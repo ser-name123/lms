@@ -99,27 +99,29 @@ export default function DashboardPage() {
           <Card>
             <CardHeader title="Recent activity" action={<Button size="sm" variant="ghost">View all</Button>} />
             <CardBody>
-              <ul className="space-y-4">
+              <ul className="space-y-4.5">
                 {activity.map((item) => {
                   const Icon = activityIcon[item.kind];
                   return (
-                    <li key={item.id} className="flex gap-3">
+                    <li key={item.id} className="flex gap-3.5 items-start">
                       <span
                         className={cn(
-                          "mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg",
+                          "grid size-9 shrink-0 place-items-center rounded-xl border",
                           item.kind === "alert"
-                            ? "bg-surface-2 text-critical"
-                            : "bg-surface-2 text-ink-2",
+                            ? "bg-critical/10 text-critical border-critical/20"
+                            : item.kind === "payment"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                            : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
                         )}
                       >
-                        <Icon className="size-4" />
+                        <Icon className="size-4.5" />
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug text-ink-2">
-                          <span className="font-medium text-ink">{item.who}</span> {item.action}{" "}
-                          <span className="font-medium text-ink">{item.target}</span>
+                          <span className="font-bold text-ink">{item.who}</span> {item.action}{" "}
+                          <span className="font-bold text-ink">{item.target}</span>
                         </p>
-                        <p className="mt-0.5 text-xs text-ink-3">{item.at}</p>
+                        <p className="mt-1 text-xs font-semibold text-ink-3">{item.at}</p>
                       </div>
                     </li>
                   );
@@ -130,56 +132,56 @@ export default function DashboardPage() {
         </div>
 
         {/* Enrollments table + today's classes */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="overflow-hidden lg:col-span-2">
+        <div className="grid gap-5 lg:grid-cols-3">
+          <Card className="overflow-hidden lg:col-span-2 border border-hairline bg-surface">
             <CardHeader
               title="Recent enrolments"
               subtitle="Latest 6 students across all courses"
-              action={<Button size="sm" variant="outline">View all</Button>}
+              action={<Button size="sm" variant="outline" className="rounded-xl">View all</Button>}
             />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-y border-hairline bg-surface-2/60 text-left">
-                    <th className="px-5 py-2.5 font-medium text-ink-3">Student</th>
-                    <th className="px-5 py-2.5 font-medium text-ink-3">Course</th>
-                    <th className="px-5 py-2.5 font-medium text-ink-3">Progress</th>
-                    <th className="px-5 py-2.5 font-medium text-ink-3">Status</th>
+                  <tr className="border-y border-hairline bg-surface-2/40 text-left">
+                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student</th>
+                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course</th>
+                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Progress</th>
+                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recentEnrollments.map((row) => (
                     <tr
                       key={row.id}
-                      className="border-b border-hairline last:border-0 hover:bg-surface-2/50"
+                      className="border-b border-hairline last:border-0 hover:bg-surface-2/30 transition-colors duration-150"
                     >
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-[11px] font-semibold text-accent">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-indigo-500 via-indigo-600 to-violet-500 text-[11px] font-bold text-white shadow-sm shadow-indigo-500/10">
                             {initials(row.student)}
                           </span>
                           <div className="min-w-0">
-                            <p className="truncate font-medium text-ink">{row.student}</p>
+                            <p className="truncate font-semibold text-ink text-sm">{row.student}</p>
                             <p className="truncate text-xs text-ink-3">{row.email}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-3">
-                        <p className="text-ink-2">{row.course}</p>
+                      <td className="px-5 py-3.5">
+                        <p className="font-medium text-ink-2">{row.course}</p>
                         <p className="text-xs text-ink-3">{row.teacher}</p>
                       </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-3">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-3/50 dark:bg-zinc-800 border border-hairline/20">
                             <div
-                              className="h-full rounded-full bg-accent"
+                              className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500"
                               style={{ width: `${row.progress}%` }}
                             />
                           </div>
-                          <span className="tnum text-xs text-ink-3">{row.progress}%</span>
+                          <span className="tnum text-xs font-bold text-ink-2">{row.progress}%</span>
                         </div>
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3.5">
                         <Badge tone={statusTone[row.status]}>{row.status}</Badge>
                       </td>
                     </tr>
@@ -189,21 +191,21 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="border border-hairline bg-surface">
             <CardHeader title="Today's classes" subtitle="14 July 2026" />
             <CardBody>
-              <ul className="space-y-2.5">
+              <ul className="space-y-3">
                 {upcomingClasses.map((row) => (
                   <li
                     key={row.id}
-                    className="flex items-center gap-3 rounded-lg border border-hairline p-3 transition-colors hover:bg-surface-2/60"
+                    className="flex items-center gap-3.5 rounded-xl border border-hairline p-3.5 bg-gradient-to-tr from-surface to-surface-2/20 hover:border-accent/30 transition-all duration-300 hover:shadow-sm"
                   >
-                    <span className="tnum w-11 shrink-0 text-xs font-medium text-ink-2">
+                    <span className="tnum w-11 shrink-0 text-xs font-bold text-ink-3 bg-surface-2/80 dark:bg-zinc-850 py-1 px-1.5 rounded-lg border border-hairline/40 text-center">
                       {row.time}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink">{row.course}</p>
-                      <p className="truncate text-xs text-ink-3">
+                      <p className="truncate text-sm font-semibold text-ink">{row.course}</p>
+                      <p className="truncate text-xs text-ink-3 mt-0.5">
                         {row.teacher} · {row.students} students
                       </p>
                     </div>

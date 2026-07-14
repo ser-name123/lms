@@ -34,13 +34,13 @@ export function Sidebar() {
       >
         {/* Brand */}
         <div className="flex h-16 items-center gap-2.5 border-b border-hairline px-4">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-accent-ink">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 shadow-md shadow-indigo-500/20 text-white">
             <Sparkles className="size-4.5" />
           </span>
           {!sidebarCollapsed && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold tracking-tight text-ink">Alfurqan</p>
-              <p className="truncate text-xs text-ink-3">Admin console</p>
+              <p className="truncate text-sm font-bold tracking-tight text-ink">Alfurqan</p>
+              <p className="truncate text-[11px] font-medium text-ink-3">Admin console</p>
             </div>
           )}
           <button
@@ -57,11 +57,11 @@ export function Sidebar() {
           {navGroups.map((group) => (
             <div key={group.label} className="mb-5 last:mb-0">
               {!sidebarCollapsed && (
-                <p className="mb-1.5 px-2 text-[11px] font-medium tracking-wide text-ink-3 uppercase">
+                <p className="mb-1.5 px-3 text-[10px] font-bold tracking-wider text-ink-3/80 dark:text-zinc-500 uppercase">
                   {group.label}
                 </p>
               )}
-              <ul className="space-y-0.5">
+              <ul className="space-y-1">
                 {group.items.map((item) => {
                   const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                   const Icon = item.icon;
@@ -73,22 +73,22 @@ export function Sidebar() {
                         onClick={() => setMobileNav(false)}
                         title={sidebarCollapsed ? item.label : undefined}
                         className={cn(
-                          "group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+                          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                           active
-                            ? "bg-accent-soft text-accent"
-                            : "text-ink-2 hover:bg-surface-2 hover:text-ink",
-                          sidebarCollapsed && "justify-center px-0",
+                            ? "bg-accent-soft text-accent shadow-sm border border-accent/5"
+                            : "text-ink-2 hover:bg-surface-2 hover:text-ink hover:translate-x-0.5",
+                          sidebarCollapsed && "justify-center px-0 hover:translate-x-0",
                         )}
                       >
                         {active && (
-                          <span className="absolute -left-3 h-5 w-0.5 rounded-r-full bg-accent" />
+                          <span className="absolute left-1.5 h-5 w-1 rounded-full bg-accent" />
                         )}
-                        <Icon className="size-4.5 shrink-0" />
+                        <Icon className={cn("size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110", active ? "text-accent" : "text-ink-3 group-hover:text-ink")} />
                         {!sidebarCollapsed && (
                           <>
                             <span className="truncate">{item.label}</span>
                             {item.badge && (
-                              <span className="tnum ml-auto rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-3">
+                              <span className="tnum ml-auto rounded-md bg-surface-3/50 dark:bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-bold text-ink-3 border border-hairline">
                                 {item.badge}
                               </span>
                             )}

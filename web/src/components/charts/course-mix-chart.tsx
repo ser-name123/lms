@@ -19,7 +19,7 @@ const total = courseMix.reduce((sum, slice) => sum + slice.value, 0);
    and identity never rests on the swatch alone. */
 export function CourseMixChart() {
   return (
-    <div className="flex flex-col items-center gap-5 sm:flex-row sm:gap-2">
+    <div className="flex flex-col items-center gap-5 sm:flex-row sm:gap-4">
       <div className="relative shrink-0">
         <ResponsiveContainer width={168} height={168}>
           <PieChart>
@@ -27,11 +27,11 @@ export function CourseMixChart() {
               data={courseMix}
               dataKey="value"
               nameKey="name"
-              innerRadius={54}
-              outerRadius={80}
-              paddingAngle={2}
+              innerRadius={58}
+              outerRadius={76}
+              paddingAngle={3}
               stroke="var(--surface)"
-              strokeWidth={2}
+              strokeWidth={3}
             >
               {courseMix.map((slice, i) => (
                 <Cell key={slice.name} fill={COLORS[i]} />
@@ -42,26 +42,26 @@ export function CourseMixChart() {
         </ResponsiveContainer>
 
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xl font-semibold tracking-tight text-ink">
+          <span className="text-2xl font-extrabold tracking-tight text-ink">
             {total.toLocaleString()}
           </span>
-          <span className="text-xs text-ink-3">students</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-ink-3 mt-0.5">students</span>
         </div>
       </div>
 
-      <ul className="w-full space-y-2.5">
+      <ul className="w-full space-y-2">
         {courseMix.map((slice, i) => (
-          <li key={slice.name} className="flex items-center gap-2.5 text-sm">
+          <li key={slice.name} className="flex items-center gap-2.5 text-xs border-b border-hairline/40 pb-2 last:border-0 last:pb-0">
             <span
               className="size-2.5 shrink-0 rounded-full"
               style={{ background: COLORS[i] }}
               aria-hidden
             />
-            <span className="truncate text-ink-2">{slice.name}</span>
-            <span className="tnum ml-auto pl-3 font-medium text-ink">
+            <span className="truncate text-ink-2 font-medium">{slice.name}</span>
+            <span className="tnum ml-auto pl-3 font-bold text-ink">
               {slice.value.toLocaleString()}
             </span>
-            <span className="tnum w-10 shrink-0 text-right text-xs text-ink-3">
+            <span className="tnum w-10 shrink-0 text-right font-bold text-ink-3">
               {Math.round((slice.value / total) * 100)}%
             </span>
           </li>

@@ -25,7 +25,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center rounded-lg font-medium transition-colors",
+        "inline-flex items-center rounded-xl font-medium transition-all duration-200 active:scale-[0.98]",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         "disabled:pointer-events-none disabled:opacity-50",
         variants[variant],

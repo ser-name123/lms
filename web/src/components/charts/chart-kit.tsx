@@ -3,7 +3,7 @@
 /* Shared chart chrome. Series colors are referenced as CSS vars (SVG paint
    accepts var()), so light/dark swap happens in CSS with no JS branch. */
 
-export const axisTick = { fill: "var(--ink-3)", fontSize: 11 };
+export const axisTick = { fill: "var(--ink-3)", fontSize: 10, fontWeight: 500 };
 export const gridStroke = "var(--line)";
 
 /* Recharts types Tooltip's `content` against its own generics; this is the
@@ -29,9 +29,9 @@ export function ChartTooltip({
   if (!active || !payload?.length) return null;
 
   return (
-    <div className="rounded-lg border border-hairline bg-surface px-3 py-2 shadow-[var(--shadow-pop)]">
-      <p className="mb-1.5 text-xs font-medium text-ink">{label}</p>
-      <ul className="space-y-1">
+    <div className="rounded-xl border border-hairline bg-surface/90 backdrop-blur-md px-3.5 py-2.5 shadow-md">
+      <p className="mb-1.5 text-xs font-bold text-ink">{label}</p>
+      <ul className="space-y-1.5">
         {payload.map((entry) => (
           <li key={String(entry.dataKey)} className="flex items-center gap-2 text-xs">
             <span
@@ -39,8 +39,8 @@ export function ChartTooltip({
               style={{ background: entry.color }}
               aria-hidden
             />
-            <span className="text-ink-2 capitalize">{entry.name}</span>
-            <span className="tnum ml-auto pl-4 font-medium text-ink">
+            <span className="text-ink-2 font-medium capitalize">{entry.name}</span>
+            <span className="tnum ml-auto pl-4 font-bold text-ink">
               {format(Number(entry.value))}
             </span>
           </li>
@@ -62,8 +62,8 @@ export function Legend({ items }: { items: { name: string; color: string; value?
             style={{ background: item.color }}
             aria-hidden
           />
-          <span className="text-ink-2">{item.name}</span>
-          {item.value ? <span className="tnum font-medium text-ink">{item.value}</span> : null}
+          <span className="text-ink-2 font-semibold">{item.name}</span>
+          {item.value ? <span className="tnum font-bold text-ink">{item.value}</span> : null}
         </li>
       ))}
     </ul>

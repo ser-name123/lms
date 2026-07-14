@@ -6,69 +6,69 @@
    Chart series + status steps come from a CVD-validated palette; do not
    hand-pick new ones without re-running the validator. */
 :root {
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --surface-2: #f2f1ed;
-  --surface-3: #e9e8e2;
+  --page: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
 
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-3: #898781;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --ink-3: #64748b;
 
-  --line: #e1e0d9;
-  --border: rgba(11, 11, 11, 0.1);
-  --axis: #c3c2b7;
+  --line: #e2e8f0;
+  --border: rgba(15, 23, 42, 0.08);
+  --axis: #94a3b8;
 
-  --accent: #2a78d6;
+  --accent: #4f46e5;
   --accent-ink: #ffffff;
-  --accent-soft: #e8f1fd;
+  --accent-soft: rgba(79, 70, 229, 0.08);
 
-  --series-1: #2a78d6;
-  --series-2: #1baf7a;
-  --series-3: #eda100;
-  --series-4: #4a3aa7;
+  --series-1: #4f46e5;
+  --series-2: #10b981;
+  --series-3: #f59e0b;
+  --series-4: #8b5cf6;
 
-  --good: #0ca30c;
-  --good-ink: #006300;
-  --warning: #fab219;
-  --serious: #ec835a;
-  --critical: #d03b3b;
+  --good: #10b981;
+  --good-ink: #047857;
+  --warning: #f59e0b;
+  --serious: #f97316;
+  --critical: #ef4444;
 
-  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 1px 3px rgba(11, 11, 11, 0.02);
-  --shadow-pop: 0 8px 24px -6px rgba(11, 11, 11, 0.12), 0 2px 6px rgba(11, 11, 11, 0.05);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
 }
 
 .dark {
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-2: #232322;
-  --surface-3: #2c2c2a;
+  --page: #09090b;
+  --surface: #18181b;
+  --surface-2: #27272a;
+  --surface-3: #3f3f46;
 
-  --ink: #ffffff;
-  --ink-2: #c3c2b7;
-  --ink-3: #898781;
+  --ink: #f4f4f5;
+  --ink-2: #d4d4d8;
+  --ink-3: #a1a1aa;
 
-  --line: #2c2c2a;
-  --border: rgba(255, 255, 255, 0.1);
-  --axis: #383835;
+  --line: #27272a;
+  --border: rgba(255, 255, 255, 0.08);
+  --axis: #71717a;
 
-  --accent: #3987e5;
+  --accent: #6366f1;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(57, 135, 229, 0.14);
+  --accent-soft: rgba(99, 102, 241, 0.15);
 
-  --series-1: #3987e5;
-  --series-2: #199e70;
-  --series-3: #c98500;
-  --series-4: #9085e9;
+  --series-1: #6366f1;
+  --series-2: #34d399;
+  --series-3: #fbbf24;
+  --series-4: #a78bfa;
 
-  --good: #0ca30c;
-  --good-ink: #0ca30c;
-  --warning: #fab219;
-  --serious: #ec835a;
-  --critical: #d03b3b;
+  --good: #10b981;
+  --good-ink: #34d399;
+  --warning: #fbbf24;
+  --serious: #fb923c;
+  --critical: #f87171;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-pop: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
 }
 
 @theme inline {
