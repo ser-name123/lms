@@ -1,0 +1,297 @@
+// LMS data model.
+// DATABASE_URL points at local Docker Postgres today and at Supabase later;
+// DIRECT_URL exists because Prisma migrations cannot run through a pooler.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  // NestJS compiles to CommonJS; without this the generated client emits ESM
+  // and ts-node/Node disagree about how to load it.
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+// Prisma 7 keeps connection URLs out of the schema — see prisma.config.ts.
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  ACADEMIC_COACH
+  TEACHER
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  TRIAL
+  PENDING
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum ClassStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum SubmissionStatus {
+  ASSIGNED
+  SUBMITTED
+  EVALUATED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+// ─── Identity ─────────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  country      String?
+  timezone     String?
+  avatarUrl    String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  studentProfile StudentProfile?
+  teacherProfile TeacherProfile?
+  refreshTokens  RefreshToken[]
+
+  @@index([role, status])
+}
+
+// Only the hash is stored, so a database leak cannot replay a session.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model StudentProfile {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentCode  String    @unique
+  phone        String?
+  dateOfBirth  DateTime?
+  guardianName String?
+
+  enrollments Enrollment[]
+  submissions Submission[]
+  invoices    Invoice[]
+  attendance  ClassAttendee[]
+}
+
+model TeacherProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teacherCode    String   @unique
+  bio            String?
+  specialisation String?
+  hourlyRate     Decimal? @db.Decimal(10, 2)
+
+  enrollments Enrollment[]
+  classes     ClassSession[]
+}
+
+// ─── Catalogue ────────────────────────────────────────────────────────────────
+
+model Level {
+  id      String   @id @default(uuid())
+  name    String   @unique
+  order   Int
+  courses Course[]
+}
+
+model Course {
+  id            String       @id @default(uuid())
+  title         String
+  slug          String       @unique
+  description   String?
+  levelId       String?
+  level         Level?       @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  price         Decimal      @db.Decimal(10, 2)
+  durationWeeks Int          @default(12)
+  status        CourseStatus @default(DRAFT)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  enrollments Enrollment[]
+  classes     ClassSession[]
+  assignments Assignment[]
+
+  @@index([status])
+}
+
+model Package {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
+  price           Decimal  @db.Decimal(10, 2)
+  classesPerMonth Int
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  enrollments Enrollment[]
+}
+
+// ─── Learning ─────────────────────────────────────────────────────────────────
+
+model Enrollment {
+  id          String           @id @default(uuid())
+  studentId   String
+  student     StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseId    String
+  course      Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId   String?
+  teacher     TeacherProfile?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  packageId   String?
+  package     Package?         @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  status      EnrollmentStatus @default(PENDING)
+  progress    Int              @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // A student sits in a given course once.
+  @@unique([studentId, courseId])
+  @@index([status])
+}
+
+model ClassSession {
+  id         String         @id @default(uuid())
+  courseId   String
+  course     Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId  String
+  teacher    TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  title      String
+  startsAt   DateTime
+  endsAt     DateTime
+  status     ClassStatus    @default(SCHEDULED)
+  meetingUrl String?
+  createdAt  DateTime       @default(now())
+
+  attendees ClassAttendee[]
+
+  @@index([startsAt])
+  @@index([teacherId, startsAt])
+}
+
+model ClassAttendee {
+  id        String         @id @default(uuid())
+  classId   String
+  class     ClassSession   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attended  Boolean        @default(false)
+  joinedAt  DateTime?
+
+  @@unique([classId, studentId])
+}
+
+model Assignment {
+  id          String   @id @default(uuid())
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  dueAt       DateTime?
+  createdAt   DateTime @default(now())
+
+  submissions Submission[]
+}
+
+model Submission {
+  id           String           @id @default(uuid())
+  assignmentId String
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status       SubmissionStatus @default(ASSIGNED)
+  content      String?
+  fileUrl      String?
+  grade        Int?
+  feedback     String?
+  submittedAt  DateTime?
+  evaluatedAt  DateTime?
+
+  @@unique([assignmentId, studentId])
+}
+
+// ─── Billing ──────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id        String         @id @default(uuid())
+  number    String         @unique
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount    Decimal        @db.Decimal(10, 2)
+  currency  String         @default("USD")
+  status    InvoiceStatus  @default(DRAFT)
+  issuedAt  DateTime       @default(now())
+  dueAt     DateTime?
+  paidAt    DateTime?
+
+  payments Payment[]
+
+  @@index([status])
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount      Decimal       @db.Decimal(10, 2)
+  provider    String        @default("stripe")
+  providerRef String?
+  status      PaymentStatus @default(PENDING)
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([invoiceId])
+}

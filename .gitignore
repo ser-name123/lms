@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+
+# Secrets never go to source control — each host holds its own copy.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+.vercel
