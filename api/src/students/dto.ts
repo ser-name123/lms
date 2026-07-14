@@ -11,7 +11,7 @@ import {
   MinLength,
 } from 'class-validator';
 
-import { EnrollmentStatus } from '../generated/prisma/enums';
+import { EnrollmentStatus, UserStatus } from '../generated/prisma/enums';
 
 export class ListStudentsDto {
   @ApiPropertyOptional({ default: 1 })
@@ -34,10 +34,45 @@ export class ListStudentsDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ enum: EnrollmentStatus })
+  @ApiPropertyOptional({ enum: UserStatus })
   @IsOptional()
-  @IsEnum(EnrollmentStatus)
-  status?: EnrollmentStatus;
+  @IsEnum(UserStatus)
+  status?: UserStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  teacherId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  country?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  joiningDateStart?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  joiningDateEnd?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  nextPaymentDateStart?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  nextPaymentDateEnd?: string;
 }
 
 export class CreateStudentDto {
@@ -72,6 +107,32 @@ export class CreateStudentDto {
   @IsOptional()
   @IsString()
   guardianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  profession?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  fees?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  joiningDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  lastPaymentDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  nextPaymentDate?: string;
 }
 
 export class UpdateStudentDto {
@@ -99,4 +160,35 @@ export class UpdateStudentDto {
   @IsOptional()
   @IsString()
   guardianName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  profession?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  fees?: number;
+
+  @ApiPropertyOptional({ enum: UserStatus })
+  @IsOptional()
+  @IsEnum(UserStatus)
+  status?: UserStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  joiningDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  lastPaymentDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  nextPaymentDate?: string;
 }

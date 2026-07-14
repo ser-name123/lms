@@ -11,6 +11,11 @@ const PROFILE_SELECT = {
   studentCode: true,
   phone: true,
   guardianName: true,
+  profession: true,
+  fees: true,
+  joiningDate: true,
+  lastPaymentDate: true,
+  nextPaymentDate: true,
   user: {
     select: {
       id: true,
@@ -40,9 +45,42 @@ const PROFILE_SELECT = {
 export class StudentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list({ page, limit, search, status }: ListStudentsDto) {
+  async list(dto: ListStudentsDto) {
+    const { 
+      page, 
+      limit, 
+      search, 
+      status, 
+      courseId, 
+      teacherId, 
+      country, 
+      joiningDateStart, 
+      joiningDateEnd, 
+      nextPaymentDateStart, 
+      nextPaymentDateEnd 
+    } = dto;
+
     const where: Prisma.StudentProfileWhereInput = {
-      ...(status ? { enrollments: { some: { status } } } : {}),
+      ...(status ? { user: { status } } : {}),
+      ...(country ? { user: { country: { contains: country, mode: 'insensitive' } } } : {}),
+      ...(courseId ? { enrollments: { some: { courseId } } } : {}),
+      ...(teacherId ? { enrollments: { some: { teacherId } } } : {}),
+      ...(joiningDateStart || joiningDateEnd
+        ? {
+            joiningDate: {
+              ...(joiningDateStart ? { gte: new Date(joiningDateStart) } : {}),
+              ...(joiningDateEnd ? { lte: new Date(joiningDateEnd) } : {}),
+            },
+          }
+        : {}),
+      ...(nextPaymentDateStart || nextPaymentDateEnd
+        ? {
+            nextPaymentDate: {
+              ...(nextPaymentDateStart ? { gte: new Date(nextPaymentDateStart) } : {}),
+              ...(nextPaymentDateEnd ? { lte: new Date(nextPaymentDateEnd) } : {}),
+            },
+          }
+        : {}),
       ...(search
         ? {
             OR: [
@@ -73,6 +111,21 @@ export class StudentsService {
     };
   }
 
+  async getCoursesList() {
+    return this.prisma.course.findMany({
+      select: { id: true, title: true }
+    });
+  }
+
+  async getTeachersList() {
+    return this.prisma.teacherProfile.findMany({
+      select: {
+        id: true,
+        user: { select: { firstName: true, lastName: true } }
+      }
+    });
+  }
+
   async findOne(id: string) {
     const student = await this.prisma.studentProfile.findUnique({
       where: { id },
@@ -94,6 +147,11 @@ export class StudentsService {
         studentCode: await this.nextStudentCode(),
         phone: dto.phone,
         guardianName: dto.guardianName,
+        profession: dto.profession,
+        fees: dto.fees,
+        joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : null,
+        lastPaymentDate: dto.lastPaymentDate ? new Date(dto.lastPaymentDate) : null,
+        nextPaymentDate: dto.nextPaymentDate ? new Date(dto.nextPaymentDate) : null,
         user: {
           create: {
             email: dto.email,
@@ -117,11 +175,17 @@ export class StudentsService {
       data: {
         phone: dto.phone,
         guardianName: dto.guardianName,
+        profession: dto.profession,
+        fees: dto.fees,
+        joiningDate: dto.joiningDate !== undefined ? (dto.joiningDate ? new Date(dto.joiningDate) : null) : undefined,
+        lastPaymentDate: dto.lastPaymentDate !== undefined ? (dto.lastPaymentDate ? new Date(dto.lastPaymentDate) : null) : undefined,
+        nextPaymentDate: dto.nextPaymentDate !== undefined ? (dto.nextPaymentDate ? new Date(dto.nextPaymentDate) : null) : undefined,
         user: {
           update: {
             firstName: dto.firstName,
             lastName: dto.lastName,
             country: dto.country,
+            status: dto.status,
           },
         },
       },

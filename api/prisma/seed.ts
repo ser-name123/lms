@@ -11,7 +11,7 @@ const prisma = new PrismaClient({
   }),
 });
 
-const ADMIN = { email: 'admin@lms.local', password: 'Admin@12345' };
+const ADMIN = { email: 'objectsquarerajan@gmail.com', password: 'admin123' };
 
 async function main() {
   const passwordHash = await bcrypt.hash(ADMIN.password, 12);

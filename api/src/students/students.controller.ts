@@ -31,6 +31,18 @@ export class StudentsController {
     return this.students.list(query);
   }
 
+  @Get('courses')
+  @ApiOperation({ summary: 'Get all courses' })
+  getCoursesList() {
+    return this.students.getCoursesList();
+  }
+
+  @Get('teachers')
+  @ApiOperation({ summary: 'Get all teachers' })
+  getTeachersList() {
+    return this.students.getTeachersList();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'One student with their enrolments' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {

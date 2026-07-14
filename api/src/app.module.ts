@@ -7,9 +7,18 @@ import { JwtAuthGuard, RolesGuard } from './auth/guards';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { StudentsModule } from './students/students.module';
+import { EmailsModule } from './emails/emails.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, StudentsModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    AuthModule,
+    StudentsModule,
+    EmailsModule,
+    SettingsModule,
+  ],
   controllers: [HealthController],
   providers: [
     // Auth is deny-by-default: every route is guarded unless it opts out with

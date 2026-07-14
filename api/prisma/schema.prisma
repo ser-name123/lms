@@ -28,6 +28,8 @@ enum UserStatus {
   ACTIVE
   INACTIVE
   PENDING
+  TRIAL
+  PAUSED
 }
 
 enum CourseStatus {
@@ -105,19 +107,26 @@ model RefreshToken {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
   createdAt DateTime  @default(now())
 
   @@index([userId])
 }
 
 model StudentProfile {
-  id           String    @id @default(uuid())
-  userId       String    @unique
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  studentCode  String    @unique
-  phone        String?
-  dateOfBirth  DateTime?
-  guardianName String?
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentCode     String    @unique
+  phone           String?
+  dateOfBirth     DateTime?
+  guardianName    String?
+  profession      String?
+  fees            Decimal?  @db.Decimal(10, 2)
+  joiningDate     DateTime?
+  lastPaymentDate DateTime?
+  nextPaymentDate DateTime?
 
   enrollments Enrollment[]
   submissions Submission[]
@@ -294,4 +303,9 @@ model Payment {
   createdAt   DateTime      @default(now())
 
   @@index([invoiceId])
+}
+
+model SystemSetting {
+  key   String @id
+  value String
 }
