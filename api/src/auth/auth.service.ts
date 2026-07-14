@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -16,6 +16,7 @@ const digest = (token: string) => createHash('sha256').update(token).digest('hex
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private otpStore = new Map<string, { otp: string; expiresAt: Date }>();
 
   constructor(
@@ -92,13 +93,19 @@ export class AuthService {
       </div>
     `;
 
-    await this.emails.sendMail(
+    // Log generated verification code to console (retrievable in server/Render logs)
+    this.logger.log(`[OTP] Generated verification code for ${user.email} is: ${otp}`);
+
+    // Dispatch verification mail asynchronously in the background so SMTP delay doesn't block client response
+    this.emails.sendMail(
       user.email,
       'Edumin Login Verification Code',
       `Your verification code is: ${otp}\nThis code is valid for 5 minutes.`,
       undefined,
       htmlTemplate,
-    );
+    ).catch(err => {
+      this.logger.error(`Failed to send verification email to ${user.email}: ${err.message}`, err.stack);
+    });
 
     return { otpRequired: true, email: user.email };
   }
