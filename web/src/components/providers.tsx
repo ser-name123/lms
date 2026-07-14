@@ -1,7 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSettingsStore } from "@/store/settings";
+import { Preloader } from "@/components/preloader";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -17,5 +19,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
 
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  useEffect(() => {
+    useSettingsStore.getState().loadSettings();
+  }, []);
+
+  return (
+    <QueryClientProvider client={client}>
+      <Preloader />
+      {children}
+    </QueryClientProvider>
+  );
 }

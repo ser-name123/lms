@@ -1,41 +1,74 @@
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { BookOpen, GraduationCap, Users, Wallet, User as UserIcon, LucideIcon } from "lucide-react";
 
-import { Sparkline } from "@/components/charts/sparkline";
 import { Card } from "@/components/ui/card";
 import type { Kpi } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
+const kpiTheme: Record<
+  string,
+  {
+    bg: string;
+    color: string;
+    icon: LucideIcon;
+    progress: number;
+    progressText: string;
+  }
+> = {
+  students: {
+    bg: "bg-[#5b73e8]",
+    color: "text-[#5b73e8]",
+    icon: Users,
+    progress: 80,
+    progressText: "80% Increase in 20 Days",
+  },
+  classes: {
+    bg: "bg-[#ffb822]",
+    color: "text-[#ffb822]",
+    icon: UserIcon,
+    progress: 50,
+    progressText: "50% Increase in 25 Days",
+  },
+  completion: {
+    bg: "bg-[#886cff]",
+    color: "text-[#886cff]",
+    icon: GraduationCap,
+    progress: 76,
+    progressText: "76% Increase in 20 Days",
+  },
+  revenue: {
+    bg: "bg-[#f85a6b]",
+    color: "text-[#f85a6b]",
+    icon: Wallet,
+    progress: 30,
+    progressText: "30% Increase in 30 Days",
+  },
+};
+
 export function StatTile({ kpi }: { kpi: Kpi }) {
-  const up = kpi.delta >= 0;
-  const Arrow = up ? ArrowUpRight : ArrowDownRight;
+  const theme = kpiTheme[kpi.id] || kpiTheme.students;
+  const Icon = theme.icon;
 
   return (
-    <Card className="group p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-md border border-hairline hover:border-accent/20 bg-gradient-to-b from-surface to-surface-2/30">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-ink-3/90">{kpi.label}</p>
+    <Card className={cn("relative p-5 text-white border-0 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-lg overflow-hidden", theme.bg)}>
+      <div className="flex items-center gap-4">
+        {/* Left: Circle Icon container */}
+        <span className={cn("grid size-12 shrink-0 place-items-center rounded-full bg-white shadow-sm", theme.color)}>
+          <Icon className="size-5" />
+        </span>
 
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <p className="text-3xl font-extrabold tracking-tight text-ink">{kpi.value}</p>
-        <div className="-mb-1 w-24 opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-105">
-          <Sparkline data={kpi.spark} tone={up ? "good" : "critical"} />
+        {/* Right: Labels & Value */}
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-white/80">{kpi.label}</p>
+          <p className="text-2xl font-black tracking-tight text-white mt-0.5">{kpi.value}</p>
         </div>
       </div>
 
-      <div className="mt-4 flex items-center gap-2 text-xs">
-        <span
-          className={cn(
-            "inline-flex items-center gap-0.5 font-bold px-1.5 py-0.5 rounded-md border text-[11px]",
-            up 
-              ? "bg-good/10 text-good-ink border-good/20" 
-              : "bg-critical/10 text-critical border-critical/20"
-          )}
-        >
-          <Arrow className="size-3.5" />
-          <span className="tnum">
-            {up ? "+" : ""}
-            {kpi.delta}%
-          </span>
-        </span>
-        <span className="font-medium text-ink-3">{kpi.hint}</span>
+      {/* Progress Bar & Growth Text */}
+      <div className="mt-4">
+        <div className="h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
+          <div className="h-full bg-white rounded-full" style={{ width: `${theme.progress}%` }} />
+        </div>
+        <p className="mt-2 text-[10px] font-bold text-white/95">{theme.progressText}</p>
       </div>
     </Card>
   );

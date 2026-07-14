@@ -6,36 +6,36 @@
    Chart series + status steps come from a CVD-validated palette; do not
    hand-pick new ones without re-running the validator. */
 :root {
-  --page: #f8fafc;
+  --page: #f8f9fa;
   --surface: #ffffff;
   --surface-2: #f1f5f9;
   --surface-3: #e2e8f0;
 
-  --ink: #0f172a;
-  --ink-2: #334155;
-  --ink-3: #64748b;
+  --ink: #212529;
+  --ink-2: #495057;
+  --ink-3: #8898aa;
 
-  --line: #e2e8f0;
-  --border: rgba(15, 23, 42, 0.08);
-  --axis: #94a3b8;
+  --line: #f0f2f5;
+  --border: rgba(33, 37, 41, 0.06);
+  --axis: #adb5bd;
 
-  --accent: #4f46e5;
+  --accent: #5b73e8;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(79, 70, 229, 0.08);
+  --accent-soft: rgba(91, 115, 232, 0.08);
 
-  --series-1: #4f46e5;
-  --series-2: #10b981;
-  --series-3: #f59e0b;
-  --series-4: #8b5cf6;
+  --series-1: #5b73e8;
+  --series-2: #ffb822;
+  --series-3: #886cff;
+  --series-4: #f85a6b;
 
   --good: #10b981;
   --good-ink: #047857;
-  --warning: #f59e0b;
+  --warning: #ffb822;
   --serious: #f97316;
-  --critical: #ef4444;
+  --critical: #f85a6b;
 
-  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
-  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.08);
 }
 
 .dark {
@@ -151,4 +151,14 @@ body {
 }
 .animate-fade-up {
   animation: fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Custom Autofill Reset to keep background matching theme inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px var(--surface) inset !important;
+  -webkit-text-fill-color: var(--ink) !important;
+  transition: background-color 5000s ease-in-out 0s;
 }

@@ -19,39 +19,39 @@ const spark = (seed: number[]): Trend[] =>
 export const kpis: Kpi[] = [
   {
     id: "students",
-    label: "Active students",
-    value: "2,847",
-    raw: 2847,
+    label: "TOTAL STUDENTS",
+    value: "3280",
+    raw: 3280,
     delta: 12.4,
     hint: "vs last month",
-    spark: spark([2210, 2290, 2340, 2455, 2510, 2640, 2712, 2847]),
-  },
-  {
-    id: "revenue",
-    label: "Revenue",
-    value: "$148,290",
-    raw: 148290,
-    delta: 8.1,
-    hint: "vs last month",
-    spark: spark([104, 112, 118, 121, 129, 133, 141, 148]),
+    spark: spark([2210, 2290, 2340, 2455, 2510, 2640, 2712, 3280]),
   },
   {
     id: "classes",
-    label: "Classes this week",
-    value: "1,236",
-    raw: 1236,
+    label: "NEW STUDENTS",
+    value: "245",
+    raw: 245,
     delta: -3.2,
     hint: "vs last week",
-    spark: spark([1310, 1288, 1301, 1276, 1290, 1262, 1255, 1236]),
+    spark: spark([1310, 1288, 1301, 1276, 1290, 1262, 1255, 245]),
   },
   {
     id: "completion",
-    label: "Completion rate",
-    value: "87.6%",
-    raw: 87.6,
+    label: "TOTAL COURSE",
+    value: "28",
+    raw: 28,
     delta: 4.3,
     hint: "vs last month",
-    spark: spark([79, 80, 82, 83, 84, 85, 86, 87.6]),
+    spark: spark([79, 80, 82, 83, 84, 85, 86, 28]),
+  },
+  {
+    id: "revenue",
+    label: "FEES COLLECTION",
+    value: "25160$",
+    raw: 25160,
+    delta: 8.1,
+    hint: "vs last month",
+    spark: spark([104, 112, 118, 121, 129, 133, 141, 148]),
   },
 ];
 
@@ -167,3 +167,91 @@ export const activity: Activity[] = [
   { id: "a4", who: "System", action: "flagged failed payment for", target: "INV-8997 · $120", at: "2h ago", kind: "alert" },
   { id: "a5", who: "Fatima Noor", action: "submitted assignment", target: "Surah Al-Mulk recitation", at: "3h ago", kind: "enroll" },
 ];
+
+export type EducationCourse = {
+  id: string;
+  title: string;
+  cover: string;
+  date: string;
+  likes: number;
+  duration: string;
+  professor: string;
+  students: string;
+};
+
+export const educationCourses: EducationCourse[] = [
+  {
+    id: "ec1",
+    title: "When Is the Best Time to Take an Education Course?",
+    cover: "/images/edu_course_1.png",
+    date: "April 23",
+    likes: 230,
+    duration: "12 Months",
+    professor: "Jack Ronan",
+    students: "+120",
+  },
+  {
+    id: "ec2",
+    title: "Education Courses: A Guide to Unlocking Your Potential",
+    cover: "/images/edu_course_2.png",
+    date: "April 23",
+    likes: 450,
+    duration: "12 Months",
+    professor: "Jimmy Morris",
+    students: "+120",
+  },
+  {
+    id: "ec3",
+    title: "A Comprehensive Guide to Taking an Education Course",
+    cover: "/images/edu_course_3.png",
+    date: "April 23",
+    likes: 120,
+    duration: "12 Months",
+    professor: "Konne Backfield",
+    students: "+120",
+  },
+  {
+    id: "ec4",
+    title: "Why Should You Consider Taking an Education Course?",
+    cover: "/images/edu_course_4.png",
+    date: "April 23",
+    likes: 275,
+    duration: "12 Months",
+    professor: "Nashid Martines",
+    students: "+120",
+  },
+];
+
+export type ExamTopper = {
+  rollNo: string;
+  name: string;
+  scores: number[];
+  color: string;
+};
+
+export const examToppers: ExamTopper[] = [
+  { rollNo: "542", name: "Jack Ronan", scores: [12, 18, 24, 30, 36, 42, 48, 54, 60], color: "#00c9a7" },
+  { rollNo: "243", name: "Jimmy Morris", scores: [36, 12, 48, 24, 60, 30, 42, 18, 54], color: "#3b82f6" },
+  { rollNo: "452", name: "Nashid Martines", scores: [12, 36, 24, 48, 12, 36, 24, 48, 12], color: "#8b5cf6" },
+  { rollNo: "124", name: "Roman Aurora", scores: [18, 24, 12, 36, 12, 48, 12, 36, 18], color: "#22c55e" },
+  { rollNo: "234", name: "Samantha", scores: [24, 36, 12, 48, 30, 42, 18, 54, 24], color: "#4f46e5" },
+];
+
+export type NewStudentEntry = {
+  no: string;
+  name: string;
+  professor: string;
+  date: string;
+  status: "Checkin" | "Pending" | "Canceled";
+  subject: string;
+  fees: string;
+};
+
+export const newStudentList: NewStudentEntry[] = [
+  { no: "01", name: "Jack Ronan", professor: "Airi Satou", date: "01 August 2021", status: "Checkin", subject: "Commerce", fees: "120$" },
+  { no: "02", name: "Jimmy Morris", professor: "Angelica Ramos", date: "31 July 2021", status: "Pending", subject: "Mechanical", fees: "120$" },
+  { no: "03", name: "Nashid Martines", professor: "Ashton Cox", date: "30 July 2021", status: "Canceled", subject: "Science", fees: "520$" },
+  { no: "04", name: "Roman Aurora", professor: "Cara Stevens", date: "29 July 2021", status: "Checkin", subject: "Arts", fees: "220$" },
+  { no: "05", name: "Samantha", professor: "Bruno Nash", date: "28 July 2021", status: "Checkin", subject: "Maths", fees: "130$" },
+];
+

@@ -85,12 +85,164 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 // ─── Auth calls ───────────────────────────────────────────────────────────────
 
 export const login = (email: string, password: string) =>
-  api<Tokens>("/auth/login", {
+  api<Tokens | { otpRequired: boolean; email: string }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 
+export const verifyOtp = (email: string, otp: string) =>
+  api<Tokens>("/auth/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ email, otp }),
+  });
+
 export const fetchMe = () => api<User>("/auth/me");
+
+export const updateProfile = (dto: { firstName?: string; lastName?: string; email?: string; password?: string; avatarUrl?: string }) =>
+  api<User>("/auth/profile", {
+    method: "PATCH",
+    body: JSON.stringify(dto),
+  });
+
+export const fetchSessions = () => 
+  api<{ id: string; userAgent: string | null; ipAddress: string | null; createdAt: string; isCurrent: boolean }[]>("/auth/sessions");
+
+export const deleteSession = (sessionId: string) => 
+  api<{ success: boolean }>(`/auth/sessions/${sessionId}`, { method: "DELETE" });
+
+export const fetchSmtpConfig = () => 
+  api<{ host: string; port: number; user: string; pass?: string; from: string; secure: boolean }>("/emails/smtp-config");
+
+export const saveSmtpConfig = (config: { host: string; port: number; user: string; pass: string; from: string; secure: boolean }) =>
+  api<{ success: boolean }>("/emails/smtp-config", {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+
+export type SystemSettings = {
+  logo: string | null;
+  favicon: string | null;
+  websiteName: string;
+  defaultTheme: string;
+  googleTags: string;
+  loaderEnabled: string;
+  loaderUrl: string | null;
+
+  // Light Mode Colors
+  primaryColor: string;
+  accentTextLight: string;
+  pageBgLight: string;
+  surfaceBgLight: string;
+  textPrimaryLight: string;
+  textSecondaryLight: string;
+  textMutedLight: string;
+  sidebarBgLight: string;
+  sidebarTextLight: string;
+  sidebarActiveBgLight: string;
+  sidebarActiveTextLight: string;
+  topbarBgLight: string;
+  topbarBorderLight: string;
+
+  // Dark Mode Colors
+  secondaryColor: string;
+  accentTextDark: string;
+  pageBgDark: string;
+  surfaceBgDark: string;
+  textPrimaryDark: string;
+  textSecondaryDark: string;
+  textMutedDark: string;
+  sidebarBgDark: string;
+  sidebarTextDark: string;
+  sidebarActiveBgDark: string;
+  sidebarActiveTextDark: string;
+  topbarBgDark: string;
+  topbarBorderDark: string;
+};
+
+export const fetchSystemSettings = () => api<SystemSettings>("/settings");
+
+export const saveSystemSettings = (settings: SystemSettings) => api<{ success: boolean }>("/settings", {
+  method: "POST",
+  body: JSON.stringify(settings),
+});
+
+export type StudentProfile = {
+  id: string;
+  studentCode: string;
+  phone: string | null;
+  guardianName: string | null;
+  profession: string | null;
+  fees: number | null;
+  joiningDate: string | null;
+  lastPaymentDate: string | null;
+  nextPaymentDate: string | null;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    country: string | null;
+    status: string;
+    avatarUrl: string | null;
+    createdAt: string;
+  };
+  enrollments: {
+    id: string;
+    status: string;
+    progress: number;
+    course: { id: string; title: string };
+    teacher: { id: string; user: { firstName: string; lastName: string } };
+  }[];
+};
+
+export const fetchStudents = (params: { 
+  page: number; 
+  limit: number; 
+  search?: string; 
+  status?: string;
+  courseId?: string;
+  teacherId?: string;
+  country?: string;
+  joiningDateStart?: string;
+  joiningDateEnd?: string;
+  nextPaymentDateStart?: string;
+  nextPaymentDateEnd?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") queryObj.status = params.status;
+  if (params.courseId) queryObj.courseId = params.courseId;
+  if (params.teacherId) queryObj.teacherId = params.teacherId;
+  if (params.country) queryObj.country = params.country;
+  if (params.joiningDateStart) queryObj.joiningDateStart = params.joiningDateStart;
+  if (params.joiningDateEnd) queryObj.joiningDateEnd = params.joiningDateEnd;
+  if (params.nextPaymentDateStart) queryObj.nextPaymentDateStart = params.nextPaymentDateStart;
+  if (params.nextPaymentDateEnd) queryObj.nextPaymentDateEnd = params.nextPaymentDateEnd;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: StudentProfile[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/students?${q.toString()}`);
+};
+
+export const fetchStudentsCourses = () => api<{ id: string; title: string }[]>("/students/courses");
+export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string } }[]>("/students/teachers");
+
+export const createStudent = (dto: any) => api<StudentProfile>("/students", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateStudent = (id: string, dto: any) => api<StudentProfile>(`/students/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteStudent = (id: string) => api<{ success: boolean }>(`/students/${id}`, {
+  method: "DELETE",
+});
 
 /* Best-effort: the refresh token is revoked server-side, but a failure here
    must not block the client from clearing its own session. */

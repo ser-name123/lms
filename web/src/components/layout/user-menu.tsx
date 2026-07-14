@@ -68,9 +68,17 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
-          {initials(name)}
-        </span>
+        {user.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt={name}
+            className="size-8 shrink-0 rounded-full object-cover border border-hairline"
+          />
+        ) : (
+          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
+            {initials(name)}
+          </span>
+        )}
         <span className="hidden text-left leading-tight lg:block">
           <span className="block text-sm font-medium text-ink">{name}</span>
           <span className="block text-xs text-ink-3">
@@ -98,6 +106,10 @@ export function UserMenu() {
           <div className="p-1.5">
             <button
               role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                router.push("/profile");
+              }}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
             >
               <UserIcon className="size-4" />
@@ -105,6 +117,10 @@ export function UserMenu() {
             </button>
             <button
               role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                router.push("/settings");
+              }}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
             >
               <Settings className="size-4" />

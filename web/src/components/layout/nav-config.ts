@@ -31,7 +31,7 @@ export const navGroups: NavGroup[] = [
   {
     label: "Academics",
     items: [
-      { label: "Students", href: "/students", icon: Users, badge: "2.8k" },
+      { label: "Students", href: "/students", icon: Users },
       { label: "Teachers", href: "/teachers", icon: GraduationCap },
       { label: "Courses", href: "/courses", icon: BookOpen },
       { label: "Classes", href: "/classes", icon: CalendarDays },
@@ -41,12 +41,8 @@ export const navGroups: NavGroup[] = [
   {
     label: "Finance",
     items: [
-      { label: "Invoices", href: "/invoices", icon: Receipt, badge: "12" },
+      { label: "Invoices", href: "/invoices", icon: Receipt },
       { label: "Payouts", href: "/payouts", icon: Wallet },
     ],
-  },
-  {
-    label: "System",
-    items: [{ label: "Settings", href: "/settings", icon: Settings }],
   },
 ];

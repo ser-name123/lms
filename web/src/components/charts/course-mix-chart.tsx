@@ -41,11 +41,9 @@ export function CourseMixChart() {
           </PieChart>
         </ResponsiveContainer>
 
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-extrabold tracking-tight text-ink">
-            {total.toLocaleString()}
-          </span>
-          <span className="text-[9px] font-bold uppercase tracking-wider text-ink-3 mt-0.5">students</span>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-ink-3 leading-tight max-w-[100px] block">In-Store Sales</span>
+          <span className="text-2xl font-black tracking-tight text-ink mt-0.5">30</span>
         </div>
       </div>
 

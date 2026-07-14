@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 
 import { Providers } from "@/components/providers";
@@ -9,10 +8,18 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Alfurqan · Admin",
-  description: "LMS admin console",
-};
+async function getSystemSettings() {
+  try {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+    const res = await fetch(`${apiBase}/settings`, { next: { revalidate: 10 } });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    // Fail silently in development/ssr before database initialization
+  }
+  return null;
+}
 
 /* Runs before paint so a dark-mode reload never flashes the light surface.
    Reads the same key zustand/persist writes. */
@@ -26,11 +33,20 @@ try {
 } catch (e) {}
 `;
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const settings = await getSystemSettings();
+  const websiteName = settings?.websiteName || "Edumin LMS";
+  const favicon = settings?.favicon || "/favicon.ico";
+
   return (
     <html lang="en" className={`${geistSans.variable} h-full`} suppressHydrationWarning>
       <head>
+        <title>{websiteName}</title>
+        <link rel="icon" href={favicon} />
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+        {settings?.googleTags && (
+          <div dangerouslySetInnerHTML={{ __html: settings.googleTags }} />
+        )}
       </head>
       {/* Extensions inject attributes onto <body> before React hydrates, which
           reads as a server/client mismatch. Only the body's own attributes are

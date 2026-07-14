@@ -27,15 +27,12 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
       {/* Search */}
       <div className="ml-auto hidden md:block">
         <label className="relative block">
-          <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+          <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-ink-3" />
           <input
             type="search"
-            placeholder="Search students, classes…"
-            className="h-9 w-64 rounded-xl border border-hairline bg-surface-2 pr-14 pl-10 text-sm text-ink placeholder:text-ink-3 focus:bg-surface focus:w-80 focus:shadow-sm focus:border-accent/30 transition-all duration-300 focus:outline-none"
+            placeholder="Search..."
+            className="h-10 w-64 rounded-full border-0 bg-surface-2 pr-4 pl-10 text-sm text-ink placeholder:text-ink-3 focus:bg-surface-2 focus:w-80 transition-all duration-300 focus:outline-none"
           />
-          <kbd className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 rounded-md border border-hairline bg-surface px-1.5 py-0.5 text-[9px] font-bold text-ink-3">
-            ⌘K
-          </kbd>
         </label>
       </div>
 

@@ -19,8 +19,8 @@ export function EnrollmentChart() {
       <div className="mb-3 flex justify-end">
         <Legend
           items={[
-            { name: "New", color: "var(--series-2)" },
-            { name: "Churned", color: "var(--series-4)" },
+            { name: "New", color: "var(--series-1)" },
+            { name: "Churned", color: "var(--series-3)" },
           ]}
         />
       </div>
@@ -40,7 +40,7 @@ export function EnrollmentChart() {
           />
           <YAxis tick={axisTick} tickLine={false} axisLine={false} width={44} />
           <Tooltip
-            cursor={{ fill: "var(--surface-2)" }}
+            cursor={{ fill: "rgba(91, 115, 232, 0.04)" }}
             content={(props) => <ChartTooltip {...(props as ChartTooltipProps)} />}
           />
 
@@ -48,14 +48,14 @@ export function EnrollmentChart() {
           <Bar
             dataKey="new"
             name="New"
-            fill="var(--series-2)"
+            fill="var(--series-1)"
             radius={[4, 4, 0, 0]}
             maxBarSize={22}
           />
           <Bar
             dataKey="churned"
             name="Churned"
-            fill="var(--series-4)"
+            fill="var(--series-3)"
             radius={[4, 4, 0, 0]}
             maxBarSize={22}
           />

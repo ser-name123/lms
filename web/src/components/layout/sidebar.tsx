@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen, Sparkles, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, GraduationCap, X } from "lucide-react";
 
 import { navGroups } from "./nav-config";
 import { useUI } from "@/store/ui";
+import { useSettingsStore } from "@/store/settings";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav } = useUI();
+  const { settings } = useSettingsStore();
   const pathname = usePathname();
 
   return (
@@ -34,13 +36,19 @@ export function Sidebar() {
       >
         {/* Brand */}
         <div className="flex h-16 items-center gap-2.5 border-b border-hairline px-4">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 shadow-md shadow-indigo-500/20 text-white">
-            <Sparkles className="size-4.5" />
-          </span>
+          {settings?.logo ? (
+            <img src={settings.logo} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
+          ) : (
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-[#5b73e8] to-[#886cff] shadow-md shadow-accent/20 text-white animate-fade-in">
+              <GraduationCap className="size-5" />
+            </span>
+          )}
           {!sidebarCollapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold tracking-tight text-ink">Alfurqan</p>
-              <p className="truncate text-[11px] font-medium text-ink-3">Admin console</p>
+            <div className="min-w-0 flex-1 animate-fade-in">
+              <p className="truncate text-base font-extrabold tracking-widest text-[#5b73e8] uppercase" style={{ color: "var(--accent)" }}>
+                {settings?.websiteName || "Edumin"}
+              </p>
+              <p className="truncate text-[10px] font-bold text-ink-3 uppercase tracking-wider">Admin console</p>
             </div>
           )}
           <button
