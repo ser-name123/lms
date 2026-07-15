@@ -114,26 +114,24 @@ export default function SignInPage() {
       <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface/85 dark:bg-surface/50 backdrop-blur-md p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(19,60,85,0.06)] dark:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] animate-fade-up transition-all duration-300">
         {/* Brand Logo Header */}
         <div className="flex flex-col items-center mb-7">
-          <div className="flex items-center gap-3">
-            {logoSrc ? (
-              <img src={logoSrc} alt="Logo" className="size-10 object-contain rounded-lg shrink-0" />
-            ) : (
-              <div className="grid size-10.5 place-items-center rounded-xl bg-accent/10 border border-accent/20">
-                <GraduationCap className="size-6 text-accent" />
-              </div>
-            )}
-            <div className="flex flex-col items-start min-w-0">
-              <span className="text-xl font-extrabold tracking-widest text-ink uppercase leading-none">
-                {settings?.websiteName || "Edumin"}
-              </span>
-              {settings?.adminConsoleTitle && (
-                <span className="text-[10px] font-bold text-ink-3 uppercase tracking-wider mt-1 leading-none">
-                  {settings.adminConsoleTitle}
-                </span>
-              )}
+          {logoSrc ? (
+            <img src={logoSrc} alt="Logo" className="h-16 w-auto object-contain rounded-xl shrink-0 mb-3.5" />
+          ) : (
+            <div className="grid size-14 place-items-center rounded-2xl bg-accent/10 border border-accent/20 mb-3.5">
+              <GraduationCap className="size-8 text-accent" />
             </div>
+          )}
+          <div className="flex flex-col items-center text-center min-w-0">
+            <span className="text-xl font-black tracking-widest text-ink uppercase leading-tight">
+              {settings?.websiteName || "Edumin"}
+            </span>
+            {settings?.adminConsoleTitle && (
+              <span className="text-[10px] font-bold text-ink-3 uppercase tracking-wider mt-1.5 leading-tight">
+                {settings.adminConsoleTitle}
+              </span>
+            )}
           </div>
-          <h2 className="mt-5 text-sm font-bold text-ink-2">
+          <h2 className="mt-6 text-sm font-bold text-ink-2">
             {otpRequired ? "Verify Code" : "Sign in your account"}
           </h2>
         </div>
