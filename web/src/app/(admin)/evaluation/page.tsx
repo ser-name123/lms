@@ -62,7 +62,7 @@ const INITIAL_REQUESTS: RequestItem[] = [
 const TEACHERS = ["Ustadh Yusuf", "Ustadha Maryam", "Ustadh Bilal", "Ustadha Zainab"];
 const LEVELS = ["Beginner Alphabet", "Quran — Level 1", "Quran — Level 2", "Quran — Level 3", "Arabic Conversational — Level 1", "Islamic Studies Junior"];
 
-const PIE_COLORS = ["#5b73e8", "#886cff", "#ffb822"];
+const PIE_COLORS = ["#133C55", "#386FA4", "#ffb822"];
 
 export default function EvaluationDashboard() {
   const [requests, setRequests] = useState<RequestItem[]>(INITIAL_REQUESTS);
@@ -361,7 +361,7 @@ export default function EvaluationDashboard() {
                   placeholder="Search name, code, phone..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-9.5 w-60 rounded-xl border border-hairline bg-surface pr-3 pl-9.5 text-xs text-ink placeholder:text-ink-3 focus:outline-none focus:border-[#5b73e8] transition-all"
+                  className="h-9.5 w-60 rounded-xl border border-hairline bg-surface pr-3 pl-9.5 text-xs text-ink placeholder:text-ink-3 focus:outline-none focus:border-accent transition-all"
                 />
               </div>
 
@@ -369,7 +369,7 @@ export default function EvaluationDashboard() {
               <select
                 value={countryFilter}
                 onChange={(e) => setCountryFilter(e.target.value)}
-                className="h-9.5 rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                className="h-9.5 rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
               >
                 <option value="">All Countries</option>
                 {uniqueCountries.map(c => <option key={c} value={c}>{c}</option>)}
@@ -379,7 +379,7 @@ export default function EvaluationDashboard() {
               <select
                 value={courseFilter}
                 onChange={(e) => setCourseFilter(e.target.value)}
-                className="h-9.5 rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                className="h-9.5 rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
               >
                 <option value="">All Courses</option>
                 {uniqueCourses.map(c => <option key={c} value={c}>{c}</option>)}
@@ -394,7 +394,7 @@ export default function EvaluationDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2/20">
+                <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2">
                   <th className="px-5 py-4">Student ID</th>
                   <th className="px-5 py-4">Student Name</th>
                   <th className="px-5 py-4">Date</th>
@@ -568,7 +568,7 @@ export default function EvaluationDashboard() {
                 <select
                   value={scheduleForm.teacher}
                   onChange={(e) => setScheduleForm(prev => ({ ...prev, teacher: e.target.value }))}
-                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
                 >
                   {TEACHERS.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
@@ -581,7 +581,7 @@ export default function EvaluationDashboard() {
                   required
                   value={scheduleForm.dateTime}
                   onChange={(e) => setScheduleForm(prev => ({ ...prev, dateTime: e.target.value }))}
-                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
                 />
               </div>
 
@@ -591,7 +591,7 @@ export default function EvaluationDashboard() {
                   value={scheduleForm.note}
                   onChange={(e) => setScheduleForm(prev => ({ ...prev, note: e.target.value }))}
                   placeholder="e.g. child is beginner, wants focused Tajweed..."
-                  className="w-full h-20 p-3 rounded-xl border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-[#5b73e8] resize-none"
+                  className="w-full h-20 p-3 rounded-xl border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent resize-none"
                 />
               </div>
 
@@ -606,7 +606,7 @@ export default function EvaluationDashboard() {
                 </Button>
                 <Button
                   type="submit"
-                  className="h-10 px-5 font-bold text-xs bg-accent text-white hover:bg-indigo-600 rounded-xl"
+                  className="h-10 px-5 font-bold text-xs bg-accent text-white hover:bg-accent-hover rounded-xl"
                 >
                   Submit Schedule
                 </Button>
@@ -696,7 +696,7 @@ export default function EvaluationDashboard() {
                   value={evaluationForm.notes}
                   onChange={(e) => setEvaluationForm(prev => ({ ...prev, notes: e.target.value }))}
                   placeholder="Enter trial performance feedback, specific struggles, recommended focus areas..."
-                  className="w-full h-24 p-3 rounded-xl border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-[#5b73e8] resize-none"
+                  className="w-full h-24 p-3 rounded-xl border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent resize-none"
                 />
               </div>
 
@@ -834,7 +834,7 @@ export default function EvaluationDashboard() {
                 <Button
                   type="button"
                   onClick={() => setScheduleModalOpen(true)}
-                  className="h-10 px-5 font-bold text-xs bg-accent text-white hover:bg-indigo-600 rounded-xl cursor-pointer"
+                  className="h-10 px-5 font-bold text-xs bg-accent text-white hover:bg-accent-hover rounded-xl cursor-pointer"
                 >
                   Schedule Trial Now
                 </Button>

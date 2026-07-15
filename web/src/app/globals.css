@@ -6,27 +6,28 @@
    Chart series + status steps come from a CVD-validated palette; do not
    hand-pick new ones without re-running the validator. */
 :root {
-  --page: #f8f9fa;
+  --page: #f5f8fb;
   --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --surface-3: #e2e8f0;
+  --surface-2: #e9eff5;
+  --surface-3: #d5e2ef;
 
-  --ink: #212529;
-  --ink-2: #495057;
-  --ink-3: #8898aa;
+  --ink: #13222e;
+  --ink-2: #2c4251;
+  --ink-3: #5c7b90;
 
-  --line: #f0f2f5;
-  --border: rgba(33, 37, 41, 0.06);
-  --axis: #adb5bd;
+  --line: #e9eff5;
+  --border: rgba(19, 60, 85, 0.08);
+  --axis: #5c7b90;
 
-  --accent: #5b73e8;
+  --accent: #133C55;
+  --accent-hover: #386FA4;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(91, 115, 232, 0.08);
+  --accent-soft: rgba(56, 111, 164, 0.09);
 
-  --series-1: #5b73e8;
-  --series-2: #ffb822;
-  --series-3: #886cff;
-  --series-4: #f85a6b;
+  --series-1: #133C55;
+  --series-2: #386FA4;
+  --series-3: #59A5D8;
+  --series-4: #84D2F6;
 
   --good: #10b981;
   --good-ink: #047857;
@@ -34,8 +35,14 @@
   --serious: #f97316;
   --critical: #f85a6b;
 
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.08);
+  --sidebar-bg: #133C55;
+  --sidebar-text: #91E5F6;
+  --sidebar-active-bg: rgba(56, 111, 164, 0.35);
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+
+  --shadow-card: 0 4px 6px -1px rgba(19, 60, 85, 0.05), 0 2px 4px -1px rgba(19, 60, 85, 0.03);
+  --shadow-pop: 0 10px 15px -3px rgba(19, 60, 85, 0.08), 0 4px 6px -4px rgba(19, 60, 85, 0.08);
 }
 
 .dark {
@@ -52,11 +59,12 @@
   --border: rgba(255, 255, 255, 0.08);
   --axis: #71717a;
 
-  --accent: #6366f1;
+  --accent: #386FA4;
+  --accent-hover: #59A5D8;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(99, 102, 241, 0.15);
+  --accent-soft: rgba(56, 111, 164, 0.15);
 
-  --series-1: #6366f1;
+  --series-1: #386FA4;
   --series-2: #34d399;
   --series-3: #fbbf24;
   --series-4: #a78bfa;
@@ -66,6 +74,12 @@
   --warning: #fbbf24;
   --serious: #fb923c;
   --critical: #f87171;
+
+  --sidebar-bg: #18181b;
+  --sidebar-text: #d4d4d8;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.08);
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 
   --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
   --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
@@ -85,8 +99,15 @@
   --color-hairline: var(--border);
 
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
+
+  --color-sidebar: var(--sidebar-bg);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-active: var(--sidebar-active-bg);
+  --color-sidebar-active-text: var(--sidebar-active-text);
+  --color-sidebar-border: var(--sidebar-border);
 
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);

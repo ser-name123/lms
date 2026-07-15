@@ -145,19 +145,19 @@ export class SettingsService {
     const settingsMap = new Map(records.map((r) => [r.key, r.value]));
 
     // Light Mode Defaults
-    let primaryColor = '#5b73e8';
+    let primaryColor = '#133C55';
     let accentTextLight = '#ffffff';
-    let pageBgLight = '#f8f9fa';
+    let pageBgLight = '#f5f8fb';
     let surfaceBgLight = '#ffffff';
-    let textPrimaryLight = '#212529';
-    let textSecondaryLight = '#495057';
-    let textMutedLight = '#8898aa';
-    let sidebarBgLight = '#ffffff';
-    let sidebarTextLight = '#495057';
-    let sidebarActiveBgLight = 'rgba(91, 115, 232, 0.08)';
-    let sidebarActiveTextLight = '#5b73e8';
+    let textPrimaryLight = '#13222e';
+    let textSecondaryLight = '#2c4251';
+    let textMutedLight = '#5c7b90';
+    let sidebarBgLight = '#133C55';
+    let sidebarTextLight = '#91E5F6';
+    let sidebarActiveBgLight = 'rgba(56, 111, 164, 0.35)';
+    let sidebarActiveTextLight = '#ffffff';
     let topbarBgLight = '#ffffff';
-    let topbarBorderLight = 'rgba(33, 37, 41, 0.06)';
+    let topbarBorderLight = 'rgba(19, 60, 85, 0.08)';
 
     // Dark Mode Defaults
     let secondaryColor = '#6366f1';

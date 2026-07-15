@@ -45,19 +45,19 @@ export default function SettingsPage() {
   const [cropperTarget, setCropperTarget] = useState<"logo" | "logoDark" | "favicon" | "loader" | null>(null);
 
   // Light Mode Color States
-  const [primaryColor, setPrimaryColor] = useState("#5b73e8");
+  const [primaryColor, setPrimaryColor] = useState("#133C55");
   const [accentTextLight, setAccentTextLight] = useState("#ffffff");
-  const [pageBgLight, setPageBgLight] = useState("#f8f9fa");
+  const [pageBgLight, setPageBgLight] = useState("#f5f8fb");
   const [surfaceBgLight, setSurfaceBgLight] = useState("#ffffff");
-  const [textPrimaryLight, setTextPrimaryLight] = useState("#212529");
-  const [textSecondaryLight, setTextSecondaryLight] = useState("#495057");
-  const [textMutedLight, setTextMutedLight] = useState("#8898aa");
-  const [sidebarBgLight, setSidebarBgLight] = useState("#ffffff");
-  const [sidebarTextLight, setSidebarTextLight] = useState("#495057");
-  const [sidebarActiveBgLight, setSidebarActiveBgLight] = useState("rgba(91, 115, 232, 0.08)");
-  const [sidebarActiveTextLight, setSidebarActiveTextLight] = useState("#5b73e8");
+  const [textPrimaryLight, setTextPrimaryLight] = useState("#13222e");
+  const [textSecondaryLight, setTextSecondaryLight] = useState("#2c4251");
+  const [textMutedLight, setTextMutedLight] = useState("#5c7b90");
+  const [sidebarBgLight, setSidebarBgLight] = useState("#133C55");
+  const [sidebarTextLight, setSidebarTextLight] = useState("#91E5F6");
+  const [sidebarActiveBgLight, setSidebarActiveBgLight] = useState("rgba(56, 111, 164, 0.35)");
+  const [sidebarActiveTextLight, setSidebarActiveTextLight] = useState("#ffffff");
   const [topbarBgLight, setTopbarBgLight] = useState("#ffffff");
-  const [topbarBorderLight, setTopbarBorderLight] = useState("rgba(33, 37, 41, 0.06)");
+  const [topbarBorderLight, setTopbarBorderLight] = useState("rgba(19, 60, 85, 0.08)");
 
   // Dark Mode Color States
   const [secondaryColor, setSecondaryColor] = useState("#6366f1");
@@ -250,19 +250,19 @@ export default function SettingsPage() {
   // Reset colors to system defaults
   const handleResetColors = () => {
     // Reset Light Mode
-    setPrimaryColor("#5b73e8");
+    setPrimaryColor("#133C55");
     setAccentTextLight("#ffffff");
-    setPageBgLight("#f8f9fa");
+    setPageBgLight("#f5f8fb");
     setSurfaceBgLight("#ffffff");
-    setTextPrimaryLight("#212529");
-    setTextSecondaryLight("#495057");
-    setTextMutedLight("#8898aa");
-    setSidebarBgLight("#ffffff");
-    setSidebarTextLight("#495057");
-    setSidebarActiveBgLight("rgba(91, 115, 232, 0.08)");
-    setSidebarActiveTextLight("#5b73e8");
+    setTextPrimaryLight("#13222e");
+    setTextSecondaryLight("#2c4251");
+    setTextMutedLight("#5c7b90");
+    setSidebarBgLight("#133C55");
+    setSidebarTextLight("#91E5F6");
+    setSidebarActiveBgLight("rgba(56, 111, 164, 0.35)");
+    setSidebarActiveTextLight("#ffffff");
     setTopbarBgLight("#ffffff");
-    setTopbarBorderLight("rgba(33, 37, 41, 0.06)");
+    setTopbarBorderLight("rgba(19, 60, 85, 0.08)");
 
     // Reset Dark Mode
     setSecondaryColor("#6366f1");
@@ -429,7 +429,7 @@ export default function SettingsPage() {
                 onClick={() => { setActiveTab("brand"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
                   activeTab === "brand" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -440,7 +440,7 @@ export default function SettingsPage() {
                 onClick={() => { setActiveTab("theme"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
                   activeTab === "theme" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -451,7 +451,7 @@ export default function SettingsPage() {
                 onClick={() => { setActiveTab("smtp"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
                   activeTab === "smtp" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -462,7 +462,7 @@ export default function SettingsPage() {
                 onClick={() => { setActiveTab("scripts"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
                   activeTab === "scripts" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -473,7 +473,7 @@ export default function SettingsPage() {
                 onClick={() => { setActiveTab("loader"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
                   activeTab === "loader" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -511,7 +511,7 @@ export default function SettingsPage() {
                             value={websiteName}
                             onChange={(e) => setWebsiteName(e.target.value)}
                             placeholder="Edumin LMS"
-                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                           />
                         </div>
                         <div>
@@ -522,7 +522,7 @@ export default function SettingsPage() {
                             value={adminConsoleTitle}
                             onChange={(e) => setAdminConsoleTitle(e.target.value)}
                             placeholder="Admin console"
-                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                           />
                         </div>
                       </div>
@@ -658,7 +658,7 @@ export default function SettingsPage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Save System Settings
@@ -675,7 +675,7 @@ export default function SettingsPage() {
                       <select
                         value={defaultTheme}
                         onChange={(e) => setDefaultTheme(e.target.value)}
-                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                       >
                         <option value="light">Always Light Mode by Default</option>
                         <option value="dark">Always Dark Mode by Default</option>
@@ -943,7 +943,7 @@ export default function SettingsPage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Save Theme Settings
@@ -983,7 +983,7 @@ export default function SettingsPage() {
                                 value={smtpHost}
                                 onChange={(e) => setSmtpHost(e.target.value)}
                                 placeholder="smtp.gmail.com"
-                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                               />
                             </div>
                             <div>
@@ -994,7 +994,7 @@ export default function SettingsPage() {
                                 value={smtpPort}
                                 onChange={(e) => setSmtpPort(Number(e.target.value))}
                                 placeholder="587"
-                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                               />
                             </div>
                           </div>
@@ -1011,7 +1011,7 @@ export default function SettingsPage() {
                                   if (smtpFrom === smtpUser) setSmtpFrom(e.target.value);
                                 }}
                                 placeholder="username@gmail.com"
-                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                               />
                             </div>
                             <div>
@@ -1022,7 +1022,7 @@ export default function SettingsPage() {
                                 value={smtpPass}
                                 onChange={(e) => setSmtpPass(e.target.value)}
                                 placeholder="••••••••"
-                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                               />
                             </div>
                           </div>
@@ -1036,7 +1036,7 @@ export default function SettingsPage() {
                                 value={smtpFrom}
                                 onChange={(e) => setSmtpFrom(e.target.value)}
                                 placeholder="objectsquarerajan@gmail.com"
-                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                               />
                             </div>
                             <div className="flex items-center gap-2 pt-6 pl-2">
@@ -1045,7 +1045,7 @@ export default function SettingsPage() {
                                 id="smtpSecure"
                                 checked={smtpSecure}
                                 onChange={(e) => setSmtpSecure(e.target.checked)}
-                                className="size-4.5 rounded border-hairline text-[#5b73e8] focus:ring-[#5b73e8]"
+                                className="size-4.5 rounded border-hairline text-accent focus:ring-accent"
                               />
                               <label htmlFor="smtpSecure" className="text-xs font-bold uppercase tracking-wider text-ink-2 select-none cursor-pointer">
                                 Enable SSL/TLS (Secure)
@@ -1057,7 +1057,7 @@ export default function SettingsPage() {
                             <Button
                               type="submit"
                               disabled={busy}
-                              className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                              className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                             >
                               {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                               Save Config
@@ -1082,7 +1082,7 @@ export default function SettingsPage() {
                             value={smtpTestEmail}
                             onChange={(e) => setSmtpTestEmail(e.target.value)}
                             placeholder="test@example.com"
-                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                           />
                         </div>
 
@@ -1110,7 +1110,7 @@ export default function SettingsPage() {
                           <Button
                             type="submit"
                             disabled={smtpStatus === "testing"}
-                            className="h-11 justify-center rounded-xl bg-[#5b73e8] hover:bg-indigo-600 font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                            className="h-11 justify-center rounded-xl bg-accent hover:bg-accent-hover font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                           >
                             {smtpStatus === "testing" ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                             Send Test Email
@@ -1136,7 +1136,7 @@ export default function SettingsPage() {
                           value={googleTags}
                           onChange={(e) => setGoogleTags(e.target.value)}
                           placeholder="<!-- Global site tag (gtag.js) - Google Analytics -->&#10;<script async src='https://www.googletagmanager.com/gtag/js?id=UA-XXXXX'></script>"
-                          className="w-full font-mono text-xs rounded-xl border border-hairline bg-surface p-4 text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="w-full font-mono text-xs rounded-xl border border-hairline bg-surface p-4 text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                         <p className="text-[10px] text-ink-3 mt-1.5 leading-relaxed">
                           Important: Add valid HTML tags (like <code>&lt;script&gt;</code>, <code>&lt;link&gt;</code>, or <code>&lt;style&gt;</code>). Broken elements could disrupt rendering parameters.
@@ -1148,7 +1148,7 @@ export default function SettingsPage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Save System Settings
@@ -1178,7 +1178,7 @@ export default function SettingsPage() {
                             checked={loaderEnabled === "true"}
                             onChange={(e) => setLoaderEnabled(e.target.checked ? "true" : "false")}
                           />
-                          <div className="w-11 h-6 bg-surface-3 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#5b73e8]"></div>
+                          <div className="w-11 h-6 bg-surface-3 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
                         </label>
                       </div>
 
@@ -1193,7 +1193,7 @@ export default function SettingsPage() {
                               <img src={loaderUrl} alt="Custom loader preview" className="max-h-full max-w-full object-contain p-2" />
                             ) : (
                               <div className="flex flex-col items-center gap-1.5 p-2">
-                                <svg className="animate-spin h-8 w-8 text-[#5b73e8]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <svg className="animate-spin h-8 w-8 text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
@@ -1247,7 +1247,7 @@ export default function SettingsPage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300 cursor-pointer"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300 cursor-pointer"
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Save System Settings

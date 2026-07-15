@@ -120,7 +120,7 @@ export function ImageCropperModal({
         <div className="flex items-center justify-between border-b border-hairline pb-3.5">
           <div>
             <h3 className="font-bold text-base text-ink flex items-center gap-1.5">
-              <Crop className="size-4.5 text-[#5b73e8]" />
+              <Crop className="size-4.5 text-accent" />
               Adjust Image Fit
             </h3>
             <p className="text-xs text-ink-3 mt-0.5">Drag to position, use the slider to zoom</p>
@@ -189,7 +189,7 @@ export function ImageCropperModal({
             step="0.05"
             value={zoom}
             onChange={(e) => setZoom(parseFloat(e.target.value))}
-            className="w-full h-1 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-[#5b73e8]"
+            className="w-full h-1 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-accent"
           />
         </div>
 
@@ -217,7 +217,7 @@ export function ImageCropperModal({
             <Button
               type="button"
               onClick={handleExecuteCrop}
-              className="h-10 px-5 font-bold text-white bg-[#5b73e8] hover:bg-indigo-600 rounded-xl hover:shadow-[0_8px_16px_rgba(91,115,232,0.25)] transition-all duration-300"
+              className="h-10 px-5 font-bold text-white bg-accent hover:bg-accent-hover rounded-xl hover:shadow-[0_8px_16px_rgba(19,60,85,0.25)] transition-all duration-300"
             >
               Crop & Apply
             </Button>

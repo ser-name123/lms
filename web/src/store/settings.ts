@@ -62,6 +62,24 @@ function applyDynamicStyles(settings: SystemSettings) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
+  // Helper to adjust color brightness for gradients
+  const adjustColorBrightness = (hex: string, percent: number) => {
+    if (!hex || !hex.startsWith("#")) return hex;
+    let R = parseInt(hex.substring(1, 3), 16);
+    let G = parseInt(hex.substring(3, 5), 16);
+    let B = parseInt(hex.substring(5, 7), 16);
+
+    R = Math.min(255, Math.max(0, R + percent));
+    G = Math.min(255, Math.max(0, G + percent));
+    B = Math.min(255, Math.max(0, B + percent));
+
+    const rHex = R.toString(16).padStart(2, '0');
+    const gHex = G.toString(16).padStart(2, '0');
+    const bHex = B.toString(16).padStart(2, '0');
+
+    return `#${rHex}${gHex}${bHex}`;
+  };
+
   customStyleTag.innerHTML = `
     :root {
       --accent: ${settings.primaryColor} !important;
@@ -93,7 +111,7 @@ function applyDynamicStyles(settings: SystemSettings) {
     
     /* Global Sidebar Style Overrides */
     aside {
-      background-color: ${settings.sidebarBgLight} !important;
+      background: linear-gradient(180deg, ${settings.sidebarBgLight} 0%, ${adjustColorBrightness(settings.sidebarBgLight, 25)} 100%) !important;
       border-right-color: ${settings.topbarBorderLight} !important;
     }
     aside p, aside span, aside svg, aside a, aside button {
@@ -103,7 +121,7 @@ function applyDynamicStyles(settings: SystemSettings) {
       background-color: ${hexToRgba(settings.sidebarTextLight, 0.08)} !important;
     }
     aside a[href].bg-accent-soft, aside a[href].text-accent, aside .bg-accent-soft {
-      background-color: ${settings.sidebarActiveBgLight} !important;
+      background: linear-gradient(90deg, ${settings.sidebarActiveBgLight} 0%, ${hexToRgba(settings.sidebarActiveBgLight, 0.55)} 100%) !important;
       color: ${settings.sidebarActiveTextLight} !important;
     }
     aside a[href].bg-accent-soft *, aside a[href].text-accent *, aside .bg-accent-soft * {
@@ -111,7 +129,7 @@ function applyDynamicStyles(settings: SystemSettings) {
     }
     
     .dark aside {
-      background-color: ${settings.sidebarBgDark} !important;
+      background: linear-gradient(180deg, ${settings.sidebarBgDark} 0%, ${adjustColorBrightness(settings.sidebarBgDark, -15)} 100%) !important;
       border-right-color: ${settings.topbarBorderDark} !important;
     }
     .dark aside p, .dark aside span, .dark aside svg, .dark aside a, .dark aside button {
@@ -121,7 +139,7 @@ function applyDynamicStyles(settings: SystemSettings) {
       background-color: ${hexToRgba(settings.sidebarTextDark, 0.08)} !important;
     }
     .dark aside a[href].bg-accent-soft, .dark aside a[href].text-accent, .dark aside .bg-accent-soft {
-      background-color: ${settings.sidebarActiveBgDark} !important;
+      background: linear-gradient(90deg, ${settings.sidebarActiveBgDark} 0%, ${hexToRgba(settings.sidebarActiveBgDark, 0.5)} 100%) !important;
       color: ${settings.sidebarActiveTextDark} !important;
     }
     .dark aside a[href].bg-accent-soft *, .dark aside a[href].text-accent *, .dark aside .bg-accent-soft * {

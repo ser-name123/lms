@@ -97,12 +97,12 @@ export default function SignInPage() {
       <div className="absolute top-1/4 -left-36 size-96 rounded-full bg-gradient-to-tr from-indigo-500/20 to-purple-500/10 blur-[80px] pointer-events-none" />
       <div className="absolute bottom-1/4 -right-36 size-96 rounded-full bg-gradient-to-br from-blue-500/10 to-indigo-500/20 blur-[80px] pointer-events-none" />
 
-      <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(91,115,232,0.12)] animate-fade-up">
+      <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(19,60,85,0.12)] animate-fade-up">
         {/* Brand Logo Header */}
         <div className="flex flex-col items-center mb-7">
           <div className="flex items-center gap-2.5">
             <div className="grid size-10.5 place-items-center rounded-xl bg-accent/10 border border-accent/20">
-              <GraduationCap className="size-6 text-[#5b73e8]" />
+              <GraduationCap className="size-6 text-accent" />
             </div>
             <span className="text-2.5xl font-black tracking-wider text-ink uppercase">
               Edumin
@@ -127,7 +127,7 @@ export default function SignInPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="username"
-                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                 suppressHydrationWarning
               />
             </div>
@@ -145,7 +145,7 @@ export default function SignInPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••"
-                  className="h-11.5 w-full rounded-xl border border-hairline bg-surface pr-12 pl-4 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                  className="h-11.5 w-full rounded-xl border border-hairline bg-surface pr-12 pl-4 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                   suppressHydrationWarning
                 />
                 <button
@@ -164,12 +164,12 @@ export default function SignInPage() {
               <label className="flex items-center gap-2 cursor-pointer text-ink-2">
                 <input 
                   type="checkbox" 
-                  className="rounded-md border-hairline text-[#5b73e8] focus:ring-[#5b73e8] size-4" 
+                  className="rounded-md border-hairline text-accent focus:ring-accent size-4" 
                   suppressHydrationWarning
                 />
                 <span>Remember my preference</span>
               </label>
-              <a href="#" className="text-[#5b73e8] hover:underline">
+              <a href="#" className="text-accent hover:underline">
                 Forgot Password?
               </a>
             </div>
@@ -187,7 +187,7 @@ export default function SignInPage() {
             <Button
               type="submit"
               disabled={busy}
-              className="h-11.5 w-full justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] hover:shadow-[0_8px_25px_rgba(91,115,232,0.35)] font-bold text-white transition-all duration-300 animate-fade-in"
+              className="h-11.5 w-full justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] hover:shadow-[0_8px_25px_rgba(19,60,85,0.35)] font-bold text-white transition-all duration-300 animate-fade-in"
               suppressHydrationWarning
             >
               {busy ? (
@@ -251,7 +251,7 @@ export default function SignInPage() {
                 value={otpCode}
                 onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
                 placeholder="123456"
-                className="h-11.5 w-full text-center tracking-[0.5em] font-bold rounded-xl border border-hairline bg-surface px-4 text-lg text-ink placeholder:text-ink-3 placeholder:tracking-normal focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                className="h-11.5 w-full text-center tracking-[0.5em] font-bold rounded-xl border border-hairline bg-surface px-4 text-lg text-ink placeholder:text-ink-3 placeholder:tracking-normal focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                 suppressHydrationWarning
               />
               <p className="mt-2 text-xs text-ink-3">
@@ -285,7 +285,7 @@ export default function SignInPage() {
               <Button
                 type="submit"
                 disabled={busy}
-                className="h-11.5 flex-[2] justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] hover:shadow-[0_8px_25px_rgba(91,115,232,0.35)] font-bold text-white transition-all duration-300"
+                className="h-11.5 flex-[2] justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] hover:shadow-[0_8px_25px_rgba(19,60,85,0.35)] font-bold text-white transition-all duration-300"
                 suppressHydrationWarning
               >
                 {busy ? (
@@ -304,7 +304,7 @@ export default function SignInPage() {
         {/* Footer */}
         <div className="mt-6 text-center text-xs text-ink-3 font-semibold">
           Don't have an account?{" "}
-          <a href="#" className="text-[#5b73e8] hover:underline ml-0.5">
+          <a href="#" className="text-accent hover:underline ml-0.5">
             Sign up
           </a>
         </div>

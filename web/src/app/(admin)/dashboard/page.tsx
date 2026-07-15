@@ -140,7 +140,7 @@ export default function DashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2/20">
+                <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2">
                   <th className="px-5 py-3.5">No.</th>
                   <th className="px-5 py-3.5">Name</th>
                   <th className="px-5 py-3.5">Assigned Professor</th>
@@ -264,7 +264,7 @@ export default function DashboardPage() {
                   variant="primary" 
                   disabled={sending}
                   onClick={handleSendEmail}
-                  className="rounded-lg bg-[#5b73e8] hover:bg-indigo-600 disabled:opacity-50 font-bold px-4 py-2 flex items-center gap-1.5 text-white"
+                  className="rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-50 font-bold px-4 py-2 flex items-center gap-1.5 text-white"
                 >
                   {sending ? "Sending..." : "Send"}
                   <Send className="size-3.5" />
@@ -289,7 +289,7 @@ export default function DashboardPage() {
                             ? "bg-critical/10 text-critical border-critical/20"
                             : item.kind === "payment"
                             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                            : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
+                            : "bg-accent-soft text-accent border-accent/20",
                         )}
                       >
                         <Icon className="size-4.5" />

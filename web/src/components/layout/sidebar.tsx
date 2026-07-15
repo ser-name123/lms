@@ -28,36 +28,36 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-hairline bg-surface",
+          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-text",
           "transition-[width,transform] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
           sidebarCollapsed ? "w-[72px]" : "w-64",
           mobileNavOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
         {/* Brand */}
-        <div className="flex h-16 items-center gap-2.5 border-b border-hairline px-4">
+        <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-4">
           {theme === "dark" && settings?.logoDark ? (
             <img src={settings.logoDark} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
           ) : settings?.logo ? (
             <img src={settings.logo} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
           ) : (
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-[#5b73e8] to-[#886cff] shadow-md shadow-accent/20 text-white animate-fade-in">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent to-[#59A5D8] shadow-md shadow-accent/20 text-white animate-fade-in">
               <GraduationCap className="size-5" />
             </span>
           )}
           {!sidebarCollapsed && (
             <div className="min-w-0 flex-1 animate-fade-in">
-              <p className="truncate text-base font-extrabold tracking-widest text-[#5b73e8] uppercase" style={{ color: "var(--accent)" }}>
+              <p className="truncate text-base font-extrabold tracking-widest text-white uppercase">
                 {settings?.websiteName || "Edumin"}
               </p>
-              <p className="truncate text-[10px] font-bold text-ink-3 uppercase tracking-wider">
+              <p className="truncate text-[10px] font-bold text-sidebar-text/70 uppercase tracking-wider">
                 {settings?.adminConsoleTitle || "Admin console"}
               </p>
             </div>
           )}
           <button
             onClick={() => setMobileNav(false)}
-            className="ml-auto grid size-8 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 lg:hidden"
+            className="ml-auto grid size-8 place-items-center rounded-lg text-sidebar-text hover:bg-sidebar-active lg:hidden"
             aria-label="Close navigation"
           >
             <X className="size-4" />
@@ -69,7 +69,7 @@ export function Sidebar() {
           {navGroups.map((group) => (
             <div key={group.label} className="mb-5 last:mb-0">
               {!sidebarCollapsed && (
-                <p className="mb-1.5 px-3 text-[10px] font-bold tracking-wider text-ink-3/80 dark:text-zinc-500 uppercase">
+                <p className="mb-1.5 px-3 text-[10px] font-bold tracking-wider text-sidebar-text/60 uppercase">
                   {group.label}
                 </p>
               )}
@@ -87,20 +87,20 @@ export function Sidebar() {
                         className={cn(
                           "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                           active
-                            ? "bg-accent-soft text-accent shadow-sm border border-accent/5"
-                            : "text-ink-2 hover:bg-surface-2 hover:text-ink hover:translate-x-0.5",
+                            ? "bg-sidebar-active text-white shadow-sm border border-white/5"
+                            : "text-sidebar-text hover:bg-sidebar-active/30 hover:text-white hover:translate-x-0.5",
                           sidebarCollapsed && "justify-center px-0 hover:translate-x-0",
                         )}
                       >
                         {active && (
-                          <span className="absolute left-1.5 h-5 w-1 rounded-full bg-accent" />
+                          <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />
                         )}
-                        <Icon className={cn("size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110", active ? "text-accent" : "text-ink-3 group-hover:text-ink")} />
+                        <Icon className={cn("size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110", active ? "text-white" : "text-sidebar-text/80 group-hover:text-white")} />
                         {!sidebarCollapsed && (
                           <>
                             <span className="truncate">{item.label}</span>
                             {item.badge && (
-                              <span className="tnum ml-auto rounded-md bg-surface-3/50 dark:bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-bold text-ink-3 border border-hairline">
+                              <span className="tnum ml-auto rounded-md bg-sidebar-active/50 px-1.5 py-0.5 text-[10px] font-bold text-white border border-sidebar-border">
                                 {item.badge}
                               </span>
                             )}
@@ -116,11 +116,11 @@ export function Sidebar() {
         </nav>
 
         {/* Collapse toggle — desktop only */}
-        <div className="hidden border-t border-hairline p-3 lg:block">
+        <div className="hidden border-t border-sidebar-border p-3 lg:block">
           <button
             onClick={toggleSidebar}
             className={cn(
-              "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink",
+              "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-sidebar-text transition-colors hover:bg-sidebar-active/30 hover:text-white",
               sidebarCollapsed && "justify-center px-0",
             )}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}

@@ -47,11 +47,11 @@ export function Preloader() {
           <div className="relative size-14 flex items-center justify-center">
             <div 
               className="absolute inset-0 rounded-full border-4 opacity-15"
-              style={{ borderColor: "var(--accent, #5b73e8)" }}
+              style={{ borderColor: "var(--accent, #133C55)" }}
             ></div>
             <div 
               className="absolute inset-0 rounded-full border-4 border-t-transparent animate-spin"
-              style={{ borderLeftColor: "var(--accent, #5b73e8)", borderRightColor: "var(--accent, #5b73e8)", borderBottomColor: "var(--accent, #5b73e8)" }}
+              style={{ borderLeftColor: "var(--accent, #133C55)", borderRightColor: "var(--accent, #133C55)", borderBottomColor: "var(--accent, #133C55)" }}
             ></div>
           </div>
         )}

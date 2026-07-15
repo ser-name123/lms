@@ -364,7 +364,7 @@ export default function ProfilePage() {
                 </div>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-0 right-0 size-6 bg-[#5b73e8] border border-surface rounded-full text-white grid place-items-center hover:scale-105 active:scale-95 transition-transform"
+                  className="absolute bottom-0 right-0 size-6 bg-accent border border-surface rounded-full text-white grid place-items-center hover:scale-105 active:scale-95 transition-transform"
                   aria-label="Upload Avatar"
                   suppressHydrationWarning
                 >
@@ -386,7 +386,7 @@ export default function ProfilePage() {
                 onClick={() => { setActiveTab("profile"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
                   activeTab === "profile" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -397,7 +397,7 @@ export default function ProfilePage() {
                 onClick={() => { setActiveTab("security"); setStatus(null); }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
                   activeTab === "security" 
-                    ? "bg-[#5b73e8] text-white" 
+                    ? "bg-accent text-white" 
                     : "text-ink-2 hover:bg-surface-2"
                 }`}
               >
@@ -409,7 +409,7 @@ export default function ProfilePage() {
                   onClick={() => { setActiveTab("admins"); setStatus(null); }}
                   className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
                     activeTab === "admins" 
-                      ? "bg-[#5b73e8] text-white" 
+                      ? "bg-accent text-white" 
                       : "text-ink-2 hover:bg-surface-2"
                   }`}
                 >
@@ -439,7 +439,7 @@ export default function ProfilePage() {
                         required
                         value={firstName}
                         onChange={(e) => setFirstName(e.target.value)}
-                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                       />
                     </div>
                     <div>
@@ -449,7 +449,7 @@ export default function ProfilePage() {
                         required
                         value={lastName}
                         onChange={(e) => setLastName(e.target.value)}
-                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                       />
                     </div>
                   </div>
@@ -467,7 +467,7 @@ export default function ProfilePage() {
                     <Button
                       type="submit"
                       disabled={busy}
-                      className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                      className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                       suppressHydrationWarning
                     >
                       {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
@@ -497,7 +497,7 @@ export default function ProfilePage() {
                           placeholder="••••••••"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                       <div>
@@ -508,7 +508,7 @@ export default function ProfilePage() {
                           placeholder="••••••••"
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                     </div>
@@ -516,7 +516,7 @@ export default function ProfilePage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
                         suppressHydrationWarning
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
@@ -614,7 +614,7 @@ export default function ProfilePage() {
                           value={newAdminFirstName}
                           onChange={(e) => setNewAdminFirstName(e.target.value)}
                           placeholder="e.g. John"
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                       <div>
@@ -625,7 +625,7 @@ export default function ProfilePage() {
                           value={newAdminLastName}
                           onChange={(e) => setNewAdminLastName(e.target.value)}
                           placeholder="e.g. Doe"
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                     </div>
@@ -638,7 +638,7 @@ export default function ProfilePage() {
                           value={newAdminEmail}
                           onChange={(e) => setNewAdminEmail(e.target.value)}
                           placeholder="e.g. john.doe@lms.local"
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                       <div>
@@ -649,7 +649,7 @@ export default function ProfilePage() {
                           placeholder="Min. 8 characters"
                           value={newAdminPassword}
                           onChange={(e) => setNewAdminPassword(e.target.value)}
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                         />
                       </div>
                     </div>
@@ -657,7 +657,7 @@ export default function ProfilePage() {
                       <Button
                         type="submit"
                         disabled={busy}
-                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300 cursor-pointer"
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300 cursor-pointer"
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Create Administrator
@@ -675,7 +675,7 @@ export default function ProfilePage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2/20">
+                        <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2">
                           <th className="px-6 py-4">Name</th>
                           <th className="px-6 py-4">Email</th>
                           <th className="px-6 py-4">Status</th>

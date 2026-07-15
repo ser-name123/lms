@@ -6,7 +6,7 @@ const tones = {
   good: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/8 dark:bg-emerald-500/10 border border-emerald-500/20 dark:border-emerald-500/20",
   warning: "text-amber-700 dark:text-amber-400 bg-amber-500/8 dark:bg-amber-500/10 border border-amber-500/20 dark:border-amber-500/20",
   critical: "text-red-700 dark:text-red-400 bg-red-500/8 dark:bg-red-500/10 border border-red-500/20 dark:border-red-500/20",
-  accent: "text-indigo-700 dark:text-indigo-400 bg-indigo-500/8 dark:bg-indigo-500/10 border border-indigo-500/20 dark:border-indigo-500/20",
+  accent: "text-accent dark:text-accent bg-accent-soft border border-accent/20 dark:border-accent/20",
 } as const;
 
 const dots = {
@@ -14,7 +14,7 @@ const dots = {
   good: "bg-emerald-500",
   warning: "bg-amber-500",
   critical: "bg-red-500",
-  accent: "bg-indigo-500",
+  accent: "bg-accent",
 } as const;
 
 export type Tone = keyof typeof tones;

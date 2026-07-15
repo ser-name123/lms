@@ -8,7 +8,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const sidebarCollapsed = useUI((s) => s.sidebarCollapsed);
 
   return (
-    <div className="min-h-screen bg-page">
+    <div className="min-h-screen bg-gradient-to-br from-page to-surface-2/20">
       <Sidebar />
       <div
         className={cn(

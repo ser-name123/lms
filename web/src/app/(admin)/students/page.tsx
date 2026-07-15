@@ -452,7 +452,7 @@ export default function StudentsPage() {
               size="sm" 
               className={cn(
                 "rounded-xl cursor-pointer transition-all",
-                (showFiltersPanel || hasActiveFilters) && "border-[#5b73e8] bg-indigo-500/5 text-[#5b73e8] font-bold"
+                (showFiltersPanel || hasActiveFilters) && "border-accent bg-accent-soft text-accent font-bold"
               )}
               onClick={() => setShowFiltersPanel(!showFiltersPanel)}
             >
@@ -466,7 +466,7 @@ export default function StudentsPage() {
             <Button 
               variant="primary" 
               size="sm" 
-              className="rounded-xl bg-[#5b73e8] hover:bg-indigo-600 font-bold text-white transition-all duration-200 shadow-sm"
+              className="rounded-xl bg-accent hover:bg-accent-hover font-bold text-white transition-all duration-200 shadow-sm"
               onClick={() => { setShowModal(true); setModalStatus(null); }}
             >
               <Plus className="size-3.5 mr-1" />
@@ -480,7 +480,7 @@ export default function StudentsPage() {
           <Card className="p-5 border border-hairline bg-surface shadow-md rounded-2xl animate-fade-in space-y-4">
             <div className="flex items-center justify-between border-b border-hairline pb-3">
               <h4 className="font-bold text-sm text-ink flex items-center gap-1.5">
-                <SlidersHorizontal className="size-4 text-[#5b73e8]" />
+                <SlidersHorizontal className="size-4 text-accent" />
                 Advanced Filters Drawer
               </h4>
               <button 
@@ -498,7 +498,7 @@ export default function StudentsPage() {
                 <select
                   value={tempCourse}
                   onChange={(e) => setTempCourse(e.target.value)}
-                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                 >
                   <option value="">All Courses</option>
                   {coursesList.map((c) => (
@@ -513,7 +513,7 @@ export default function StudentsPage() {
                 <select
                   value={tempTeacher}
                   onChange={(e) => setTempTeacher(e.target.value)}
-                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                 >
                   <option value="">All Teachers</option>
                   {teachersList.map((t) => (
@@ -532,7 +532,7 @@ export default function StudentsPage() {
                     value={tempCountry}
                     onChange={(e) => setTempCountry(e.target.value)}
                     placeholder="Search Country (e.g. India)"
-                    className="h-10.5 w-full rounded-xl border border-hairline bg-surface pr-3.5 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                    className="h-10.5 w-full rounded-xl border border-hairline bg-surface pr-3.5 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                   />
                 </div>
               </div>
@@ -549,7 +549,7 @@ export default function StudentsPage() {
                       type="date"
                       value={tempJoiningStart}
                       onChange={(e) => setTempJoiningStart(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-accent"
                     />
                   </div>
                   <div className="relative">
@@ -558,7 +558,7 @@ export default function StudentsPage() {
                       type="date"
                       value={tempJoiningEnd}
                       onChange={(e) => setTempJoiningEnd(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-accent"
                     />
                   </div>
                 </div>
@@ -574,7 +574,7 @@ export default function StudentsPage() {
                       type="date"
                       value={tempPaymentDueStart}
                       onChange={(e) => setTempPaymentDueStart(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-accent"
                     />
                   </div>
                   <div className="relative">
@@ -583,7 +583,7 @@ export default function StudentsPage() {
                       type="date"
                       value={tempPaymentDueEnd}
                       onChange={(e) => setTempPaymentDueEnd(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-[#5b73e8]"
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-xs text-ink focus:outline-none focus:border-accent"
                     />
                   </div>
                 </div>
@@ -604,7 +604,7 @@ export default function StudentsPage() {
                 onClick={handleApplyFilters}
                 variant="primary"
                 size="sm"
-                className="rounded-xl bg-[#5b73e8] hover:bg-indigo-600 font-bold text-white transition-all duration-200 cursor-pointer"
+                className="rounded-xl bg-accent hover:bg-accent-hover font-bold text-white transition-all duration-200 cursor-pointer"
               >
                 Apply Filters
               </Button>
@@ -622,7 +622,7 @@ export default function StudentsPage() {
             ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-hairline bg-surface-2/40 text-left">
+                  <tr className="border-b border-hairline bg-surface-2 text-left">
                     <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student</th>
                     <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">ID</th>
                     <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Mobile</th>
@@ -650,7 +650,7 @@ export default function StudentsPage() {
                         {/* Student Name */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-3">
-                            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-indigo-500 via-indigo-600 to-violet-500 text-[11px] font-bold text-white shadow-sm shadow-indigo-500/10">
+                            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent via-[#386FA4] to-[#59A5D8] text-[11px] font-bold text-white shadow-sm shadow-accent/10">
                               {initials(`${row.user.firstName} ${row.user.lastName}`)}
                             </span>
                             <div className="min-w-0">
@@ -696,7 +696,7 @@ export default function StudentsPage() {
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               onClick={() => openManageModal(row)}
-                              className="size-7.5 bg-surface border border-hairline rounded-lg text-ink-2 hover:bg-surface-2 hover:text-[#5b73e8] flex items-center justify-center transition-colors cursor-pointer"
+                              className="size-7.5 bg-surface border border-hairline rounded-lg text-ink-2 hover:bg-surface-2 hover:text-accent flex items-center justify-center transition-colors cursor-pointer"
                               aria-label="Edit Profile"
                             >
                               <Edit2 className="size-3.5" />
@@ -810,7 +810,7 @@ export default function StudentsPage() {
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       placeholder="John"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -824,7 +824,7 @@ export default function StudentsPage() {
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
                       placeholder="Doe"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -842,7 +842,7 @@ export default function StudentsPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="john.doe@mail.com"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -857,7 +857,7 @@ export default function StudentsPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -874,7 +874,7 @@ export default function StudentsPage() {
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="+91 98765 43210"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -887,7 +887,7 @@ export default function StudentsPage() {
                       value={country}
                       onChange={(e) => setCountry(e.target.value)}
                       placeholder="India"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -904,7 +904,7 @@ export default function StudentsPage() {
                       value={profession}
                       onChange={(e) => setProfession(e.target.value)}
                       placeholder="Student / Engineer"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -917,7 +917,7 @@ export default function StudentsPage() {
                       value={fees}
                       onChange={(e) => setFees(e.target.value === "" ? "" : Number(e.target.value))}
                       placeholder="5000"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -933,7 +933,7 @@ export default function StudentsPage() {
                       type="date"
                       value={joiningDate}
                       onChange={(e) => setJoiningDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -945,7 +945,7 @@ export default function StudentsPage() {
                       type="date"
                       value={lastPaymentDate}
                       onChange={(e) => setLastPaymentDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -961,7 +961,7 @@ export default function StudentsPage() {
                       type="date"
                       value={nextPaymentDate}
                       onChange={(e) => setNextPaymentDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -974,7 +974,7 @@ export default function StudentsPage() {
                       value={guardianName}
                       onChange={(e) => setGuardianName(e.target.value)}
                       placeholder="Parent/Guardian Full Name"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -993,7 +993,7 @@ export default function StudentsPage() {
                 <Button
                   type="submit"
                   disabled={modalBusy}
-                  className="h-10 px-6 font-bold text-white bg-[#5b73e8] hover:bg-indigo-600 rounded-xl hover:shadow-[0_8px_16px_rgba(91,115,232,0.25)] transition-all duration-300"
+                  className="h-10 px-6 font-bold text-white bg-accent hover:bg-accent-hover rounded-xl hover:shadow-[0_8px_16px_rgba(19,60,85,0.25)] transition-all duration-300"
                 >
                   {modalBusy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                   Create Account
@@ -1014,7 +1014,7 @@ export default function StudentsPage() {
             <div className="flex items-center justify-between border-b border-hairline px-6 py-4.5">
               <div>
                 <h3 className="font-bold text-base text-ink flex items-center gap-2">
-                  <Edit2 className="size-4.5 text-[#5b73e8]" />
+                  <Edit2 className="size-4.5 text-accent" />
                   Manage Student Profile
                 </h3>
                 <p className="text-xs text-ink-3 mt-0.5">
@@ -1056,7 +1056,7 @@ export default function StudentsPage() {
                       value={manageFirstName}
                       onChange={(e) => setManageFirstName(e.target.value)}
                       placeholder="First Name"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1070,7 +1070,7 @@ export default function StudentsPage() {
                       value={manageLastName}
                       onChange={(e) => setManageLastName(e.target.value)}
                       placeholder="Last Name"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1096,7 +1096,7 @@ export default function StudentsPage() {
                 <select
                   value={manageStatus}
                   onChange={(e) => setManageStatus(e.target.value)}
-                  className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all duration-200"
+                  className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all duration-200"
                 >
                   <option value="ACTIVE">ACTIVE (Enrolled & Authorized)</option>
                   <option value="INACTIVE">INACTIVE (Access Suspended)</option>
@@ -1117,7 +1117,7 @@ export default function StudentsPage() {
                       value={managePhone}
                       onChange={(e) => setManagePhone(e.target.value)}
                       placeholder="+91 98765 43210"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1130,7 +1130,7 @@ export default function StudentsPage() {
                       value={manageCountry}
                       onChange={(e) => setManageCountry(e.target.value)}
                       placeholder="India"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1147,7 +1147,7 @@ export default function StudentsPage() {
                       value={manageProfession}
                       onChange={(e) => setManageProfession(e.target.value)}
                       placeholder="Student / Developer"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1160,7 +1160,7 @@ export default function StudentsPage() {
                       value={manageFees}
                       onChange={(e) => setManageFees(e.target.value === "" ? "" : Number(e.target.value))}
                       placeholder="5000"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1176,7 +1176,7 @@ export default function StudentsPage() {
                       type="date"
                       value={manageJoiningDate}
                       onChange={(e) => setManageJoiningDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1188,7 +1188,7 @@ export default function StudentsPage() {
                       type="date"
                       value={manageLastPaymentDate}
                       onChange={(e) => setManageLastPaymentDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1204,7 +1204,7 @@ export default function StudentsPage() {
                       type="date"
                       value={manageNextPaymentDate}
                       onChange={(e) => setManageNextPaymentDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1217,7 +1217,7 @@ export default function StudentsPage() {
                       value={manageGuardianName}
                       onChange={(e) => setManageGuardianName(e.target.value)}
                       placeholder="Guardian Name"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
                 </div>
@@ -1247,7 +1247,7 @@ export default function StudentsPage() {
                   <Button
                     type="submit"
                     disabled={manageBusy}
-                    className="h-10 px-6 font-bold text-white bg-[#5b73e8] hover:bg-indigo-600 rounded-xl hover:shadow-[0_8px_16px_rgba(91,115,232,0.25)] transition-all duration-300 cursor-pointer"
+                    className="h-10 px-6 font-bold text-white bg-accent hover:bg-accent-hover rounded-xl hover:shadow-[0_8px_16px_rgba(19,60,85,0.25)] transition-all duration-300 cursor-pointer"
                   >
                     {manageBusy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                     Save Settings
