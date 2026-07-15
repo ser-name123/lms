@@ -101,6 +101,11 @@ export class CreateStudentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  gender?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   country?: string;
 
   @ApiPropertyOptional()
@@ -191,4 +196,15 @@ export class UpdateStudentDto {
   @IsOptional()
   @IsString()
   nextPaymentDate?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  gender?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  password?: string;
 }

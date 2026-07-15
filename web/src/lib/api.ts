@@ -184,6 +184,7 @@ export type StudentProfile = {
   id: string;
   studentCode: string;
   phone: string | null;
+  gender: string | null;
   guardianName: string | null;
   profession: string | null;
   fees: number | null;
@@ -206,6 +207,7 @@ export type StudentProfile = {
     progress: number;
     course: { id: string; title: string };
     teacher: { id: string; user: { firstName: string; lastName: string } };
+    package?: { id: string; name: string; price: number; classesPerMonth: number } | null;
   }[];
 };
 
@@ -257,6 +259,35 @@ export const updateStudent = (id: string, dto: any) => api<StudentProfile>(`/stu
 export const deleteStudent = (id: string) => api<{ success: boolean }>(`/students/${id}`, {
   method: "DELETE",
 });
+
+export type StudentStats = {
+  total: number;
+  active: number;
+  inactive: number;
+  pending: number;
+  trial: number;
+  paused: number;
+  male: number;
+  female: number;
+  countries: { country: string; count: number }[];
+};
+
+export const fetchStudentStats = () => api<StudentStats>("/students/stats");
+
+export type StudentSession = {
+  id: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+};
+
+export const fetchStudentSessions = (studentId: string) =>
+  api<StudentSession[]>(`/students/${studentId}/sessions`);
+
+export const revokeStudentSession = (studentId: string, sessionId: string) =>
+  api<void>(`/students/${studentId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
 
 /* Best-effort: the refresh token is revoked server-side, but a failure here
    must not block the client from clearing its own session. */

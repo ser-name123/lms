@@ -10,6 +10,7 @@ const PROFILE_SELECT = {
   id: true,
   studentCode: true,
   phone: true,
+  gender: true,
   guardianName: true,
   profession: true,
   fees: true,
@@ -36,6 +37,9 @@ const PROFILE_SELECT = {
       course: { select: { id: true, title: true } },
       teacher: {
         select: { id: true, user: { select: { firstName: true, lastName: true } } },
+      },
+      package: {
+        select: { id: true, name: true, price: true, classesPerMonth: true },
       },
     },
   },
@@ -146,6 +150,7 @@ export class StudentsService {
       data: {
         studentCode: await this.nextStudentCode(),
         phone: dto.phone,
+        gender: dto.gender,
         guardianName: dto.guardianName,
         profession: dto.profession,
         fees: dto.fees,
@@ -170,10 +175,22 @@ export class StudentsService {
   async update(id: string, dto: UpdateStudentDto) {
     await this.findOne(id);
 
+    const userUpdate: any = {
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      country: dto.country,
+      status: dto.status,
+    };
+
+    if (dto.password) {
+      userUpdate.passwordHash = await bcrypt.hash(dto.password, 12);
+    }
+
     return this.prisma.studentProfile.update({
       where: { id },
       data: {
         phone: dto.phone,
+        gender: dto.gender,
         guardianName: dto.guardianName,
         profession: dto.profession,
         fees: dto.fees,
@@ -181,12 +198,7 @@ export class StudentsService {
         lastPaymentDate: dto.lastPaymentDate !== undefined ? (dto.lastPaymentDate ? new Date(dto.lastPaymentDate) : null) : undefined,
         nextPaymentDate: dto.nextPaymentDate !== undefined ? (dto.nextPaymentDate ? new Date(dto.nextPaymentDate) : null) : undefined,
         user: {
-          update: {
-            firstName: dto.firstName,
-            lastName: dto.lastName,
-            country: dto.country,
-            status: dto.status,
-          },
+          update: userUpdate,
         },
       },
       select: PROFILE_SELECT,
@@ -197,6 +209,69 @@ export class StudentsService {
     const student = await this.findOne(id);
     // The profile cascades from the user, so deleting the user is enough.
     await this.prisma.user.delete({ where: { id: student.user.id } });
+  }
+
+  async getSessions(id: string) {
+    const student = await this.findOne(id);
+    return this.prisma.refreshToken.findMany({
+      where: {
+        userId: student.user.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        userAgent: true,
+        ipAddress: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async revokeSession(id: string, sessionId: string) {
+    const student = await this.findOne(id);
+    await this.prisma.refreshToken.deleteMany({
+      where: { id: sessionId, userId: student.user.id },
+    });
+  }
+
+  async getStats() {
+    const [total, active, inactive, pending, trial, paused, male, female] = await Promise.all([
+      this.prisma.studentProfile.count(),
+      this.prisma.studentProfile.count({ where: { user: { status: 'ACTIVE' } } }),
+      this.prisma.studentProfile.count({ where: { user: { status: 'INACTIVE' } } }),
+      this.prisma.studentProfile.count({ where: { user: { status: 'PENDING' } } }),
+      this.prisma.studentProfile.count({ where: { user: { status: 'TRIAL' } } }),
+      this.prisma.studentProfile.count({ where: { user: { status: 'PAUSED' } } }),
+      this.prisma.studentProfile.count({ where: { gender: 'Male' } }),
+      this.prisma.studentProfile.count({ where: { gender: 'Female' } }),
+    ]);
+
+    const countryGroups = await this.prisma.user.groupBy({
+      by: ['country'],
+      where: { role: 'STUDENT', country: { not: null } },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 5,
+    });
+
+    const countries = countryGroups.map((g) => ({
+      country: g.country ?? 'Unknown',
+      count: g._count.id,
+    }));
+
+    return {
+      total,
+      active,
+      inactive,
+      pending,
+      trial,
+      paused,
+      male,
+      female,
+      countries,
+    };
   }
 
   private async nextStudentCode() {

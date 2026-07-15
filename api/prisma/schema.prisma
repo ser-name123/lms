@@ -120,6 +120,7 @@ model StudentProfile {
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   studentCode     String    @unique
   phone           String?
+  gender          String?
   dateOfBirth     DateTime?
   guardianName    String?
   profession      String?

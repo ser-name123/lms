@@ -21,7 +21,12 @@ import {
   Edit2,
   Briefcase,
   DollarSign,
-  Calendar
+  Calendar,
+  Key,
+  Laptop,
+  MapPin,
+  Clock,
+  MoreVertical
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -36,7 +41,12 @@ import {
   deleteStudent, 
   fetchStudentsCourses,
   fetchStudentsTeachers,
+  fetchStudentStats,
+  fetchStudentSessions,
+  revokeStudentSession,
   StudentProfile, 
+  StudentStats,
+  StudentSession,
   ApiError 
 } from "@/lib/api";
 import { cn, initials } from "@/lib/utils";
@@ -68,6 +78,13 @@ export default function StudentsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
 
+  // Stats Dashboard
+  const [stats, setStats] = useState<StudentStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
+  // Active Dropdown Action Row
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
   // Advanced Filters Panel states
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [coursesList, setCoursesList] = useState<{ id: string; title: string }[]>([]);
@@ -98,6 +115,7 @@ export default function StudentsPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
+  const [gender, setGender] = useState("Male");
   const [country, setCountry] = useState("India");
   const [guardianName, setGuardianName] = useState("");
   const [profession, setProfession] = useState("");
@@ -113,6 +131,7 @@ export default function StudentsPage() {
   const [manageFirstName, setManageFirstName] = useState("");
   const [manageLastName, setManageLastName] = useState("");
   const [managePhone, setManagePhone] = useState("");
+  const [manageGender, setManageGender] = useState("Male");
   const [manageCountry, setManageCountry] = useState("");
   const [manageGuardianName, setManageGuardianName] = useState("");
   const [manageProfession, setManageProfession] = useState("");
@@ -123,6 +142,17 @@ export default function StudentsPage() {
   const [manageStatus, setManageStatus] = useState("ACTIVE");
   const [manageBusy, setManageBusy] = useState(false);
   const [manageStatusMsg, setManageStatusMsg] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Sessions Modal states
+  const [sessionsStudent, setSessionsStudent] = useState<StudentProfile | null>(null);
+  const [sessions, setSessions] = useState<StudentSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
+  // Password reset modal states
+  const [pwdResetStudent, setPwdResetStudent] = useState<StudentProfile | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [pwdResetBusy, setPwdResetBusy] = useState(false);
+  const [pwdResetMsg, setPwdResetMsg] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Load courses and teachers list on initial render
   useEffect(() => {
@@ -140,6 +170,19 @@ export default function StudentsPage() {
     };
     loadFilterHelpers();
   }, []);
+
+  // Fetch Summary statistics
+  const loadStats = async () => {
+    setLoadingStats(true);
+    try {
+      const data = await fetchStudentStats();
+      setStats(data);
+    } catch (err) {
+      console.error("Failed to load metrics statistics:", err);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
 
   // Load students from database
   const loadStudents = async () => {
@@ -183,6 +226,10 @@ export default function StudentsPage() {
     paymentDueEnd
   ]);
 
+  useEffect(() => {
+    loadStats();
+  }, [students]);
+
   const resetPage = (fn: () => void) => {
     fn();
     setPage(1);
@@ -201,6 +248,7 @@ export default function StudentsPage() {
         firstName,
         lastName,
         phone: phone || undefined,
+        gender: gender || undefined,
         country: country || undefined,
         guardianName: guardianName || undefined,
         profession: profession || undefined,
@@ -218,6 +266,7 @@ export default function StudentsPage() {
       setEmail("");
       setPassword("");
       setPhone("");
+      setGender("Male");
       setCountry("India");
       setGuardianName("");
       setProfession("");
@@ -254,6 +303,7 @@ export default function StudentsPage() {
     setManageFirstName(student.user.firstName);
     setManageLastName(student.user.lastName);
     setManagePhone(student.phone || "");
+    setManageGender(student.gender || "Male");
     setManageCountry(student.user.country || "India");
     setManageGuardianName(student.guardianName || "");
     setManageProfession(student.profession || "");
@@ -263,6 +313,35 @@ export default function StudentsPage() {
     setManageNextPaymentDate(formatDateForInput(student.nextPaymentDate));
     setManageStatus(student.user.status);
     setManageStatusMsg(null);
+  };
+
+  // Open Sessions list
+  const openSessionsModal = (student: StudentProfile) => {
+    setSessionsStudent(student);
+    setSessions([]);
+    loadSessions(student.id);
+  };
+
+  const loadSessions = async (studentId: string) => {
+    setLoadingSessions(true);
+    try {
+      const data = await fetchStudentSessions(studentId);
+      setSessions(data);
+    } catch (err) {
+      console.error("Failed to load sessions:", err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string) => {
+    if (!sessionsStudent) return;
+    try {
+      await revokeStudentSession(sessionsStudent.id, sessionId);
+      loadSessions(sessionsStudent.id);
+    } catch (err) {
+      console.error("Failed to revoke session:", err);
+    }
   };
 
   // Update Student Form Handler
@@ -277,6 +356,7 @@ export default function StudentsPage() {
         firstName: manageFirstName,
         lastName: manageLastName,
         phone: managePhone || null,
+        gender: manageGender || null,
         country: manageCountry || null,
         guardianName: manageGuardianName || null,
         profession: manageProfession || null,
@@ -416,7 +496,161 @@ export default function StudentsPage() {
     <>
       <Topbar title="Students" subtitle={`${total} students registered across courses`} />
 
-      <div className="animate-fade-up space-y-5 p-4 sm:p-6">
+      <div className="animate-fade-up space-y-6 p-4 sm:p-6">
+        
+        {/* Advanced Overview Charts Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Card 1: Student Record (Bar Chart) */}
+          <Card className="p-5 border border-hairline bg-surface shadow-sm rounded-2xl flex flex-col justify-between h-[300px]">
+            <div>
+              <h3 className="text-sm font-bold text-ink">Student Record</h3>
+              <p className="text-[10px] text-ink-3">Distribution of student accounts by status</p>
+            </div>
+            
+            {/* Custom SVG Bar Chart */}
+            <div className="flex-1 flex items-end justify-between gap-2.5 px-2 mt-4 mb-2 h-[150px]">
+              {(() => {
+                const totalVal = stats?.total || 0;
+                const activeVal = stats?.active || 0;
+                const pendingVal = stats?.pending || 0;
+                const trialVal = stats?.trial || 0;
+                const pausedVal = stats?.paused || 0;
+
+                const maxVal = Math.max(totalVal, activeVal, pendingVal, trialVal, pausedVal, 1);
+
+                const data = [
+                  { label: "Total", value: totalVal, color: "from-[#386FA4] to-[#133C55]" },
+                  { label: "Active", value: activeVal, color: "from-good/70 to-good" },
+                  { label: "Trial", value: trialVal, color: "from-accent/70 to-accent" },
+                  { label: "Pending", value: pendingVal, color: "from-warning/70 to-warning" },
+                  { label: "Paused", value: pausedVal, color: "from-neutral/70 to-neutral" },
+                ];
+
+                return data.map((item, idx) => {
+                  const percentage = (item.value / maxVal) * 100;
+                  return (
+                    <div key={idx} className="flex-1 flex flex-col items-center group h-full justify-end">
+                      <span className="text-[10px] font-bold text-ink mb-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">{item.value}</span>
+                      <div className="w-full relative rounded-t-lg bg-surface-2 overflow-hidden flex items-end" style={{ height: `${Math.max(percentage, 8)}%` }}>
+                        <div className={`w-full h-full bg-gradient-to-t ${item.color} rounded-t-lg transition-all duration-500`} />
+                      </div>
+                      <span className="text-[10px] font-bold text-ink-3 mt-2 truncate w-full text-center">{item.label}</span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </Card>
+
+          {/* Card 2: Gender (Radial/Circular Progress Chart) */}
+          <Card className="p-5 border border-hairline bg-surface shadow-sm rounded-2xl flex flex-col justify-between h-[300px]">
+            <div>
+              <h3 className="text-sm font-bold text-ink">Gender</h3>
+              <p className="text-[10px] text-ink-3">Ratio of male to female students</p>
+            </div>
+
+            <div className="flex-1 flex items-center justify-center relative mt-2">
+              {(() => {
+                const maleCount = stats?.male || 0;
+                const femaleCount = stats?.female || 0;
+                const totalCount = maleCount + femaleCount || 1;
+                const malePct = Math.round((maleCount / totalCount) * 100);
+                const femalePct = Math.round((femaleCount / totalCount) * 100);
+
+                // SVG dimensions
+                const radius = 50;
+                const circumference = 2 * Math.PI * radius;
+                const strokeDashoffset = circumference - (malePct / 100) * circumference;
+
+                return (
+                  <div className="flex items-center gap-6 w-full px-2">
+                    {/* Ring Container */}
+                    <div className="relative size-28 flex items-center justify-center shrink-0">
+                      <svg className="size-full -rotate-90">
+                        {/* Background track circle */}
+                        <circle
+                          cx="56"
+                          cy="56"
+                          r={radius}
+                          className="stroke-surface-3 fill-none"
+                          strokeWidth="10"
+                        />
+                        {/* Male arc (Yale Blue accent) */}
+                        <circle
+                          cx="56"
+                          cy="56"
+                          r={radius}
+                          className="stroke-accent fill-none transition-all duration-1000 ease-out"
+                          strokeWidth="10"
+                          strokeDasharray={circumference}
+                          strokeDashoffset={strokeDashoffset}
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      {/* Centered % */}
+                      <div className="absolute flex flex-col items-center justify-center text-center">
+                        <span className="text-lg font-black text-ink">{malePct}%</span>
+                        <span className="text-[8px] font-bold text-ink-3 uppercase tracking-wider">Male</span>
+                      </div>
+                    </div>
+
+                    {/* Stats List */}
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="size-2.5 rounded-full bg-accent" />
+                          <span className="font-bold text-ink-2">Male</span>
+                        </div>
+                        <span className="tnum font-extrabold text-ink">{maleCount} ({malePct}%)</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="size-2.5 rounded-full bg-surface-3" />
+                          <span className="font-bold text-ink-2">Female</span>
+                        </div>
+                        <span className="tnum font-extrabold text-ink">{femaleCount} ({femalePct}%)</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </Card>
+
+          {/* Card 3: Countries Leaderboard */}
+          <Card className="p-5 border border-hairline bg-surface shadow-sm rounded-2xl flex flex-col justify-between h-[300px]">
+            <div>
+              <h3 className="text-sm font-bold text-ink">Countries</h3>
+              <p className="text-[10px] text-ink-3">Top student geographical distributions</p>
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center space-y-3 mt-4">
+              {stats?.countries && stats.countries.length > 0 ? (
+                stats.countries.map((c, idx) => {
+                  return (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <span className="text-ink-2 flex items-center gap-2">
+                          <span className="grid size-5 place-items-center rounded bg-surface-2 text-[10px]">📍</span>
+                          {c.country}
+                        </span>
+                        <span className="tnum text-ink">{c.count}</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+                        <div className="h-full bg-accent rounded-full transition-all duration-700" style={{ width: `${(c.count / (stats.total || 1)) * 100}%` }} />
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-6 text-xs font-bold text-ink-3">No location data available</div>
+              )}
+            </div>
+          </Card>
+
+        </div>
+
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3">
           <label className="relative min-w-56 flex-1 sm:max-w-xs">
@@ -623,91 +857,148 @@ export default function StudentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-hairline bg-surface-2 text-left">
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">ID</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Mobile</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Profession</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Fees</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Joining Date</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Last Payment</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Next Payment</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Status</th>
-                    <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3 text-right">Actions</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Name</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student ID</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Date of Joining</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Teacher Name</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course Name</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Contact</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Scheduled Classes</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Level</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Status</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((row) => {
                     const firstEnrollment = row.enrollments?.[0];
                     const courseName = firstEnrollment ? firstEnrollment.course.title : "Not Enrolled";
+                    const teacherName = firstEnrollment ? `${firstEnrollment.teacher.user.firstName} ${firstEnrollment.teacher.user.lastName}` : "Not Assigned";
+                    const packageName = firstEnrollment?.package?.name || "Simple";
+                    const classesCount = firstEnrollment?.package?.classesPerMonth || 17;
                     const statusText = row.user.status;
 
                     return (
                       <tr
                         key={row.id}
-                        className="border-b border-hairline last:border-0 hover:bg-surface-2/30 transition-colors duration-150"
+                        className="border-b border-hairline last:border-0 hover:bg-surface-2/30 transition-colors duration-150 relative"
                       >
                         {/* Student Name */}
-                        <td className="px-5 py-3.5">
+                        <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent via-[#386FA4] to-[#59A5D8] text-[11px] font-bold text-white shadow-sm shadow-accent/10">
                               {initials(`${row.user.firstName} ${row.user.lastName}`)}
                             </span>
                             <div className="min-w-0">
-                              <p className="truncate font-semibold text-ink text-sm">{row.user.firstName} {row.user.lastName}</p>
+                              <p className="truncate font-semibold text-ink text-sm flex items-center gap-1.5">
+                                {row.user.firstName} {row.user.lastName}
+                                {row.gender && (
+                                  <span className="text-[10px] px-1.5 py-0.2 bg-surface-3 rounded-full text-ink-2 font-black uppercase">
+                                    {row.gender.charAt(0)}
+                                  </span>
+                                )}
+                              </p>
                               <p className="truncate text-xs text-ink-3">{row.user.email}</p>
                             </div>
                           </div>
                         </td>
 
                         {/* Student ID */}
-                        <td className="tnum px-5 py-3.5 text-xs font-bold text-ink-3">{row.studentCode}</td>
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-3">{row.studentCode}</td>
 
-                        {/* Mobile Phone Number */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{row.phone || "—"}</td>
-
-                        {/* Profession */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{row.profession || "—"}</td>
-
-                        {/* Course Name */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{courseName}</td>
-
-                        {/* Fees Amount */}
-                        <td className="tnum px-5 py-3.5 text-xs font-bold text-ink">
-                          {row.fees !== null ? `₹${Number(row.fees).toLocaleString()}` : "—"}
+                        {/* Package */}
+                        <td className="px-4 py-3 text-xs text-ink font-semibold">
+                          <span className="px-2.5 py-1 bg-accent/5 border border-accent/10 rounded-xl text-accent font-black">
+                            {packageName}
+                          </span>
                         </td>
 
                         {/* Joining date */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{formatDateLabel(row.joiningDate)}</td>
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{formatDateLabel(row.joiningDate)}</td>
 
-                        {/* Last payment date */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{formatDateLabel(row.lastPaymentDate)}</td>
+                        {/* Teacher Name */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{teacherName}</td>
 
-                        {/* Next payment date */}
-                        <td className="px-5 py-3.5 text-xs text-ink-2 font-medium">{formatDateLabel(row.nextPaymentDate)}</td>
+                        {/* Course Name */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{courseName}</td>
+
+                        {/* Mobile Phone Number */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.phone || "—"}</td>
+
+                        {/* Scheduled Classes */}
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink">{classesCount} Classes</td>
+
+                        {/* Level (mocked fallback level 1 as shown in user reference) */}
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-2">Level 1</td>
 
                         {/* Account Status */}
-                        <td className="px-5 py-3.5">
+                        <td className="px-4 py-3">
                           <Badge tone={statusTone[statusText] || "neutral"}>{statusText}</Badge>
                         </td>
 
-                        {/* Action Buttons */}
-                        <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
+                        {/* Actions Dropdown Menu */}
+                        <td className="px-4 py-3 text-right">
+                          <div className="relative inline-block text-left">
                             <button
-                              onClick={() => openManageModal(row)}
-                              className="size-7.5 bg-surface border border-hairline rounded-lg text-ink-2 hover:bg-surface-2 hover:text-accent flex items-center justify-center transition-colors cursor-pointer"
-                              aria-label="Edit Profile"
+                              onClick={() => setActiveMenuId(activeMenuId === row.id ? null : row.id)}
+                              className="size-8 rounded-lg hover:bg-surface-3 flex items-center justify-center text-ink-2 cursor-pointer transition-colors"
                             >
-                              <Edit2 className="size-3.5" />
+                              <MoreVertical className="size-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteStudent(row)}
-                              className="size-7.5 bg-surface border border-hairline rounded-lg text-critical hover:bg-critical/5 flex items-center justify-center transition-colors cursor-pointer"
-                              aria-label="Delete Profile"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
+
+                            {/* Dropdown Options */}
+                            {activeMenuId === row.id && (
+                              <>
+                                {/* Overlay to close dropdown */}
+                                <div className="fixed inset-0 z-10" onClick={() => setActiveMenuId(null)} />
+                                <div className="absolute right-0 mt-1.5 w-44 rounded-xl border border-hairline bg-surface shadow-lg z-20 py-1 animate-fade-in text-left">
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      openManageModal(row);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <Edit2 className="size-3.5 text-accent" />
+                                    Edit Profile
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      setPwdResetStudent(row);
+                                      setNewPassword("");
+                                      setPwdResetMsg(null);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <Key className="size-3.5 text-accent" />
+                                    Change Password
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      openSessionsModal(row);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <Laptop className="size-3.5 text-accent" />
+                                    Login History
+                                  </button>
+                                  <div className="border-t border-hairline my-1" />
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      handleDeleteStudent(row);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-critical hover:bg-critical/5 transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                    Delete Student
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -863,7 +1154,7 @@ export default function StudentsPage() {
                 </div>
               </div>
 
-              {/* Mobile and Country */}
+              {/* Mobile and Gender */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Mobile Number</label>
@@ -879,6 +1170,22 @@ export default function StudentsPage() {
                   </div>
                 </div>
                 <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Gender</label>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Country and Profession */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Country</label>
                   <div className="relative">
                     <Globe className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
@@ -891,10 +1198,6 @@ export default function StudentsPage() {
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* Profession and Fees */}
-              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Profession / Role</label>
                   <div className="relative">
@@ -908,6 +1211,10 @@ export default function StudentsPage() {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Fees & Guardian Name */}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Fees Amount (₹)</label>
                   <div className="relative">
@@ -917,6 +1224,19 @@ export default function StudentsPage() {
                       value={fees}
                       onChange={(e) => setFees(e.target.value === "" ? "" : Number(e.target.value))}
                       placeholder="5000"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Guardian Name</label>
+                  <div className="relative">
+                    <User className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                    <input
+                      type="text"
+                      value={guardianName}
+                      onChange={(e) => setGuardianName(e.target.value)}
+                      placeholder="Parent/Guardian Full Name"
                       className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
                   </div>
@@ -951,32 +1271,17 @@ export default function StudentsPage() {
                 </div>
               </div>
 
-              {/* Next Payment & Guardian */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Next Payment Date</label>
-                  <div className="relative">
-                    <Calendar className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
-                    <input
-                      type="date"
-                      value={nextPaymentDate}
-                      onChange={(e) => setNextPaymentDate(e.target.value)}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Guardian Name</label>
-                  <div className="relative">
-                    <User className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
-                    <input
-                      type="text"
-                      value={guardianName}
-                      onChange={(e) => setGuardianName(e.target.value)}
-                      placeholder="Parent/Guardian Full Name"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
-                    />
-                  </div>
+              {/* Next Payment Date */}
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Next Payment Date</label>
+                <div className="relative">
+                  <Calendar className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                  <input
+                    type="date"
+                    value={nextPaymentDate}
+                    onChange={(e) => setNextPaymentDate(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                  />
                 </div>
               </div>
 
@@ -1005,7 +1310,7 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {/* Advanced Manage Student (Edit/Delete) Modal */}
+      {/* Advanced Manage Student Modal */}
       {selectedStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-surface border border-hairline w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-scale-up">
@@ -1090,20 +1395,34 @@ export default function StudentsPage() {
                 </div>
               </div>
 
-              {/* Status Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Account Status</label>
-                <select
-                  value={manageStatus}
-                  onChange={(e) => setManageStatus(e.target.value)}
-                  className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all duration-200"
-                >
-                  <option value="ACTIVE">ACTIVE (Enrolled & Authorized)</option>
-                  <option value="INACTIVE">INACTIVE (Access Suspended)</option>
-                  <option value="PENDING">PENDING (Approval Awaiting)</option>
-                  <option value="TRIAL">TRIAL (Evaluation Period)</option>
-                  <option value="PAUSED">PAUSED (Temporarily Paused)</option>
-                </select>
+              {/* Status & Gender */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Account Status</label>
+                  <select
+                    value={manageStatus}
+                    onChange={(e) => setManageStatus(e.target.value)}
+                    className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all duration-200"
+                  >
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="INACTIVE">INACTIVE</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="TRIAL">TRIAL</option>
+                    <option value="PAUSED">PAUSED</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Gender</label>
+                  <select
+                    value={manageGender}
+                    onChange={(e) => setManageGender(e.target.value)}
+                    className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all duration-200"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
               </div>
 
               {/* Mobile and Country */}
@@ -1255,6 +1574,179 @@ export default function StudentsPage() {
                 </div>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Active Login Sessions Modal */}
+      {sessionsStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-surface border border-hairline w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-scale-up">
+            <div className="flex items-center justify-between border-b border-hairline px-6 py-4.5">
+              <div>
+                <h3 className="font-bold text-base text-ink flex items-center gap-2">
+                  <Laptop className="size-4.5 text-accent" />
+                  Active Sessions & Location
+                </h3>
+                <p className="text-xs text-ink-3 mt-0.5">
+                  Live logins for {sessionsStudent.user.firstName} {sessionsStudent.user.lastName}
+                </p>
+              </div>
+              <button 
+                onClick={() => setSessionsStudent(null)}
+                className="size-8 rounded-full bg-surface-2 hover:bg-surface-3 transition-colors grid place-items-center text-ink-2"
+                aria-label="Close"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+              {loadingSessions ? (
+                <div className="flex justify-center items-center py-8 text-xs font-bold text-ink-3">
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                  Fetching sessions...
+                </div>
+              ) : sessions.length > 0 ? (
+                <div className="space-y-3">
+                  {sessions.map((s) => (
+                    <div key={s.id} className="flex items-start justify-between p-3.5 rounded-2xl border border-hairline bg-surface-2/40 hover:bg-surface-2/70 transition-colors">
+                      <div className="flex gap-3 min-w-0">
+                        <div className="grid size-9.5 place-items-center rounded-xl bg-accent/10 text-accent shrink-0">
+                          <Laptop className="size-4.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-ink truncate max-w-[200px]" title={s.userAgent || "Unknown Device"}>
+                            {s.userAgent || "Unknown Device"}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-2 mt-1 text-[10px] font-semibold text-ink-3">
+                            <span className="flex items-center gap-1">
+                              <MapPin className="size-3 text-accent" />
+                              {s.ipAddress || "Unknown IP"}
+                            </span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="size-3 text-accent" />
+                              {new Date(s.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleRevokeSession(s.id)}
+                        className="text-xs font-bold text-critical hover:underline bg-critical/5 px-2.5 py-1 rounded-lg shrink-0 cursor-pointer"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-xs font-bold text-ink-3">
+                  No active login sessions found for this student.
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-hairline px-6 py-4.5 bg-surface-2/40">
+              <Button
+                variant="ghost"
+                onClick={() => setSessionsStudent(null)}
+                className="h-10 px-4 font-bold text-ink-2 hover:bg-surface-2 rounded-xl"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Modal */}
+      {pwdResetStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-surface border border-hairline w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl animate-scale-up">
+            <div className="flex items-center justify-between border-b border-hairline px-6 py-4.5">
+              <div>
+                <h3 className="font-bold text-base text-ink flex items-center gap-2">
+                  <Key className="size-4.5 text-accent" />
+                  Reset Password
+                </h3>
+                <p className="text-xs text-ink-3 mt-0.5">
+                  Change password for {pwdResetStudent.user.firstName}
+                </p>
+              </div>
+              <button 
+                onClick={() => setPwdResetStudent(null)}
+                className="size-8 rounded-full bg-surface-2 hover:bg-surface-3 transition-colors grid place-items-center text-ink-2"
+                aria-label="Close"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setPwdResetBusy(true);
+              setPwdResetMsg(null);
+              try {
+                await updateStudent(pwdResetStudent.id, {
+                  password: newPassword
+                });
+                setPwdResetMsg({ type: "success", message: "Password updated successfully!" });
+                setNewPassword("");
+                setTimeout(() => setPwdResetStudent(null), 1500);
+              } catch (err) {
+                setPwdResetMsg({ type: "error", message: err instanceof ApiError ? err.message : "Reset failed." });
+              } finally {
+                setPwdResetBusy(false);
+              }
+            }} className="p-6 space-y-4">
+              
+              {pwdResetMsg && (
+                <div className={`flex items-start gap-2.5 p-3 rounded-xl border text-xs font-semibold ${
+                  pwdResetMsg.type === "success" ? "bg-good/5 border-good/10 text-good-ink" : "bg-critical/5 border-critical/10 text-critical"
+                }`}>
+                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                  {pwdResetMsg.message}
+                </div>
+              )}
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">New Password</label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-hairline pt-4 bg-surface">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setPwdResetStudent(null)}
+                  className="h-10 px-4 font-bold text-ink-2 hover:bg-surface-2 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={pwdResetBusy}
+                  className="h-10 px-6 font-bold text-white bg-accent hover:bg-accent-hover rounded-xl"
+                >
+                  {pwdResetBusy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
+                  Reset
+                </Button>
+              </div>
             </form>
           </div>
         </div>

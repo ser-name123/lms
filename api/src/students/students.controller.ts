@@ -43,6 +43,12 @@ export class StudentsController {
     return this.students.getTeachersList();
   }
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Get student dashboard stats' })
+  getStats() {
+    return this.students.getStats();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'One student with their enrolments' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -69,5 +75,22 @@ export class StudentsController {
   @ApiOperation({ summary: 'Delete a student and their account' })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.students.remove(id);
+  }
+
+  @Get(':id/sessions')
+  @ApiOperation({ summary: 'Get active login sessions for a student' })
+  getSessions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.students.getSessions(id);
+  }
+
+  @Delete(':id/sessions/:sessionId')
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Revoke a student login session' })
+  revokeSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+  ) {
+    return this.students.revokeSession(id, sessionId);
   }
 }
