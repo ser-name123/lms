@@ -10,7 +10,7 @@ import { useSettingsStore } from "@/store/settings";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav } = useUI();
+  const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav, theme } = useUI();
   const { settings } = useSettingsStore();
   const pathname = usePathname();
 
@@ -36,7 +36,9 @@ export function Sidebar() {
       >
         {/* Brand */}
         <div className="flex h-16 items-center gap-2.5 border-b border-hairline px-4">
-          {settings?.logo ? (
+          {theme === "dark" && settings?.logoDark ? (
+            <img src={settings.logoDark} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
+          ) : settings?.logo ? (
             <img src={settings.logo} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
           ) : (
             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-[#5b73e8] to-[#886cff] shadow-md shadow-accent/20 text-white animate-fade-in">
@@ -48,7 +50,9 @@ export function Sidebar() {
               <p className="truncate text-base font-extrabold tracking-widest text-[#5b73e8] uppercase" style={{ color: "var(--accent)" }}>
                 {settings?.websiteName || "Edumin"}
               </p>
-              <p className="truncate text-[10px] font-bold text-ink-3 uppercase tracking-wider">Admin console</p>
+              <p className="truncate text-[10px] font-bold text-ink-3 uppercase tracking-wider">
+                {settings?.adminConsoleTitle || "Admin console"}
+              </p>
             </div>
           )}
           <button

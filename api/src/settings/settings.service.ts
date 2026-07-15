@@ -9,6 +9,14 @@ export class SystemSettingsDto {
 
   @IsOptional()
   @IsString()
+  logoDark: string | null;
+
+  @IsOptional()
+  @IsString()
+  adminConsoleTitle: string;
+
+  @IsOptional()
+  @IsString()
   favicon: string | null;
 
   @IsString()
@@ -121,6 +129,8 @@ export class SettingsService {
         key: {
           in: [
             'WEBSITE_LOGO', 
+            'WEBSITE_LOGO_DARK',
+            'ADMIN_CONSOLE_TITLE',
             'WEBSITE_FAVICON', 
             'WEBSITE_THEME', 
             'GOOGLE_TAGS', 
@@ -206,6 +216,8 @@ export class SettingsService {
 
     return {
       logo: settingsMap.get('WEBSITE_LOGO') || null,
+      logoDark: settingsMap.get('WEBSITE_LOGO_DARK') || null,
+      adminConsoleTitle: settingsMap.get('ADMIN_CONSOLE_TITLE') || 'Admin console',
       favicon: settingsMap.get('WEBSITE_FAVICON') || null,
       websiteName: settingsMap.get('WEBSITE_NAME') || 'Edumin LMS',
       defaultTheme,
@@ -278,6 +290,8 @@ export class SettingsService {
 
     const updates = [
       { key: 'WEBSITE_LOGO', value: dto.logo || '' },
+      { key: 'WEBSITE_LOGO_DARK', value: dto.logoDark || '' },
+      { key: 'ADMIN_CONSOLE_TITLE', value: dto.adminConsoleTitle || 'Admin console' },
       { key: 'WEBSITE_FAVICON', value: dto.favicon || '' },
       { key: 'WEBSITE_THEME', value: JSON.stringify(themeObj) },
       { key: 'GOOGLE_TAGS', value: dto.googleTags || '' },

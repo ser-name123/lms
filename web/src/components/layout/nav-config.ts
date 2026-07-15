@@ -31,6 +31,7 @@ export const navGroups: NavGroup[] = [
   {
     label: "Academics",
     items: [
+      { label: "Trial Classes", href: "/evaluation", icon: ClipboardList },
       { label: "Students", href: "/students", icon: Users },
       { label: "Teachers", href: "/teachers", icon: GraduationCap },
       { label: "Courses", href: "/courses", icon: BookOpen },

@@ -121,6 +121,8 @@ export const saveSmtpConfig = (config: { host: string; port: number; user: strin
 
 export type SystemSettings = {
   logo: string | null;
+  logoDark: string | null;
+  adminConsoleTitle: string | null;
   favicon: string | null;
   websiteName: string;
   defaultTheme: string;

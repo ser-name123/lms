@@ -91,8 +91,8 @@ export function ImageCropperModal({
     const scaleY = img.naturalHeight / rect.height;
 
     // Crop box coordinates mapped back onto the original source image
-    const sourceX = (viewportLeft - rect.left) * scaleX;
-    const sourceY = (viewportTop - rect.top) * scaleY;
+    const sourceX = (containerRect.left + viewportLeft - rect.left) * scaleX;
+    const sourceY = (containerRect.top + viewportTop - rect.top) * scaleY;
     const sourceWidth = viewportWidth * scaleX;
     const sourceHeight = viewportHeight * scaleY;
 

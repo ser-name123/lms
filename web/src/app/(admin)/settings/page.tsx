@@ -30,6 +30,8 @@ export default function SettingsPage() {
   // Brand states
   const [websiteName, setWebsiteName] = useState("Edumin LMS");
   const [logo, setLogo] = useState<string | null>(null);
+  const [logoDark, setLogoDark] = useState<string | null>(null);
+  const [adminConsoleTitle, setAdminConsoleTitle] = useState("Admin console");
   const [favicon, setFavicon] = useState<string | null>(null);
   const [defaultTheme, setDefaultTheme] = useState("light");
   const [googleTags, setGoogleTags] = useState("");
@@ -40,7 +42,7 @@ export default function SettingsPage() {
 
   // Cropper States
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
-  const [cropperTarget, setCropperTarget] = useState<"logo" | "favicon" | "loader" | null>(null);
+  const [cropperTarget, setCropperTarget] = useState<"logo" | "logoDark" | "favicon" | "loader" | null>(null);
 
   // Light Mode Color States
   const [primaryColor, setPrimaryColor] = useState("#5b73e8");
@@ -92,6 +94,7 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const logoDarkInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
   const loaderInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,6 +106,8 @@ export default function SettingsPage() {
         const settings = await fetchSystemSettings();
         setWebsiteName(settings.websiteName);
         setLogo(settings.logo);
+        setLogoDark(settings.logoDark);
+        setAdminConsoleTitle(settings.adminConsoleTitle ?? "Admin console");
         setFavicon(settings.favicon);
         setDefaultTheme(settings.defaultTheme);
         setGoogleTags(settings.googleTags);
@@ -189,6 +194,23 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
   };
 
+  const handleLogoDarkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setStatus({ type: "error", message: "Logo file size exceeds 2MB limit." });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropperSrc(reader.result as string);
+      setCropperTarget("logoDark");
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Handle Favicon Upload (Base64 encoding)
   const handleFaviconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -266,6 +288,8 @@ export default function SettingsPage() {
 
     const payload = {
       logo,
+      logoDark,
+      adminConsoleTitle,
       favicon,
       websiteName,
       defaultTheme,
@@ -477,23 +501,37 @@ export default function SettingsPage() {
                         <p className="text-xs text-ink-3 mt-0.5">Customize your brand name, administrative logo image, and browser favicon</p>
                       </div>
 
-                      {/* Website Name */}
-                      <div>
-                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Website Name</label>
-                        <input
-                          type="text"
-                          required
-                          value={websiteName}
-                          onChange={(e) => setWebsiteName(e.target.value)}
-                          placeholder="Edumin LMS"
-                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
-                        />
+                      {/* Website Name & Admin Console Label */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Website Name</label>
+                          <input
+                            type="text"
+                            required
+                            value={websiteName}
+                            onChange={(e) => setWebsiteName(e.target.value)}
+                            placeholder="Edumin LMS"
+                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Admin Console Label</label>
+                          <input
+                            type="text"
+                            required
+                            value={adminConsoleTitle}
+                            onChange={(e) => setAdminConsoleTitle(e.target.value)}
+                            placeholder="Admin console"
+                            className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                          />
+                        </div>
                       </div>
 
                       {/* Logo Upload */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                        {/* Light Logo */}
                         <div className="border border-hairline/80 p-5 rounded-2xl bg-surface shadow-sm space-y-4">
-                          <span className="block text-xs font-bold uppercase tracking-wider text-ink-3">Website Logo</span>
+                          <span className="block text-xs font-bold uppercase tracking-wider text-ink-3">Website Logo (Light)</span>
                           <div className="h-32 border border-dashed border-hairline rounded-xl grid place-items-center bg-surface-2/40 overflow-hidden relative group">
                             {logo ? (
                               <>
@@ -525,6 +563,47 @@ export default function SettingsPage() {
                           <Button
                             type="button"
                             onClick={() => logoInputRef.current?.click()}
+                            className="w-full h-10 border border-hairline hover:bg-surface-2 rounded-xl text-ink-2 font-bold text-xs"
+                          >
+                            <Upload className="size-3.5 mr-1.5" />
+                            Upload Logo (2MB max)
+                          </Button>
+                        </div>
+
+                        {/* Dark Logo */}
+                        <div className="border border-hairline/80 p-5 rounded-2xl bg-surface shadow-sm space-y-4">
+                          <span className="block text-xs font-bold uppercase tracking-wider text-ink-3">Website Logo (Dark Theme)</span>
+                          <div className="h-32 border border-dashed border-hairline rounded-xl grid place-items-center bg-zinc-950 overflow-hidden relative group">
+                            {logoDark ? (
+                              <>
+                                <img src={logoDark} alt="Dark Logo Preview" className="h-full w-full object-contain p-2" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setLogoDark(null)}
+                                    className="p-2 bg-critical text-white rounded-lg hover:scale-105 transition-transform"
+                                  >
+                                    <Trash2 className="size-4" />
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-center text-zinc-400 space-y-1">
+                                <ImageIcon className="size-8 mx-auto stroke-1 text-zinc-500" />
+                                <span className="block text-xs">No Logo Uploaded</span>
+                              </div>
+                            )}
+                          </div>
+                          <input
+                            type="file"
+                            ref={logoDarkInputRef}
+                            onChange={handleLogoDarkUpload}
+                            accept="image/*"
+                            className="hidden"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => logoDarkInputRef.current?.click()}
                             className="w-full h-10 border border-hairline hover:bg-surface-2 rounded-xl text-ink-2 font-bold text-xs"
                           >
                             <Upload className="size-3.5 mr-1.5" />
@@ -1188,9 +1267,10 @@ export default function SettingsPage() {
       {cropperSrc && cropperTarget && (
         <ImageCropperModal
           imageSrc={cropperSrc}
-          aspectRatio={cropperTarget === "logo" ? 3.5 / 1 : 1}
+          aspectRatio={cropperTarget === "logo" || cropperTarget === "logoDark" ? 3.5 / 1 : 1}
           onCrop={(cropped) => {
             if (cropperTarget === "logo") setLogo(cropped);
+            if (cropperTarget === "logoDark") setLogoDark(cropped);
             if (cropperTarget === "favicon") setFavicon(cropped);
             if (cropperTarget === "loader") setLoaderUrl(cropped);
             setCropperSrc(null);
@@ -1198,6 +1278,7 @@ export default function SettingsPage() {
           }}
           onSkip={() => {
             if (cropperTarget === "logo") setLogo(cropperSrc);
+            if (cropperTarget === "logoDark") setLogoDark(cropperSrc);
             if (cropperTarget === "favicon") setFavicon(cropperSrc);
             if (cropperTarget === "loader") setLoaderUrl(cropperSrc);
             setCropperSrc(null);
