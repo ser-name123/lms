@@ -11,16 +11,18 @@ import {
   AlertCircle, 
   Loader2, 
   Upload,
-  X
+  X,
+  Shield
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/store/auth";
-import { updateProfile, fetchMe, fetchSessions, deleteSession, revokeSession, ApiError } from "@/lib/api";
+import { updateProfile, fetchMe, fetchSessions, deleteSession, revokeSession, fetchAdmins, createAdmin, deleteAdmin, ApiError } from "@/lib/api";
 import { initials } from "@/lib/utils";
 import { ImageCropperModal } from "@/components/image-cropper";
 
-type Tab = "profile" | "security";
+type Tab = "profile" | "security" | "admins";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -45,6 +47,16 @@ export default function ProfilePage() {
   const [sessions, setSessions] = useState<{ id: string; userAgent: string | null; ipAddress: string | null; createdAt: string; isCurrent: boolean }[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
 
+  // Admin Management States
+  const [adminsList, setAdminsList] = useState<{ id: string; email: string; firstName: string; lastName: string; status: string; createdAt: string }[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+
+  // New Admin Form States
+  const [newAdminFirstName, setNewAdminFirstName] = useState("");
+  const [newAdminLastName, setNewAdminLastName] = useState("");
+  const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+
   // Custom Image Cropper States
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
 
@@ -61,9 +73,27 @@ export default function ProfilePage() {
     }
   };
 
+  const loadAdmins = async () => {
+    setLoadingAdmins(true);
+    try {
+      const list = await fetchAdmins();
+      setAdminsList(list);
+    } catch (err) {
+      console.error("Failed to load admins:", err);
+      setStatus({ 
+        type: "error", 
+        message: err instanceof ApiError ? err.message : "Failed to load admin list." 
+      });
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "security") {
       loadActiveSessions();
+    } else if (activeTab === "admins") {
+      loadAdmins();
     }
   }, [activeTab]);
 
@@ -232,7 +262,60 @@ export default function ProfilePage() {
     return { browser, os, device };
   };
 
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setStatus(null);
+
+    try {
+      await createAdmin({
+        firstName: newAdminFirstName,
+        lastName: newAdminLastName,
+        email: newAdminEmail,
+        password: newAdminPassword
+      });
+      
+      setNewAdminFirstName("");
+      setNewAdminLastName("");
+      setNewAdminEmail("");
+      setNewAdminPassword("");
+
+      await loadAdmins();
+      setStatus({ type: "success", message: "New administrator created successfully!" });
+    } catch (err) {
+      setStatus({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to create administrator."
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (id: string, email: string) => {
+    if (!window.confirm(`Are you sure you want to delete administrator account: ${email}?`)) {
+      return;
+    }
+    
+    setBusy(true);
+    setStatus(null);
+
+    try {
+      await deleteAdmin(id);
+      await loadAdmins();
+      setStatus({ type: "success", message: "Administrator deleted successfully." });
+    } catch (err) {
+      setStatus({
+        type: "error",
+        message: err instanceof ApiError ? err.message : "Failed to delete administrator."
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const name = `${user.firstName} ${user.lastName}`;
+  const isMasterAdmin = user?.email === "objectsquarerajan@gmail.com";
 
   return (
     <>
@@ -301,7 +384,7 @@ export default function ProfilePage() {
             <div className="border border-hairline/80 rounded-2xl bg-surface p-1.5 shadow-sm space-y-1">
               <button
                 onClick={() => { setActiveTab("profile"); setStatus(null); }}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
                   activeTab === "profile" 
                     ? "bg-[#5b73e8] text-white" 
                     : "text-ink-2 hover:bg-surface-2"
@@ -312,7 +395,7 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={() => { setActiveTab("security"); setStatus(null); }}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
                   activeTab === "security" 
                     ? "bg-[#5b73e8] text-white" 
                     : "text-ink-2 hover:bg-surface-2"
@@ -321,6 +404,19 @@ export default function ProfilePage() {
                 <Key className="size-4.5" />
                 Security
               </button>
+              {isMasterAdmin && (
+                <button
+                  onClick={() => { setActiveTab("admins"); setStatus(null); }}
+                  className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 cursor-pointer ${
+                    activeTab === "admins" 
+                      ? "bg-[#5b73e8] text-white" 
+                      : "text-ink-2 hover:bg-surface-2"
+                  }`}
+                >
+                  <Shield className="size-4.5" />
+                  Manage Admins
+                </button>
+              )}
             </div>
 
           </div>
@@ -493,6 +589,147 @@ export default function ProfilePage() {
                         );
                       })
                     )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {activeTab === "admins" && isMasterAdmin && (
+              <div className="space-y-6 animate-fade-in">
+                
+                {/* Add Admin Form */}
+                <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden">
+                  <div className="border-b border-hairline px-6 py-5">
+                    <h2 className="font-bold text-lg text-ink">Add New Administrator</h2>
+                    <p className="text-xs text-ink-3 mt-0.5">Create a new administrative account with dashboard access rights</p>
+                  </div>
+                  <form onSubmit={handleCreateAdmin} className="p-6 space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">First Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={newAdminFirstName}
+                          onChange={(e) => setNewAdminFirstName(e.target.value)}
+                          placeholder="e.g. John"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Last Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={newAdminLastName}
+                          onChange={(e) => setNewAdminLastName(e.target.value)}
+                          placeholder="e.g. Doe"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Email Address</label>
+                        <input
+                          type="email"
+                          required
+                          value={newAdminEmail}
+                          onChange={(e) => setNewAdminEmail(e.target.value)}
+                          placeholder="e.g. john.doe@lms.local"
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Password</label>
+                        <input
+                          type="password"
+                          required
+                          placeholder="Min. 8 characters"
+                          value={newAdminPassword}
+                          onChange={(e) => setNewAdminPassword(e.target.value)}
+                          className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-[#5b73e8] focus:ring-1 focus:ring-[#5b73e8] focus:shadow-[0_0_0_4px_rgba(91,115,232,0.12)] transition-all duration-200"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={busy}
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-[#5b73e8] to-[#4860e6] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(91,115,232,0.25)] transition-all duration-300 cursor-pointer"
+                      >
+                        {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
+                        Create Administrator
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Admins Table */}
+                <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden">
+                  <div className="border-b border-hairline px-6 py-5">
+                    <h2 className="font-bold text-lg text-ink">Administrator Accounts</h2>
+                    <p className="text-xs text-ink-3 mt-0.5">List of authorized administrative staff</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-hairline text-left text-[11px] font-bold uppercase tracking-wider text-ink-3 bg-surface-2/20">
+                          <th className="px-6 py-4">Name</th>
+                          <th className="px-6 py-4">Email</th>
+                          <th className="px-6 py-4">Status</th>
+                          <th className="px-6 py-4">Created At</th>
+                          <th className="px-6 py-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-hairline">
+                        {loadingAdmins ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-8 text-center text-ink-3 font-semibold">
+                              <Loader2 className="size-4 animate-spin inline mr-1.5" />
+                              Loading admin accounts...
+                            </td>
+                          </tr>
+                        ) : adminsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-8 text-center text-ink-3 font-semibold">
+                              No admin accounts found.
+                            </td>
+                          </tr>
+                        ) : (
+                          adminsList.map((admin) => {
+                            const isSelf = admin.id === user.id;
+                            const isMaster = admin.email === "objectsquarerajan@gmail.com";
+                            return (
+                              <tr key={admin.id} className="hover:bg-surface-2/30 transition-colors">
+                                <td className="px-6 py-4.5 font-bold text-ink">{admin.firstName} {admin.lastName}</td>
+                                <td className="px-6 py-4.5 font-semibold text-ink-2">{admin.email}</td>
+                                <td className="px-6 py-4.5">
+                                  <Badge className="bg-green-500/10 text-green-500 hover:bg-green-500/10 border-0 font-extrabold text-[10px]">{admin.status}</Badge>
+                                </td>
+                                <td className="px-6 py-4.5 text-xs font-semibold text-ink-3">{new Date(admin.createdAt).toLocaleDateString()}</td>
+                                <td className="px-6 py-4.5 text-right">
+                                  {isMaster ? (
+                                    <span className="text-3xs uppercase font-extrabold px-2 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">Master Admin</span>
+                                  ) : isSelf ? (
+                                    <span className="text-3xs uppercase font-extrabold px-2 py-0.5 rounded bg-surface-3 text-ink-3">Current User</span>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleDeleteAdmin(admin.id, admin.email)}
+                                      className="text-xs text-critical hover:underline font-bold cursor-pointer"
+                                      type="button"
+                                    >
+                                      Delete Account
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 

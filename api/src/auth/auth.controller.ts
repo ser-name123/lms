@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { AuthService } from './auth.service';
 import { CurrentUser, Public, type AuthUser } from './decorators';
-import { LoginDto, RefreshDto, TokensDto, UpdateProfileDto, VerifyOtpDto } from './dto';
+import { LoginDto, RefreshDto, TokensDto, UpdateProfileDto, VerifyOtpDto, CreateAdminDto } from './dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -74,5 +74,26 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke a specific session' })
   revokeSession(@CurrentUser() user: AuthUser, @Param('id') sessionId: string) {
     return this.auth.revokeSession(user.id, sessionId);
+  }
+
+  @Get('admins')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all administrators (Master admin only)' })
+  listAdmins(@CurrentUser() user: AuthUser) {
+    return this.auth.listAdmins(user.id);
+  }
+
+  @Post('admins')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a new administrator (Master admin only)' })
+  createAdmin(@CurrentUser() user: AuthUser, @Body() dto: CreateAdminDto) {
+    return this.auth.createAdmin(user.id, dto);
+  }
+
+  @Delete('admins/:id')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete an administrator (Master admin only)' })
+  deleteAdmin(@CurrentUser() user: AuthUser, @Param('id') targetId: string) {
+    return this.auth.deleteAdmin(user.id, targetId);
   }
 }

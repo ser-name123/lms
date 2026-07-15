@@ -1,12 +1,12 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger, ForbiddenException, ConflictException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { UserStatus } from '../generated/prisma/enums';
-import type { TokensDto, UpdateProfileDto } from './dto';
+import { UserStatus, Role } from '../generated/prisma/enums';
+import type { TokensDto, UpdateProfileDto, CreateAdminDto } from './dto';
 import { EmailsService } from '../emails/emails.service';
 
 /* Refresh tokens are high-entropy already, so a fast SHA-256 digest is the
@@ -286,6 +286,85 @@ export class AuthService {
         revokedAt: new Date(),
       },
     });
+    return { success: true };
+  }
+
+  async listAdmins(currentUserId: string) {
+    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+    }
+
+    return this.prisma.user.findMany({
+      where: { role: Role.ADMIN },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+  }
+
+  async createAdmin(currentUserId: string, dto: CreateAdminDto) {
+    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existing) {
+      throw new ConflictException('An account with this email address already exists.');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    const newAdmin = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        passwordHash,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        role: Role.ADMIN,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    return newAdmin;
+  }
+
+  async deleteAdmin(currentUserId: string, targetId: string) {
+    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+    }
+
+    const targetUser = await this.prisma.user.findUnique({ where: { id: targetId } });
+    if (!targetUser) {
+      throw new BadRequestException('User not found.');
+    }
+
+    if (targetUser.email === 'objectsquarerajan@gmail.com') {
+      throw new ForbiddenException('The master administrator account cannot be deleted.');
+    }
+
+    if (targetUser.id === currentUserId) {
+      throw new ForbiddenException('You cannot delete your own active administrator account.');
+    }
+
+    await this.prisma.user.delete({ where: { id: targetId } });
     return { success: true };
   }
 }

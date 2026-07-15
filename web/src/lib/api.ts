@@ -110,6 +110,18 @@ export const fetchSessions = () =>
 export const deleteSession = (sessionId: string) => 
   api<{ success: boolean }>(`/auth/sessions/${sessionId}`, { method: "DELETE" });
 
+export const fetchAdmins = () => 
+  api<{ id: string; email: string; firstName: string; lastName: string; status: string; createdAt: string }[]>("/auth/admins");
+
+export const createAdmin = (dto: { firstName: string; lastName: string; email: string; password: string }) =>
+  api<{ id: string; email: string; firstName: string; lastName: string; status: string; createdAt: string }>("/auth/admins", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+export const deleteAdmin = (id: string) =>
+  api<{ success: boolean }>(`/auth/admins/${id}`, { method: "DELETE" });
+
 export const fetchSmtpConfig = () => 
   api<{ host: string; port: number; user: string; pass?: string; from: string; secure: boolean }>("/emails/smtp-config");
 
