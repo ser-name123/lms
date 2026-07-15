@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ApiError, fetchMe, login, verifyOtp } from "@/lib/api";
 import { useAuth, useAuthHydrated } from "@/store/auth";
 import { useSettingsStore } from "@/store/settings";
+import { useUI } from "@/store/ui";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -15,6 +16,7 @@ export default function SignInPage() {
   const { accessToken, setSession, setTokens, clear } = useAuth();
   
   const { settings, initialized, loadSettings } = useSettingsStore();
+  const theme = useUI((s) => s.theme);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -100,19 +102,21 @@ export default function SignInPage() {
     }
   };
 
+  const logoSrc = theme === "dark" && settings?.logoDark ? settings.logoDark : (settings?.logo || undefined);
+
   return (
-    <main className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-[#f8fafc] via-[#f1f5f9] to-[#e2e8f0] px-4 py-12 overflow-hidden">
+    <main className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-page to-surface-2/30 px-4 py-12 overflow-hidden transition-colors duration-300">
       
       {/* Decorative Glow Bubbles */}
-      <div className="absolute top-1/4 -left-36 size-96 rounded-full bg-gradient-to-tr from-indigo-500/20 to-purple-500/10 blur-[80px] pointer-events-none" />
-      <div className="absolute bottom-1/4 -right-36 size-96 rounded-full bg-gradient-to-br from-blue-500/10 to-indigo-500/20 blur-[80px] pointer-events-none" />
+      <div className="absolute top-1/4 -left-36 size-96 rounded-full bg-gradient-to-tr from-accent/15 to-accent-hover/5 dark:from-accent/25 dark:to-accent-hover/10 blur-[80px] pointer-events-none transition-all duration-300" />
+      <div className="absolute bottom-1/4 -right-36 size-96 rounded-full bg-gradient-to-br from-accent-hover/5 to-accent/15 dark:from-accent-hover/10 dark:to-accent/20 blur-[80px] pointer-events-none transition-all duration-300" />
 
-      <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(19,60,85,0.12)] animate-fade-up">
+      <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface/85 dark:bg-surface/50 backdrop-blur-md p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(19,60,85,0.06)] dark:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] animate-fade-up transition-all duration-300">
         {/* Brand Logo Header */}
         <div className="flex flex-col items-center mb-7">
           <div className="flex items-center gap-3">
-            {settings?.logo ? (
-              <img src={settings.logo} alt="Logo" className="size-10 object-contain rounded-lg shrink-0" />
+            {logoSrc ? (
+              <img src={logoSrc} alt="Logo" className="size-10 object-contain rounded-lg shrink-0" />
             ) : (
               <div className="grid size-10.5 place-items-center rounded-xl bg-accent/10 border border-accent/20">
                 <GraduationCap className="size-6 text-accent" />
