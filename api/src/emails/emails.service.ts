@@ -47,12 +47,31 @@ export class EmailsService {
     // Fallback to env variables
     const user = this.config.get<string>('SMTP_USER');
     const pass = this.config.get<string>('SMTP_PASS');
+    const host = this.config.get<string>('SMTP_HOST');
+    const from = this.config.get<string>('SMTP_FROM') || user;
+
+    /* When SMTP_HOST is set (e.g. Brevo relay on port 2525 — Render blocks the
+       standard 587/465 submission ports), connect to that host directly.
+       Without it we default to Gmail, which keeps local dev working with just
+       SMTP_USER/SMTP_PASS. */
+    if (host) {
+      return {
+        transporter: nodemailer.createTransport({
+          host,
+          port: Number(this.config.get<string>('SMTP_PORT') || 2525),
+          secure: this.config.get<string>('SMTP_SECURE') === 'true',
+          auth: { user, pass },
+        }),
+        from,
+      };
+    }
+
     return {
       transporter: nodemailer.createTransport({
         service: 'gmail',
         auth: { user, pass },
       }),
-      from: user,
+      from,
     };
   }
 
