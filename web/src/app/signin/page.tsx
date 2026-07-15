@@ -7,11 +7,14 @@ import { CircleAlert, Eye, EyeOff, Loader2, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError, fetchMe, login, verifyOtp } from "@/lib/api";
 import { useAuth, useAuthHydrated } from "@/store/auth";
+import { useSettingsStore } from "@/store/settings";
 
 export default function SignInPage() {
   const router = useRouter();
   const hydrated = useAuthHydrated();
   const { accessToken, setSession, setTokens, clear } = useAuth();
+  
+  const { settings, initialized, loadSettings } = useSettingsStore();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,6 +25,13 @@ export default function SignInPage() {
   // OTP state
   const [otpRequired, setOtpRequired] = useState(false);
   const [otpCode, setOtpCode] = useState("");
+
+  // Load dynamic settings if not initialized
+  useEffect(() => {
+    if (!initialized) {
+      loadSettings();
+    }
+  }, [initialized, loadSettings]);
 
   // Already signed in? Don't show the form again.
   useEffect(() => {
@@ -100,15 +110,26 @@ export default function SignInPage() {
       <div className="relative w-full max-w-[480px] rounded-3xl border border-hairline/80 bg-surface p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(19,60,85,0.12)] animate-fade-up">
         {/* Brand Logo Header */}
         <div className="flex flex-col items-center mb-7">
-          <div className="flex items-center gap-2.5">
-            <div className="grid size-10.5 place-items-center rounded-xl bg-accent/10 border border-accent/20">
-              <GraduationCap className="size-6 text-accent" />
+          <div className="flex items-center gap-3">
+            {settings?.logo ? (
+              <img src={settings.logo} alt="Logo" className="size-10 object-contain rounded-lg shrink-0" />
+            ) : (
+              <div className="grid size-10.5 place-items-center rounded-xl bg-accent/10 border border-accent/20">
+                <GraduationCap className="size-6 text-accent" />
+              </div>
+            )}
+            <div className="flex flex-col items-start min-w-0">
+              <span className="text-xl font-extrabold tracking-widest text-ink uppercase leading-none">
+                {settings?.websiteName || "Edumin"}
+              </span>
+              {settings?.adminConsoleTitle && (
+                <span className="text-[10px] font-bold text-ink-3 uppercase tracking-wider mt-1 leading-none">
+                  {settings.adminConsoleTitle}
+                </span>
+              )}
             </div>
-            <span className="text-2.5xl font-black tracking-wider text-ink uppercase">
-              Edumin
-            </span>
           </div>
-          <h2 className="mt-4 text-base font-bold text-ink-2">
+          <h2 className="mt-5 text-sm font-bold text-ink-2">
             {otpRequired ? "Verify Code" : "Sign in your account"}
           </h2>
         </div>
