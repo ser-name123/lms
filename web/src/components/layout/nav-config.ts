@@ -67,8 +67,9 @@ export const navGroups: NavGroup[] = [
   {
     label: "Finance",
     items: [
-      { label: "Invoices", href: "/invoices", icon: Receipt },
-      { label: "Payouts", href: "/payouts", icon: Wallet },
+      { label: "Invoice", href: "/invoices", icon: Receipt },
+      { label: "Salary and Wages", href: "/payouts", icon: Wallet },
+      { label: "Expenses", href: "/expenses", icon: FileText },
     ],
   },
 ];

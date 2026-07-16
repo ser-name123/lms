@@ -154,6 +154,11 @@ export class ListPayoutsDto {
   @IsString()
   role?: string;
 
+  @ApiPropertyOptional({ enum: PayoutMethod })
+  @IsOptional()
+  @IsEnum(PayoutMethod)
+  method?: PayoutMethod;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

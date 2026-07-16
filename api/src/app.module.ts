@@ -20,6 +20,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { LmsDataModule } from './lms-data/lms-data.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PayoutsModule } from './payouts/payouts.module';
+import { ExpensesModule } from './expenses/expenses.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PayoutsModule } from './payouts/payouts.module';
     LmsDataModule,
     DashboardModule,
     PayoutsModule,
+    ExpensesModule,
   ],
   controllers: [HealthController],
   providers: [

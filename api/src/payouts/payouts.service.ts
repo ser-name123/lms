@@ -9,10 +9,11 @@ export class PayoutsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(dto: ListPayoutsDto) {
-    const { page = 1, limit = 20, search, status, role, sortBy } = dto;
+    const { page = 1, limit = 20, search, status, role, method, sortBy } = dto;
 
     const where: Prisma.PayoutWhereInput = {
       ...(status ? { status } : {}),
+      ...(method ? { paymentMethod: method } : {}),
       ...(role || search
         ? {
             user: {

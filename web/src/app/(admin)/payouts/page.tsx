@@ -46,12 +46,12 @@ import {
   updatePayout,
   processPayoutPayment,
   deletePayout,
-  seedPayouts,
   type Payout,
   type PayoutStats,
   type PayoutStatus,
   type PayoutMethod
 } from "@/lib/api";
+import { useSettingsStore } from "@/store/settings";
 
 const DESIGNATIONS = ["All", "Supervisor", "Academic Coach", "Teacher"] as const;
 const STATUSES = ["All", "Pending", "Processing", "Paid", "Failed"] as const;
@@ -84,6 +84,18 @@ export default function PayoutsDashboard() {
   const [stats, setStats] = useState<PayoutStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Brand identity (logo + academy name) pulled from admin System Settings
+  const settings = useSettingsStore(s => s.settings);
+  const brandName = settings?.websiteName || "Al Furqan Academy";
+  const brandLogo = settings?.logo || "";
+
+  // Human-readable month-over-month caption from a raw percentage value
+  const trendCaption = (pct: number | undefined | null) => {
+    if (pct === undefined || pct === null || Number.isNaN(pct)) return "No prior month data";
+    if (pct === 0) return "No change vs last month";
+    return `${Math.abs(pct)}% ${pct > 0 ? "increase" : "decrease"} vs last month`;
+  };
 
   // Filters, sorting, and pagination
   const [searchQuery, setSearchQuery] = useState("");
@@ -130,6 +142,10 @@ export default function PayoutsDashboard() {
     setLoading(true);
     const roleParam = roleFilter === "All" ? undefined : roleFilter;
     const statusParam = statusFilter === "All" ? undefined : statusFilter.toUpperCase();
+    const methodParam =
+      methodFilter === "All"
+        ? undefined
+        : methodFilter.toUpperCase().replace(/\s+/g, "_");
 
     fetchPayouts({
       page: currentPage,
@@ -137,6 +153,7 @@ export default function PayoutsDashboard() {
       search: searchQuery || undefined,
       status: statusParam,
       role: roleParam,
+      method: methodParam,
       sortBy
     })
       .then(res => {
@@ -156,34 +173,13 @@ export default function PayoutsDashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [currentPage, pageSize, roleFilter, statusFilter, sortBy]);
+  }, [currentPage, pageSize, roleFilter, statusFilter, methodFilter, sortBy]);
 
   // Handle Search submit
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1);
     loadDashboardData();
-  };
-
-  // Seed historical demo data helper
-  const handleSeedData = () => {
-    setActionLoading(true);
-    seedPayouts()
-      .then(res => {
-        Swal.fire({
-          title: "Database Seeded!",
-          text: res.seededCount > 0 
-            ? `Successfully seeded ${res.seededCount} historical payroll transactions.`
-            : "Database already contains payroll records. No seeding required.",
-          icon: "success",
-          confirmButtonColor: "#386FA4"
-        });
-        loadDashboardData();
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: err.message || "Failed to seed demo data.", icon: "error" });
-      })
-      .finally(() => setActionLoading(false));
   };
 
   // Generate payroll run trigger
@@ -443,25 +439,24 @@ export default function PayoutsDashboard() {
       
       <div className="animate-fade-up p-4 sm:p-6 space-y-6">
         
-        {/* Analytics Topbar / Seed Alert */}
+        {/* Empty-state prompt: no payroll yet → run the first payrun */}
         {payouts.length === 0 && !loading && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl border border-hairline bg-surface shadow-sm">
             <div className="flex items-center gap-3">
               <div className="bg-amber-500/10 p-2.5 rounded-xl">
-                <AlertCircle className="size-5 text-amber-500 animate-bounce" />
+                <AlertCircle className="size-5 text-amber-500" />
               </div>
               <div>
                 <h4 className="text-sm font-bold text-ink">No Payroll Transactions Found</h4>
-                <p className="text-xs text-ink-3">Would you like to seed mock historical data for the past 3 months to view charts?</p>
+                <p className="text-xs text-ink-3">Run a monthly payrun to generate salary drafts for your active staff.</p>
               </div>
             </div>
             <Button
-              onClick={handleSeedData}
-              disabled={actionLoading}
+              onClick={() => setShowPayrunModal(true)}
               className="bg-accent hover:shadow-lg text-white font-bold px-4 py-2 text-xs rounded-xl"
             >
-              {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-              Seed Analytics Data
+              <Plus className="size-3.5 mr-1.5" />
+              Run Monthly Payroll
             </Button>
           </div>
         )}
@@ -478,16 +473,19 @@ export default function PayoutsDashboard() {
                   </div>
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Total Salary Paid</span>
                 </div>
-                <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  <TrendingUp className="size-3" />
-                  +{stats?.paidIncreasePct ?? 60}%
+                <span className={cn(
+                  "text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5",
+                  (stats?.paidIncreasePct ?? 0) < 0 ? "text-rose-500 bg-rose-500/10" : "text-emerald-500 bg-emerald-500/10"
+                )}>
+                  <TrendingUp className={cn("size-3", (stats?.paidIncreasePct ?? 0) < 0 && "rotate-180")} />
+                  {(stats?.paidIncreasePct ?? 0) > 0 ? "+" : ""}{stats?.paidIncreasePct ?? 0}%
                 </span>
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
                   ${stats ? stats.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">60% Increase than last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">{trendCaption(stats?.paidIncreasePct)}</p>
               </div>
             </CardBody>
           </Card>
@@ -503,14 +501,14 @@ export default function PayoutsDashboard() {
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Pending Salary</span>
                 </div>
                 <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                  +{stats?.pendingIncreasePct ?? 10}%
+                  {(stats?.pendingIncreasePct ?? 0) > 0 ? "+" : ""}{stats?.pendingIncreasePct ?? 0}%
                 </span>
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
                   ${stats ? stats.pendingSalary.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">10% Increase than last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">{trendCaption(stats?.pendingIncreasePct)}</p>
               </div>
             </CardBody>
           </Card>
@@ -526,14 +524,14 @@ export default function PayoutsDashboard() {
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Balance</span>
                 </div>
                 <span className="text-xs font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full">
-                  {stats?.balanceIncreasePct ?? 50}%
+                  {(stats?.balanceIncreasePct ?? 0) > 0 ? "+" : ""}{stats?.balanceIncreasePct ?? 0}%
                 </span>
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
                   ${stats ? stats.balance.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">50% Increase than last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">Paid minus outstanding salary</p>
               </div>
             </CardBody>
           </Card>
@@ -639,6 +637,18 @@ export default function PayoutsDashboard() {
                 className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink focus:outline-none cursor-pointer"
               >
                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            {/* Filter by Payment Method */}
+            <div className="flex items-center gap-1.5 ml-2">
+              <span>Method:</span>
+              <select
+                value={methodFilter}
+                onChange={(e) => { setMethodFilter(e.target.value); setCurrentPage(1); }}
+                className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink focus:outline-none cursor-pointer"
+              >
+                {METHODS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
 
@@ -1326,8 +1336,8 @@ export default function PayoutsDashboard() {
             <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30">
               <h3 className="font-bold text-ink text-sm">Payslip Invoice Preview</h3>
               <div className="flex items-center gap-2">
-                <Button 
-                  onClick={() => window.print()}
+                <Button
+                  onClick={() => handlePrintPayslip()}
                   className="bg-accent hover:shadow-lg text-white font-bold text-xs h-9 px-4 rounded-lg flex items-center gap-1.5 cursor-pointer"
                 >
                   <Printer className="size-4" />
@@ -1347,9 +1357,17 @@ export default function PayoutsDashboard() {
               {/* Header */}
               <div className="flex items-start justify-between border-b pb-6 border-zinc-200">
                 <div>
-                  <h1 className="text-xl font-black tracking-tight uppercase text-zinc-900">AL FURQAN ACADEMY</h1>
-                  <p className="text-xs text-zinc-500 mt-1">123 Islamic Center Ave, New York, NY</p>
-                  <p className="text-xs text-zinc-500">support@alfurqan.academy | +1 555-0199</p>
+                  {brandLogo ? (
+                    <img
+                      src={brandLogo}
+                      alt={brandName}
+                      style={{ maxHeight: 48, maxWidth: 240, objectFit: "contain" }}
+                      className="mb-2"
+                    />
+                  ) : (
+                    <h1 className="text-xl font-black tracking-tight uppercase text-zinc-900">{brandName}</h1>
+                  )}
+                  <p className="text-xs text-zinc-500 mt-1">Official Payroll Statement</p>
                 </div>
                 <div className="text-right">
                   <h2 className="text-base font-extrabold text-zinc-900 uppercase">OFFICIAL PAYSLIP</h2>
@@ -1469,5 +1487,34 @@ export default function PayoutsDashboard() {
   // Helper method mapping to open pay summary directly
   function handleOpenPaySummary(pkg: Payout) {
     handleOpenPayModal(pkg);
+  }
+
+  // Print only the payslip (isolated window) instead of the whole app chrome
+  function handlePrintPayslip() {
+    const printContent = document.getElementById("print-payslip")?.innerHTML;
+    if (!printContent) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Payslip${selectedPayout ? " - " + selectedPayout.user.firstName + " " + selectedPayout.user.lastName : ""}</title>
+          <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+          <style>
+            body { font-family: sans-serif; padding: 40px; background: white; color: #18181b; }
+          </style>
+        </head>
+        <body>
+          ${printContent}
+          <script>
+            window.onload = function() {
+              window.print();
+              window.close();
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   }
 }

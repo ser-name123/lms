@@ -858,6 +858,7 @@ export const fetchPayouts = (params: {
   search?: string;
   status?: string;
   role?: string;
+  method?: string;
   sortBy?: string;
 }) => {
   const queryObj: Record<string, string> = {
@@ -867,6 +868,7 @@ export const fetchPayouts = (params: {
   if (params.search) queryObj.search = params.search;
   if (params.status && params.status !== "All") queryObj.status = params.status;
   if (params.role && params.role !== "All") queryObj.role = params.role.toUpperCase();
+  if (params.method && params.method !== "All") queryObj.method = params.method;
   if (params.sortBy) queryObj.sortBy = params.sortBy;
 
   const q = new URLSearchParams(queryObj);
@@ -902,6 +904,91 @@ export const deletePayout = (id: string) => api<void>(`/payouts/${id}`, {
 });
 
 export const seedPayouts = () => api<{ seededCount: number }>("/payouts/seed", {
+  method: "POST",
+});
+
+// ─── Expense Calls & Types ──────────────────────────────────────────────────────
+
+export type ExpenseCategory = 
+  | "SALARY" 
+  | "RENT" 
+  | "UTILITIES" 
+  | "MARKETING" 
+  | "SOFTWARE" 
+  | "OFFICE_SUPPLIES" 
+  | "TRAVEL" 
+  | "OTHERS";
+
+export type ExpenseStatus = "APPROVED" | "PENDING" | "REJECTED";
+export type ExpensePaymentMethod = "BANK_TRANSFER" | "CREDIT_CARD" | "PAYPAL" | "CASH" | "WISE";
+
+export interface Expense {
+  id: string;
+  title: string;
+  amount: number;
+  category: ExpenseCategory;
+  paymentMethod: ExpensePaymentMethod;
+  status: ExpenseStatus;
+  paymentDate: string;
+  merchant: string | null;
+  referenceNo: string | null;
+  receiptUrl: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExpenseStats {
+  totalExpense: number;
+  pendingExpense: number;
+  revenue: number;
+  balance: number;
+  categoryBreakdown: { name: string; value: number; count: number }[];
+  trend: { month: string; revenue: number; expenses: number }[];
+}
+
+export const fetchExpenses = (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  category?: string;
+  status?: string;
+  paymentMethod?: string;
+  sortBy?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+  if (params.search) queryObj.search = params.search;
+  if (params.category && params.category !== "All") queryObj.category = params.category.toUpperCase();
+  if (params.status && params.status !== "All") queryObj.status = params.status.toUpperCase();
+  if (params.paymentMethod && params.paymentMethod !== "All") {
+    queryObj.paymentMethod = params.paymentMethod.toUpperCase().replace(" ", "_");
+  }
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: Expense[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(`/expenses?${q.toString()}`);
+};
+
+export const fetchExpenseStats = () => api<ExpenseStats>("/expenses/stats");
+
+export const createExpense = (dto: any) => api<Expense>("/expenses", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateExpense = (id: string, dto: any) => api<Expense>(`/expenses/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteExpense = (id: string) => api<void>(`/expenses/${id}`, {
+  method: "DELETE",
+});
+
+export const seedExpenses = () => api<{ seededCount: number }>("/expenses/seed", {
   method: "POST",
 });
 
