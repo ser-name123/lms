@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSettingsStore } from "@/store/settings";
 import { 
   Plus, 
   Search, 
@@ -44,15 +45,6 @@ import {
   deleteInvoice 
 } from "@/lib/api";
 
-const PRODUCT_LIST = [
-  { title: "Hifz Premium Bundle", price: 150 },
-  { title: "Arabic Grammar Course", price: 79 },
-  { title: "Noorani Qaida Basics", price: 49 },
-  { title: "Islamic Fiqh Advanced", price: 120 },
-  { title: "Tajweed Foundations", price: 65 },
-  { title: "One-on-One Session Hours Package", price: 95 }
-] as const;
-
 const STATUSES = ["Paid", "Pending", "Overdue", "Refunded"] as const;
 const PAYMENT_METHODS = ["Stripe", "PayPal", "Bank Transfer", "Cash"] as const;
 const BILLING_CYCLES = ["Monthly", "Quarterly", "One-Time"] as const;
@@ -80,6 +72,9 @@ export default function InvoicesPage() {
   
   // Database Recipient students
   const [dbStudents, setDbStudents] = useState<{ id: string; name: string; email: string }[]>(FALLBACK_STUDENTS);
+
+  // Brand identity for the invoice header comes from System Settings.
+  const settings = useSettingsStore(s => s.settings);
 
   // Academy Billing Coordinates
   const [academyName, setAcademyName] = useState("Al Furqan Academy");
@@ -113,6 +108,10 @@ export default function InvoicesPage() {
   const [productOption, setProductOption] = useState<"preset" | "custom">("preset");
   const [presetIndex, setPresetIndex] = useState(0);
   const [customProductTitle, setCustomProductTitle] = useState("");
+
+  // Real bundles come from the admin's Packages catalogue (LmsPackage), not a
+  // hardcoded list. Falls back to nothing until they load.
+  const [packages, setPackages] = useState<{ title: string; price: number }[]>([]);
   
   const [formBillingCycle, setFormBillingCycle] = useState<typeof BILLING_CYCLES[number]>("Monthly");
   const [formSubtotal, setFormSubtotal] = useState(150);
@@ -147,6 +146,8 @@ export default function InvoicesPage() {
     let tax = 5;
     let notes = "";
     let paymentMethod = "Stripe";
+    let recipientName = "";
+    let recipientEmail = "";
 
     if (inv.notes) {
       try {
@@ -159,6 +160,8 @@ export default function InvoicesPage() {
           tax = typeof parsed.tax === "number" ? parsed.tax : tax;
           notes = parsed.notes || "";
           paymentMethod = parsed.paymentMethod || paymentMethod;
+          recipientName = parsed.recipientName || "";
+          recipientEmail = parsed.recipientEmail || "";
         }
       } catch {
         notes = inv.notes;
@@ -168,8 +171,10 @@ export default function InvoicesPage() {
     return {
       id: inv.id,
       number: inv.number,
-      studentName: inv.student ? `${inv.student.user.firstName} ${inv.student.user.lastName}` : "Unknown Recipient",
-      studentEmail: inv.student ? inv.student.user.email : "",
+      studentName: inv.student
+        ? `${inv.student.user.firstName} ${inv.student.user.lastName}`
+        : recipientName || "Custom Recipient",
+      studentEmail: inv.student ? inv.student.user.email : recipientEmail,
       studentId: inv.studentId,
       packageTitle,
       billingCycle,
@@ -245,6 +250,17 @@ export default function InvoicesPage() {
       })
       .catch(err => console.warn("Failed to fetch students, using fallback", err));
 
+    // Load the admin's real package bundles for the preset dropdown.
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+    fetch(`${apiBase}/lms-data/packages`)
+      .then(res => res.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          setPackages(data.map(p => ({ title: p.title, price: Number(p.price) || 0 })));
+        }
+      })
+      .catch(err => console.warn("Failed to fetch packages", err));
+
     // Load Academy billing details from localStorage
     const savedName = localStorage.getItem("academy_billing_name");
     const savedAddress = localStorage.getItem("academy_billing_address");
@@ -270,12 +286,12 @@ export default function InvoicesPage() {
     }
   };
 
-  // Set preset product details when preset index changes
+  // Set preset product details when the selected bundle (or the list) changes.
   useEffect(() => {
-    if (productOption === "preset") {
-      setFormSubtotal(PRODUCT_LIST[presetIndex].price);
+    if (productOption === "preset" && packages[presetIndex]) {
+      setFormSubtotal(packages[presetIndex].price);
     }
-  }, [productOption, presetIndex]);
+  }, [productOption, presetIndex, packages]);
 
   // Reset page when filter triggers
   useEffect(() => {
@@ -297,7 +313,7 @@ export default function InvoicesPage() {
     setCustomProductTitle("");
     
     setFormBillingCycle("Monthly");
-    setFormSubtotal(PRODUCT_LIST[0].price);
+    setFormSubtotal(packages[0]?.price ?? 0);
     setFormDiscount(0);
     setFormTax(5);
     
@@ -358,7 +374,7 @@ export default function InvoicesPage() {
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let targetStudentId = "";
+    let targetStudentId: string | null = null;
     if (recipientOption === "db") {
       targetStudentId = formStudentId;
       if (!targetStudentId && dbStudents.length > 0) {
@@ -369,18 +385,26 @@ export default function InvoicesPage() {
         return;
       }
     } else {
-      Swal.fire({
-        title: "Database Constraint",
-        text: "Prisma requires a registered student relation. Please select a registered student recipient or add them in the Students tab first.",
-        icon: "warning",
-        background: document.documentElement.classList.contains("dark") ? "#1f1f23" : "#ffffff"
-      });
-      return;
+      // Custom / external recipient — no student relation, name+email in notes.
+      if (!customStudentName.trim() || !customStudentEmail.trim()) {
+        Swal.fire({ title: "Recipient Required", text: "Please enter the recipient's name and email.", icon: "error" });
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customStudentEmail.trim())) {
+        Swal.fire({ title: "Invalid Email", text: "Please enter a valid recipient email address.", icon: "error" });
+        return;
+      }
+      targetStudentId = null;
     }
 
     let packageTitle = "";
     if (productOption === "preset") {
-      packageTitle = PRODUCT_LIST[presetIndex].title;
+      const pkg = packages[presetIndex];
+      if (!pkg) {
+        Swal.fire({ title: "No Package Selected", text: "No packages exist yet — add one in the Packages tab, or use a custom line item.", icon: "error" });
+        return;
+      }
+      packageTitle = pkg.title;
     } else {
       if (!customProductTitle) {
         Swal.fire({ title: "Product Title Required", text: "Please specify product description.", icon: "error" });
@@ -413,7 +437,11 @@ export default function InvoicesPage() {
         discount: Number(formDiscount),
         tax: Number(formTax),
         notes: formNotes,
-        paymentMethod: formPaymentMethod
+        paymentMethod: formPaymentMethod,
+        // For a custom recipient, keep name+email with the invoice.
+        ...(recipientOption === "custom"
+          ? { recipientName: customStudentName.trim(), recipientEmail: customStudentEmail.trim() }
+          : {})
       })
     };
 
@@ -531,7 +559,21 @@ export default function InvoicesPage() {
   const handleOpenPreview = (inv: any) => {
     const formattedIssue = new Date(inv.invoiceDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     const formattedDue = new Date(inv.dueDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    
+
+    // Header brand: the admin's uploaded logo, else the website name text.
+    const brandName = settings?.websiteName || academyName;
+    const brandLogo = settings?.logo || "";
+    const brandHeader = brandLogo
+      ? `<img src="${brandLogo}" alt="${brandName}" style="max-height:44px;max-width:220px;object-fit:contain;display:block;margin-bottom:6px;" />`
+      : `<div class="flex items-center gap-2 mb-2">
+                <svg class="text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 28px; height: 28px;">
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"></path>
+                  <path d="M6 6h10"></path>
+                  <path d="M6 10h10"></path>
+                </svg>
+                <h2 class="text-xl font-bold tracking-tight text-emerald-700 font-sans" style="margin: 0; line-height: 1.2;">${brandName}</h2>
+              </div>`;
+
     Swal.fire({
       title: `<span class="text-sm font-bold tracking-wider text-ink-3 uppercase">Print Preview Details</span>`,
       html: `
@@ -539,14 +581,7 @@ export default function InvoicesPage() {
           
           <div class="flex justify-between items-start border-b pb-6 border-zinc-200 mb-6">
             <div>
-              <div class="flex items-center gap-2 mb-2">
-                <svg class="text-emerald-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 28px; height: 28px;">
-                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"></path>
-                  <path d="M6 6h10"></path>
-                  <path d="M6 10h10"></path>
-                </svg>
-                <h2 class="text-xl font-bold tracking-tight text-emerald-700 font-sans" style="margin: 0; line-height: 1.2;">${academyName}</h2>
-              </div>
+              ${brandHeader}
               <p class="text-xs text-zinc-500 mt-1 font-sans leading-normal">${academyAddress.replace(/\n/g, "<br/>")}<br/>Phone: ${academyPhone}<br/>Email: ${academyEmail}</p>
             </div>
             <div class="text-right">
@@ -1050,31 +1085,66 @@ export default function InvoicesPage() {
                 <span className="block text-xs font-bold text-ink-3 uppercase">Billed Recipient Details</span>
                 <div className="flex gap-4 text-xs font-semibold mb-2">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="radio" 
+                    <input
+                      type="radio"
                       name="rec-opt"
-                      checked={recipientOption === "db"} 
+                      checked={recipientOption === "db"}
                       onChange={() => setRecipientOption("db")}
                       className="text-accent focus:ring-accent border-hairline size-3.5"
                     />
                     <span>Registered Student Recipient</span>
                   </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="rec-opt"
+                      checked={recipientOption === "custom"}
+                      onChange={() => setRecipientOption("custom")}
+                      className="text-accent focus:ring-accent border-hairline size-3.5"
+                    />
+                    <span>Custom / External Recipient</span>
+                  </label>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Select Student</label>
-                  <select
-                    value={formStudentEmail}
-                    onChange={(e) => handleSelectStudentChange(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {dbStudents.map(student => (
-                      <option key={student.email} value={student.email}>
-                        {student.name} ({student.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {recipientOption === "db" ? (
+                  <div>
+                    <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Select Student</label>
+                    <select
+                      value={formStudentEmail}
+                      onChange={(e) => handleSelectStudentChange(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    >
+                      {dbStudents.map(student => (
+                        <option key={student.email} value={student.email}>
+                          {student.name} ({student.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Recipient Name</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Ahmed Khan"
+                        value={customStudentName}
+                        onChange={(e) => setCustomStudentName(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Recipient Email</label>
+                      <input
+                        type="email"
+                        placeholder="e.g. ahmed@example.com"
+                        value={customStudentEmail}
+                        onChange={(e) => setCustomStudentEmail(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Product selection */}
@@ -1110,13 +1180,18 @@ export default function InvoicesPage() {
                       <select
                         value={presetIndex}
                         onChange={(e) => setPresetIndex(Number(e.target.value))}
-                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                        disabled={packages.length === 0}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                       >
-                        {PRODUCT_LIST.map((prod, idx) => (
-                          <option key={idx} value={idx}>
-                            {prod.title} (${prod.price})
-                          </option>
-                        ))}
+                        {packages.length === 0 ? (
+                          <option value={0}>No packages yet — add in Packages tab</option>
+                        ) : (
+                          packages.map((prod, idx) => (
+                            <option key={idx} value={idx}>
+                              {prod.title} (${prod.price})
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                     <div>

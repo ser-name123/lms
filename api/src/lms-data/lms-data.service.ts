@@ -147,9 +147,25 @@ export class LmsDataService {
   }
 
   // 3. Assessments
+  // LmsAssessment has no student count of its own, so it is resolved live from
+  // the linked course (by courseCode) — the same rule assignments follow.
   async getAssessments() {
-    return this.prisma.lmsAssessment.findMany({
-      orderBy: { title: 'asc' },
+    const [assessments, courses] = await Promise.all([
+      this.prisma.lmsAssessment.findMany({ orderBy: { title: 'asc' } }),
+      this.prisma.lmsCourse.findMany({
+        select: { code: true, title: true, studentsCount: true },
+      }),
+    ]);
+
+    const courseByCode = new Map(courses.map((c) => [c.code, c]));
+
+    return assessments.map((a) => {
+      const course = courseByCode.get(a.courseCode);
+      return {
+        ...a,
+        studentsCount: course?.studentsCount ?? 0,
+        courseTitle: course?.title ?? a.courseTitle,
+      };
     });
   }
   /** Keeps assessment numbers sane: non-negative counts, score within 0–100. */
@@ -276,5 +292,52 @@ export class LmsDataService {
   }
   async deletePackage(id: string) {
     return this.prisma.lmsPackage.delete({ where: { id } });
+  }
+
+  // 6. Classes (scheduled live sessions)
+  async getClasses() {
+    return this.prisma.lmsClass.findMany({ orderBy: { timeStart: 'asc' } });
+  }
+
+  /** Counts stay non-negative; enrolled can never exceed capacity. */
+  private normaliseClass(data: any) {
+    const out = { ...data };
+    if (out.capacity != null) {
+      out.capacity = Math.max(0, Math.round(Number(out.capacity) || 0));
+    }
+    if (out.enrolled != null) {
+      const cap = out.capacity ?? Number.MAX_SAFE_INTEGER;
+      out.enrolled = Math.max(0, Math.min(Math.round(Number(out.enrolled) || 0), cap));
+    }
+    return out;
+  }
+
+  async createClass(dto: any) {
+    return this.prisma.lmsClass.create({ data: this.normaliseClass(dto) });
+  }
+  async updateClass(id: string, dto: any) {
+    const { id: _, ...data } = dto;
+    return this.prisma.lmsClass.update({
+      where: { id },
+      data: this.normaliseClass(data),
+    });
+  }
+  async deleteClass(id: string) {
+    return this.prisma.lmsClass.delete({ where: { id } });
+  }
+
+  // 7. Meetings
+  async getMeetings() {
+    return this.prisma.lmsMeeting.findMany({ orderBy: { timeStart: 'asc' } });
+  }
+  async createMeeting(dto: any) {
+    return this.prisma.lmsMeeting.create({ data: dto });
+  }
+  async updateMeeting(id: string, dto: any) {
+    const { id: _, ...data } = dto;
+    return this.prisma.lmsMeeting.update({ where: { id }, data });
+  }
+  async deleteMeeting(id: string) {
+    return this.prisma.lmsMeeting.delete({ where: { id } });
   }
 }

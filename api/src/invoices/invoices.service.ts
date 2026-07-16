@@ -91,22 +91,28 @@ export class InvoicesService {
       throw new BadRequestException('Due date cannot be before the issue date.');
     }
 
-    // Verify student exists
-    const student = await this.prisma.studentProfile.findUnique({
-      where: { id: dto.studentId },
-    });
-    if (!student) {
-      throw new NotFoundException(`Student profile with ID ${dto.studentId} not found.`);
+    // A registered recipient must exist; a custom recipient has no studentId.
+    if (dto.studentId) {
+      const student = await this.prisma.studentProfile.findUnique({
+        where: { id: dto.studentId },
+      });
+      if (!student) {
+        throw new NotFoundException(
+          `Student profile with ID ${dto.studentId} not found.`,
+        );
+      }
     }
 
     return this.prisma.invoice.create({
       data: {
         number: dto.number,
-        studentId: dto.studentId,
+        studentId: dto.studentId ?? null,
         amount: dto.amount,
         status: dto.status || 'DRAFT',
         issuedAt: dto.issuedAt ? new Date(dto.issuedAt) : new Date(),
         dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+        notes: dto.notes ?? null,
+        ...(dto.currency ? { currency: dto.currency } : {}),
       },
       include: {
         student: {
@@ -139,6 +145,7 @@ export class InvoicesService {
         amount: dto.amount,
         status: dto.status,
         dueAt: dto.dueAt ? new Date(dto.dueAt) : undefined,
+        notes: dto.notes ?? undefined,
       },
       include: {
         student: {

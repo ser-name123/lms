@@ -808,5 +808,102 @@ export type DashboardOverview = {
 
 export const fetchDashboard = () => api<DashboardOverview>("/dashboard/overview");
 
+// ─── Payout Calls & Types ──────────────────────────────────────────────────────
+
+export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";
+export type PayoutMethod = "BANK_TRANSFER" | "WISE" | "PAYPAL" | "CASH" | "STRIPE";
+
+export interface Payout {
+  id: string;
+  userId: string;
+  amount: number;
+  deductions: number;
+  bonus: number;
+  netAmount: number;
+  paymentMethod: PayoutMethod;
+  status: PayoutStatus;
+  paymentDate: string | null;
+  referenceNumber: string | null;
+  billingPeriodStart: string;
+  billingPeriodEnd: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: string;
+    status: string;
+    phone: string | null;
+    gender: string | null;
+    avatarUrl: string | null;
+  };
+}
+
+export interface PayoutStats {
+  totalPaid: number;
+  pendingSalary: number;
+  balance: number;
+  paidIncreasePct: number;
+  pendingIncreasePct: number;
+  balanceIncreasePct: number;
+  trend: { month: string; paid: number; pending: number }[];
+}
+
+export const fetchPayouts = (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: string;
+  role?: string;
+  sortBy?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") queryObj.status = params.status;
+  if (params.role && params.role !== "All") queryObj.role = params.role.toUpperCase();
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: Payout[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(`/payouts?${q.toString()}`);
+};
+
+export const fetchPayoutStats = () => api<PayoutStats>("/payouts/stats");
+
+export const createPayout = (dto: any) => api<Payout>("/payouts", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const bulkGeneratePayouts = (dto: { billingPeriodStart: string; billingPeriodEnd: string }) => 
+  api<{ generatedCount: number }>("/payouts/bulk-generate", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+export const updatePayout = (id: string, dto: any) => api<Payout>(`/payouts/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const processPayoutPayment = (id: string, dto: { referenceNumber: string; notes?: string; paymentMethod?: PayoutMethod }) => 
+  api<Payout>(`/payouts/${id}/pay`, {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+export const deletePayout = (id: string) => api<void>(`/payouts/${id}`, {
+  method: "DELETE",
+});
+
+export const seedPayouts = () => api<{ seededCount: number }>("/payouts/seed", {
+  method: "POST",
+});
+
 
 

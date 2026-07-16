@@ -34,7 +34,7 @@ import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { fetchStudentsTeachers, fetchStudents, fetchEmployees } from "@/lib/api";
+import { fetchStudentsTeachers, fetchStudents, fetchEmployees, authHeader } from "@/lib/api";
 
 const MEETING_TYPES = ["1-on-1 Meeting", "Group Meeting", "Staff Call", "Parent-Teacher Meeting"] as const;
 const MEETING_STATUSES = ["Upcoming", "In Progress", "Completed", "Cancelled"] as const;
@@ -64,41 +64,20 @@ const FALLBACK_STAFF = [
 ];
 
 // Initial 30 Mock Meetings
-const INITIAL_MEETINGS = [
-  { id: "meet-1", topic: "Tajweed Articulation Feedback Session", type: "1-on-1 Meeting", timeStart: "2026-07-16T15:00", timeEnd: "2026-07-16T15:30", link: "https://zoom.us/j/1112223330", host: "Sheikh Abdul Rahman", status: "In Progress", agenda: "Discussing throat articulation progress and vocal rules check.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }] },
-  { id: "meet-2", topic: "Quran Hifz Review (Juz 30)", type: "1-on-1 Meeting", timeStart: "2026-07-16T16:00", timeEnd: "2026-07-16T16:30", link: "https://zoom.us/j/1112223331", host: "Ustadha Fatima", status: "Upcoming", agenda: "Weekly review session for Quran memorization check.", attendees: [{ name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }] },
-  { id: "meet-3", topic: "Quranic Arabic Grammar Q&A Session", type: "Group Meeting", timeStart: "2026-07-16T18:00", timeEnd: "2026-07-16T19:00", link: "https://zoom.us/j/1112223332", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Reviewing verbs root sheets and case endings declensions.", attendees: [{ name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }, { name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Pending" }, { name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }] },
-  { id: "meet-4", topic: "Weekly Academic Progress Review", type: "Staff Call", timeStart: "2026-07-16T10:00", timeEnd: "2026-07-16T11:00", link: "https://zoom.us/j/1112223333", host: "Sheikh Yasir Qadhi", status: "Completed", agenda: "Discussing student evaluations, study trackers and leave requests.", attendees: [{ name: "Sheikh Abdul Rahman", role: "Teacher", email: "rahman@example.com", status: "Accepted" }, { name: "Ustadha Fatima", role: "Teacher", email: "fatima@example.com", status: "Accepted" }, { name: "Ustadha Zaynab", role: "Teacher", email: "zaynab@example.com", status: "Declined" }] },
-  { id: "meet-5", topic: "Zayd's Tajweed Evaluation Review", type: "Parent-Teacher Meeting", timeStart: "2026-07-17T15:00", timeEnd: "2026-07-17T15:30", link: "https://zoom.us/j/1112223334", host: "Ustadha Fatima", status: "Upcoming", agenda: "Feedback session with Zayd's father regarding pronunciation goals.", attendees: [{ name: "Abu Zayd (Parent)", role: "Parent", email: "abuzayd@example.com", status: "Accepted" }, { name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }] },
-  { id: "meet-6", topic: "Arabic Conversation Practical Practice", type: "Group Meeting", timeStart: "2026-07-18T14:00", timeEnd: "2026-07-18T15:00", link: "https://zoom.us/j/1112223335", host: "Ustadha Zaynab", status: "Upcoming", agenda: "Practicing restaurant ordering and shopping scripts dialogue.", attendees: [{ name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }, { name: "Mariam Omar", role: "Student", email: "mariam@example.com", status: "Accepted" }] },
-  { id: "meet-7", topic: "Noorani Qaida Articulation Test Check", type: "1-on-1 Meeting", timeStart: "2026-07-16T11:00", timeEnd: "2026-07-16T11:30", link: "https://zoom.us/j/1112223336", host: "Ustadha Fatima", status: "Completed", agenda: "Reviewing basic alphabet connection shapes and short vowels.", attendees: [{ name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }] },
-  { id: "meet-8", topic: "Monthly Board Meeting", type: "Staff Call", timeStart: "2026-07-15T16:00", timeEnd: "2026-07-15T18:00", link: "https://zoom.us/j/1112223337", host: "Sheikh Yasir Qadhi", status: "Completed", agenda: "Quarterly review of lms platform scaling and payment plans.", attendees: [{ name: "Sheikh Abdul Rahman", role: "Teacher", email: "rahman@example.com", status: "Accepted" }, { name: "Sheikh Muhammad Al-Mansoori", role: "Teacher", email: "mansoori@example.com", status: "Accepted" }] },
-  { id: "meet-9", topic: "Hadith Science Methodology Session", type: "Group Meeting", timeStart: "2026-07-19T17:00", timeEnd: "2026-07-19T18:00", link: "https://zoom.us/j/1112223338", host: "Sheikh Muhammad Al-Mansoori", status: "Upcoming", agenda: "Exploring narrator reliability criteria and biographies classification.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Pending" }, { name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }] },
-  { id: "meet-10", topic: "Fiqh of Worship Inquiry", type: "1-on-1 Meeting", timeStart: "2026-07-16T16:30", timeEnd: "2026-07-16T17:00", link: "https://zoom.us/j/1112223339", host: "Sheikh Abdul Rahman", status: "Upcoming", agenda: "Doubt clearing call regarding tayammum and travel prayer rulings.", attendees: [{ name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }] },
-  { id: "meet-11", topic: "Tafseer Juz Amma Thematic Review", type: "Group Meeting", timeStart: "2026-07-20T19:00", timeEnd: "2026-07-20T20:00", link: "https://zoom.us/j/1112223340", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Thematic outline and analysis of Surah Al-Naba.", attendees: [{ name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }, { name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }, { name: "Mariam Omar", role: "Student", email: "mariam@example.com", status: "Accepted" }] },
-  { id: "meet-12", topic: "Ahmad's Seerah Project Plan", type: "1-on-1 Meeting", timeStart: "2026-07-16T14:00", timeEnd: "2026-07-16T14:30", link: "https://zoom.us/j/1112223341", host: "Sheikh Abdul Rahman", status: "Completed", agenda: "Guidance on choosing early Caliphate transitions resources.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }] },
-  { id: "meet-13", topic: "Islamic Creed Q&A Session", type: "Group Meeting", timeStart: "2026-07-21T18:00", timeEnd: "2026-07-21T19:00", link: "https://zoom.us/j/1112223342", host: "Sheikh Muhammad Al-Mansoori", status: "Upcoming", agenda: "Reviewing attributes of Allah and passing criteria.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }, { name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }] },
-  { id: "meet-14", topic: "Mariam's Study Plan Discussion", type: "Parent-Teacher Meeting", timeStart: "2026-07-22T15:00", timeEnd: "2026-07-22T15:30", link: "https://zoom.us/j/1112223343", host: "Ustadha Zaynab", status: "Upcoming", agenda: "Discussing Arabic reading and calligraphy practice timelines.", attendees: [{ name: "Mariam's Mother (Parent)", role: "Parent", email: "mariam.mom@example.com", status: "Accepted" }, { name: "Mariam Omar", role: "Student", email: "mariam@example.com", status: "Accepted" }] },
-  { id: "meet-15", topic: "Caligraphy Naskh Stroke Correction", type: "1-on-1 Meeting", timeStart: "2026-07-23T11:00", timeEnd: "2026-07-23T11:30", link: "https://zoom.us/j/1112223344", host: "Ustadha Zaynab", status: "Upcoming", agenda: "Evaluating student's alphabet stroke angles and thicknesses.", attendees: [{ name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Pending" }] },
-  { id: "meet-16", topic: "Trial Class Feedback Session", type: "Parent-Teacher Meeting", timeStart: "2026-07-16T12:30", timeEnd: "2026-07-16T13:00", link: "https://zoom.us/j/1112223345", host: "Ustadha Fatima", status: "Completed", agenda: "Evaluating Noorani Qaida basic diagnostic with Yusuf's father.", attendees: [{ name: "Yusuf's Father (Parent)", role: "Parent", email: "yusuf.father@example.com", status: "Accepted" }] },
-  { id: "meet-17", topic: "Pilgrimage Rules and Logistics Q&A", type: "Group Meeting", timeStart: "2026-07-24T16:00", timeEnd: "2026-07-24T17:30", link: "https://zoom.us/j/1112223346", host: "Sheikh Abdul Rahman", status: "Upcoming", agenda: "Walkthrough of Hajj and Umrah visual charts.", attendees: [{ name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }, { name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }, { name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Declined" }] },
-  { id: "meet-18", topic: "Teachers Syllabus Mapping Alignment", type: "Staff Call", timeStart: "2026-07-25T09:00", timeEnd: "2026-07-25T10:30", link: "https://zoom.us/j/1112223347", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Mapping intermediate Tajweed rules to courses curriculums.", attendees: [{ name: "Sheikh Abdul Rahman", role: "Teacher", email: "rahman@example.com", status: "Accepted" }, { name: "Ustadha Fatima", role: "Teacher", email: "fatima@example.com", status: "Accepted" }] },
-  { id: "meet-19", topic: "Hadith Terminology Check", type: "1-on-1 Meeting", timeStart: "2026-07-26T14:30", timeEnd: "2026-07-26T15:00", link: "https://zoom.us/j/1112223348", host: "Sheikh Muhammad Al-Mansoori", status: "Upcoming", agenda: "Verifying definitions of Hasan and Sahih classifications.", attendees: [{ name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }] },
-  { id: "meet-20", topic: "Quran Reflections Review Session", type: "Group Meeting", timeStart: "2026-07-27T17:00", timeEnd: "2026-07-27T18:00", link: "https://zoom.us/j/1112223349", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Reflection journals discussion covering lessons from Surah Al-Kahf.", attendees: [{ name: "Zayd Ahmed", role: "Student", email: "zayd@example.com", status: "Accepted" }, { name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }] },
-  { id: "meet-21", topic: "Parent Teacher Review: Ahmad's Progress", type: "Parent-Teacher Meeting", timeStart: "2026-07-16T14:30", timeEnd: "2026-07-16T15:00", link: "https://zoom.us/j/1112223350", host: "Sheikh Abdul Rahman", status: "Live", agenda: "Reviewing Quran memorization speed and Tajweed scores with Ahmad's Father.", attendees: [{ name: "Ahmad's Father (Parent)", role: "Parent", email: "ahmad.father@example.com", status: "Accepted" }, { name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }] },
-  { id: "meet-22", topic: "Trial Session for New Arabic Enrollee", type: "1-on-1 Meeting", timeStart: "2026-07-16T15:30", timeEnd: "2026-07-16T16:00", link: "https://zoom.us/j/1112223351", host: "Ustadha Zaynab", status: "Upcoming", agenda: "General trial class to review reading skills.", attendees: [{ name: "Fatima Noor", role: "Student", email: "fatima.noor@example.com", status: "Accepted" }] },
-  { id: "meet-23", topic: "Staff Coordination Meeting", type: "Staff Call", timeStart: "2026-07-16T11:00", timeEnd: "2026-07-16T12:00", link: "https://zoom.us/j/1112223352", host: "Sheikh Yasir Qadhi", status: "Completed", agenda: "General sync meeting to review platform support tickets.", attendees: [{ name: "Ustadha Fatima", role: "Teacher", email: "fatima@example.com", status: "Accepted" }, { name: "Ustadha Zaynab", role: "Teacher", email: "zaynab@example.com", status: "Accepted" }] },
-  { id: "meet-24", topic: "Hajj Rituals Checklist Walkthrough", type: "Group Meeting", timeStart: "2026-07-16T17:00", timeEnd: "2026-07-16T18:00", link: "https://zoom.us/j/1112223353", host: "Sheikh Abdul Rahman", status: "Upcoming", agenda: "Reviewing rules of Muzdalifah and Arafat checklist.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }, { name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }] },
-  { id: "meet-25", topic: "Intermediate Tajweed Check-in", type: "1-on-1 Meeting", timeStart: "2026-07-16T12:00", timeEnd: "2026-07-16T12:30", link: "https://zoom.us/j/1112223354", host: "Ustadha Fatima", status: "Completed", agenda: "Verifying prolongation signs (Madd) reading.", attendees: [{ name: "Mariam Omar", role: "Student", email: "mariam@example.com", status: "Accepted" }] },
-  { id: "meet-26", topic: "Seerah Course Syllabus Review", type: "Staff Call", timeStart: "2026-07-14T11:00", timeEnd: "2026-07-14T12:00", link: "https://zoom.us/j/1112223355", host: "Sheikh Yasir Qadhi", status: "Completed", agenda: "Updating course outlines for Islamic history segments.", attendees: [{ name: "Sheikh Abdul Rahman", role: "Teacher", email: "rahman@example.com", status: "Accepted" }] },
-  { id: "meet-27", topic: "Qalqalah Articulation Correction", type: "1-on-1 Meeting", timeStart: "2026-07-16T15:00", timeEnd: "2026-07-16T15:30", link: "https://zoom.us/j/1112223356", host: "Ustadha Fatima", status: "Live", agenda: "Reviewing Qalqalah rules on Surah Al-Ikhlas.", attendees: [{ name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }] },
-  { id: "meet-28", topic: "Arabic Grammar Verb Quiz doubt solving", type: "1-on-1 Meeting", timeStart: "2026-07-16T19:30", timeEnd: "2026-07-16T20:00", link: "https://zoom.us/j/1112223357", host: "Ustadha Fatima", status: "Upcoming", agenda: "Solving doubt questions from mock evaluation 2.", attendees: [{ name: "Sara Khan", role: "Student", email: "sara@example.com", status: "Accepted" }] },
-  { id: "meet-29", topic: "Monthly Parent-Teacher Advisory Meetup", type: "Parent-Teacher Meeting", timeStart: "2026-07-28T16:00", timeEnd: "2026-07-28T17:30", link: "https://zoom.us/j/1112223358", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Advisory board feedback from student parents.", attendees: [{ name: "Ahmad's Father (Parent)", role: "Parent", email: "ahmad.father@example.com", status: "Accepted" }, { name: "Zayd's Father (Parent)", role: "Parent", email: "zayd.father@example.com", status: "Pending" }] },
-  { id: "meet-30", topic: "Seerah Camp Introductory Call", type: "Group Meeting", timeStart: "2026-07-29T18:00", timeEnd: "2026-07-29T19:00", link: "https://zoom.us/j/1112223359", host: "Sheikh Yasir Qadhi", status: "Upcoming", agenda: "Explaining timeline rules and dates for summer Seerah camp.", attendees: [{ name: "Ahmad Ali", role: "Student", email: "ahmad@example.com", status: "Accepted" }, { name: "Yusuf Hussain", role: "Student", email: "yusuf@example.com", status: "Accepted" }] }
-];
+const INITIAL_MEETINGS: any[] = [];
 
 export default function MeetingsPage() {
   const [meetings, setMeetings] = useState(INITIAL_MEETINGS);
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+
+  // Load meetings from the database.
+  useEffect(() => {
+    fetch(`${apiBase}/lms-data/meetings`)
+      .then(res => res.json())
+      .then((data: any[]) => setMeetings(data))
+      .catch(console.error);
+  }, [apiBase]);
 
   // Dynamic Lists from Database APIs
   const [dbTeachers, setDbTeachers] = useState<{ name: string; email: string }[]>(
@@ -219,7 +198,7 @@ export default function MeetingsPage() {
         meet.topic.toLowerCase().includes(searchQuery.toLowerCase()) || 
         meet.host.toLowerCase().includes(searchQuery.toLowerCase()) ||
         meet.agenda.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        meet.attendees.some(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        meet.attendees.some((a: any) => a.name.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesType = typeFilter === "All" || meet.type === typeFilter;
       const matchesStatus = statusFilter === "All" || meet.status === statusFilter;
       return matchesSearch && matchesType && matchesStatus;
@@ -261,13 +240,17 @@ export default function MeetingsPage() {
       color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
     }).then((result) => {
       if (result.isConfirmed) {
-        setMeetings(prev => prev.filter(m => m.id !== id));
-        Swal.fire({
-          title: "Deleted!",
-          text: "The meeting schedule has been removed.",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
+        fetch(`${apiBase}/lms-data/meetings/${id}`, { method: "DELETE", headers: authHeader() })
+          .then(() => {
+            setMeetings(prev => prev.filter(m => m.id !== id));
+            Swal.fire({
+              title: "Deleted!",
+              text: "The meeting schedule has been removed.",
+              icon: "success",
+              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+            });
+          })
+          .catch(() => Swal.fire({ title: "Error", text: "Could not delete meeting.", icon: "error" }));
       }
     });
   };
@@ -298,8 +281,7 @@ export default function MeetingsPage() {
       return;
     }
 
-    const newMeet = {
-      id: `meet-${Date.now()}`,
+    const payload = {
       topic: formTopic,
       type: formType,
       timeStart: formTimeStart,
@@ -311,14 +293,23 @@ export default function MeetingsPage() {
       attendees: formAttendees.length > 0 ? formAttendees : [{ name: "General Audience", role: "Guest", email: "", status: "Pending" }]
     };
 
-    setMeetings([newMeet, ...meetings]);
-    setShowAddModal(false);
-    Swal.fire({
-      title: "Scheduled",
-      text: "Meeting scheduled successfully!",
-      icon: "success",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-    });
+    fetch(`${apiBase}/lms-data/meetings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(payload),
+    })
+      .then(res => res.json())
+      .then(saved => {
+        setMeetings(prev => [saved, ...prev]);
+        setShowAddModal(false);
+        Swal.fire({
+          title: "Scheduled",
+          text: "Meeting scheduled successfully!",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(() => Swal.fire({ title: "Error", text: "Could not schedule meeting.", icon: "error" }));
   };
 
   const handleOpenEditModal = (meet: typeof INITIAL_MEETINGS[0]) => {
@@ -349,31 +340,35 @@ export default function MeetingsPage() {
       return;
     }
 
-    setMeetings(prev => prev.map(m => {
-      if (m.id === selectedMeeting.id) {
-        return {
-          ...m,
-          topic: formTopic,
-          type: formType,
-          timeStart: formTimeStart,
-          timeEnd: formTimeEnd,
-          link: formLink,
-          host: formHost,
-          status: formStatus,
-          agenda: formAgenda,
-          attendees: formAttendees
-        };
-      }
-      return m;
-    }));
+    const payload = {
+      topic: formTopic,
+      type: formType,
+      timeStart: formTimeStart,
+      timeEnd: formTimeEnd,
+      link: formLink,
+      host: formHost,
+      status: formStatus,
+      agenda: formAgenda,
+      attendees: formAttendees
+    };
 
-    setShowEditModal(false);
-    Swal.fire({
-      title: "Saved",
-      text: "Meeting updates saved successfully!",
-      icon: "success",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-    });
+    fetch(`${apiBase}/lms-data/meetings/${selectedMeeting.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(payload),
+    })
+      .then(res => res.json())
+      .then(saved => {
+        setMeetings(prev => prev.map(m => (m.id === saved.id ? saved : m)));
+        setShowEditModal(false);
+        Swal.fire({
+          title: "Saved",
+          text: "Meeting updates saved successfully!",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(() => Swal.fire({ title: "Error", text: "Could not update meeting.", icon: "error" }));
   };
 
   // Dynamically add attendee to list
@@ -428,7 +423,7 @@ export default function MeetingsPage() {
     const startStr = new Date(meet.timeStart).toLocaleString();
     const endStr = new Date(meet.timeEnd).toLocaleTimeString();
     
-    const attendeesListStr = meet.attendees.map(a => `
+    const attendeesListStr = meet.attendees.map((a: any) => `
       <tr class="border-b border-hairline hover:bg-surface-2/40">
         <td class="px-4 py-2 font-semibold text-xs text-ink text-left">${a.name}</td>
         <td class="px-4 py-2 text-xs text-ink-3 text-left">${a.role}</td>
@@ -697,7 +692,7 @@ export default function MeetingsPage() {
                               {meet.attendees.length} Invitees
                             </div>
                             <div className="text-[11px] text-ink-3 mt-1 truncate max-w-[200px]">
-                              {meet.attendees.map(a => a.name).join(", ")}
+                              {meet.attendees.map((a: any) => a.name).join(", ")}
                             </div>
                           </td>
                           <td className="px-6 py-4">

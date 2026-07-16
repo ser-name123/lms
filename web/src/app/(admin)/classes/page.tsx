@@ -31,7 +31,7 @@ import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { fetchStudentsTeachers, fetchStudentsCourses } from "@/lib/api";
+import { fetchStudentsTeachers, authHeader } from "@/lib/api";
 
 // Course List (for linking in dropdowns)
 const AVAILABLE_COURSES = [
@@ -76,38 +76,7 @@ const TEACHERS = [
 ];
 
 // Initial Mock Classes Data (30 items with independent categories)
-const INITIAL_CLASSES = [
-  { id: "cls-1", topic: "Harf Voicing & Throat Letters Practice", courseCode: "QRN-101", courseTitle: "Basic Quran Reading", teacher: "Sheikh Abdul Rahman", capacity: 15, enrolled: 12, category: "Regular Class", timeStart: "2026-07-16T14:00", timeEnd: "2026-07-16T15:00", link: "https://zoom.us/j/1234567890", status: "Live", description: "Focuses on voicing the letters from throat articulation coordinates." },
-  { id: "cls-2", topic: "Surah Al-Mulk Memorization Check", courseCode: "QRN-401", courseTitle: "Quran Memorization Hifz", teacher: "Ustadha Fatima", capacity: 5, enrolled: 4, category: "1-on-1 Session", timeStart: "2026-07-16T15:30", timeEnd: "2026-07-16T16:00", link: "https://zoom.us/j/1234567891", status: "Upcoming", description: "One-on-one memorization review of the first 15 verses of Surah Al-Mulk." },
-  { id: "cls-3", topic: "Noon Sakinah Rules Mastery", courseCode: "QRN-101", courseTitle: "Basic Quran Reading", teacher: "Sheikh Abdul Rahman", capacity: 20, enrolled: 18, category: "Regular Class", timeStart: "2026-07-16T17:00", timeEnd: "2026-07-16T18:00", link: "https://zoom.us/j/1234567892", status: "Upcoming", description: "Detailed look at Idgham, Izhar, Ikhfa and Iqlab cases." },
-  { id: "cls-4", topic: "Arabic Verb Conjugation Basics", courseCode: "ARB-101", courseTitle: "Arabic Grammar Level 1", teacher: "Ustadha Fatima", capacity: 25, enrolled: 22, category: "Regular Class", timeStart: "2026-07-16T10:00", timeEnd: "2026-07-16T11:30", link: "https://zoom.us/j/1234567893", status: "Completed", description: "Conjugations of simple past tense verbs across singular pronouns." },
-  { id: "cls-5", topic: "Battle of Badr Key Events", courseCode: "ISL-301", courseTitle: "Seerah of Prophet Muhammad", teacher: "Sheikh Abdul Rahman", capacity: 50, enrolled: 48, category: "Guest Lecture", timeStart: "2026-07-17T18:00", timeEnd: "2026-07-17T19:30", link: "https://zoom.us/j/1234567894", status: "Upcoming", description: "A visual timeline mapping of the coordinates and stages of the Battle of Badr." },
-  { id: "cls-6", topic: "Advanced Sifaat Pronunciation Check", courseCode: "TAJ-202", courseTitle: "Advanced Tajweed Rules", teacher: "Ustadha Fatima", capacity: 8, enrolled: 7, category: "Revision Session", timeStart: "2026-07-18T11:00", timeEnd: "2026-07-18T12:00", link: "https://zoom.us/j/1234567895", status: "Upcoming", description: "Reviewing voicing properties (Hams, Jahr, Shiddah) with student audio reviews." },
-  { id: "cls-7", topic: "Market Vocabulary Dialogue", courseCode: "ARB-201", courseTitle: "Arabic Conversational Skills", teacher: "Ustadha Fatima", capacity: 12, enrolled: 10, category: "Regular Class", timeStart: "2026-07-16T12:00", timeEnd: "2026-07-16T13:00", link: "https://zoom.us/j/1234567896", status: "Completed", description: "Practicing numbers and shopping scripts in colloquial Arabic." },
-  { id: "cls-8", topic: "Wudu and Tayammum Practical Demo", courseCode: "ISL-202", courseTitle: "Fiqh of Worship", teacher: "Sheikh Abdul Rahman", capacity: 30, enrolled: 28, category: "Regular Class", timeStart: "2026-07-15T15:00", timeEnd: "2026-07-15T16:00", link: "https://zoom.us/j/1234567897", status: "Completed", description: "Teacher walkthrough demonstrating correct purification rituals." },
-  { id: "cls-9", topic: "Hadith Chain Narrators Analysis", courseCode: "ISL-102", courseTitle: "Introduction to Hadith", teacher: "Sheikh Abdul Rahman", capacity: 15, enrolled: 12, category: "Regular Class", timeStart: "2026-07-19T14:00", timeEnd: "2026-07-19T15:00", link: "https://zoom.us/j/1234567898", status: "Upcoming", description: "Mapping narrator biographies and verification grids." },
-  { id: "cls-10", topic: "Juz 30 Words Root Check", courseCode: "ARB-150", courseTitle: "Quranic Arabic Vocabulary", teacher: "Ustadha Fatima", capacity: 20, enrolled: 16, category: "Revision Session", timeStart: "2026-07-16T16:00", timeEnd: "2026-07-16T17:00", link: "https://zoom.us/j/1234567899", status: "Upcoming", description: "Vocabulary breakdown of common root words in Juz Amma." },
-  { id: "cls-11", topic: "Tafseer of Surah An-Nas Introduction", courseCode: "QRN-250", courseTitle: "Tafseer of Juz Amma", teacher: "Sheikh Abdul Rahman", capacity: 40, enrolled: 35, category: "Regular Class", timeStart: "2026-07-16T19:00", timeEnd: "2026-07-16T20:00", link: "https://zoom.us/j/1234567900", status: "Upcoming", description: "Introduction to themes of refuge and protection in Surah An-Nas." },
-  { id: "cls-12", topic: "Pillars of Faith Q&A Session", courseCode: "ISL-101", courseTitle: "Islamic Creed Aqeedah", teacher: "Sheikh Abdul Rahman", capacity: 30, enrolled: 25, category: "Regular Class", timeStart: "2026-07-20T16:00", timeEnd: "2026-07-20T17:00", link: "https://zoom.us/j/1234567901", status: "Upcoming", description: "Reviewing final project outlines and answering student creed questions." },
-  { id: "cls-13", topic: "Manners with Parents Discussion", courseCode: "ISL-080", courseTitle: "Basic Islamic Manners Akhlaq", teacher: "Ustadha Fatima", capacity: 20, enrolled: 18, category: "Regular Class", timeStart: "2026-07-16T09:00", timeEnd: "2026-07-16T10:00", link: "https://zoom.us/j/1234567902", status: "Completed", description: "Interactive talk detailing filial piety and parent relationships." },
-  { id: "cls-14", topic: "Naskh stroke patterns analysis", courseCode: "ARB-099", courseTitle: "Arabic Handwriting Naskh", teacher: "Ustadha Fatima", capacity: 10, enrolled: 8, category: "Trial Class", timeStart: "2026-07-15T11:00", timeEnd: "2026-07-15T12:00", link: "https://zoom.us/j/1234567903", status: "Completed", description: "Trial session demonstrating pen grid angles for Naskh strokes." },
-  { id: "cls-15", topic: "Hajj Scenario Rulings check", courseCode: "ISL-250", courseTitle: "Rulings of Hajj & Umrah", teacher: "Sheikh Abdul Rahman", capacity: 40, enrolled: 38, category: "Revision Session", timeStart: "2026-07-21T18:00", timeEnd: "2026-07-21T19:00", link: "https://zoom.us/j/1234567904", status: "Upcoming", description: "Analyzing scenarios to distinguish correct pilgrimage pillars from minor mistakes." },
-  { id: "cls-16", topic: "Tajweed symbols match up tutorial", courseCode: "TAJ-101", courseTitle: "Tajweed Rules for Kids", teacher: "Ustadha Fatima", capacity: 50, enrolled: 45, category: "Regular Class", timeStart: "2026-07-16T14:30", timeEnd: "2026-07-16T15:30", link: "https://zoom.us/j/1234567905", status: "Live", description: "Interactive voice game review matching markers." },
-  { id: "cls-17", topic: "Umayyad Caliphate transitions review", courseCode: "ISL-350", courseTitle: "History of Islamic Caliphates", teacher: "Sheikh Abdul Rahman", capacity: 25, enrolled: 20, category: "Regular Class", timeStart: "2026-07-14T17:00", timeEnd: "2026-07-14T18:00", link: "https://zoom.us/j/1234567906", status: "Completed", description: "Detailed history analysis covering caliphate transitions." },
-  { id: "cls-18", topic: "Jazariyyah Recitation Mastery", courseCode: "TAJ-301", courseTitle: "Tajweed Masterclass", teacher: "Ustadha Fatima", capacity: 5, enrolled: 4, category: "1-on-1 Session", timeStart: "2026-07-16T18:00", timeEnd: "2026-07-16T18:30", link: "https://zoom.us/j/1234567907", status: "Upcoming", description: "Evaluating recitation of poem lines under Sheikh verification." },
-  { id: "cls-19", topic: "Juz Amma Spiritual Themes", courseCode: "QRN-301", courseTitle: "Quranic Reflections", teacher: "Sheikh Abdul Rahman", capacity: 30, enrolled: 27, category: "Regular Class", timeStart: "2026-07-22T19:00", timeEnd: "2026-07-22T20:00", link: "https://zoom.us/j/1234567908", status: "Upcoming", description: "Reflective essays mapping thematic threads in Juz 30." },
-  { id: "cls-20", topic: "Intro to Quranic Codex History", courseCode: "QRN-202", courseTitle: "Intro to Quran Sciences", teacher: "Sheikh Abdul Rahman", capacity: 20, enrolled: 18, category: "Regular Class", timeStart: "2026-07-16T13:00", timeEnd: "2026-07-16T14:00", link: "https://zoom.us/j/1234567909", status: "Completed", description: "Chronological study detailing early Quran codification." },
-  { id: "cls-21", topic: "Islamic Golden Age Achievements Overview", courseCode: "ISL-220", courseTitle: "Islamic History & Heritage", teacher: "Sheikh Abdul Rahman", capacity: 25, enrolled: 22, category: "Regular Class", timeStart: "2026-07-16T15:00", timeEnd: "2026-07-16T16:00", link: "https://zoom.us/j/1234567910", status: "Completed", description: "Exploring major astronomical and medical contributions." },
-  { id: "cls-22", topic: "Introductory Tajweed Reading basic", courseCode: "TAJ-099", courseTitle: "Introduction to Tajweed", teacher: "Ustadha Fatima", capacity: 60, enrolled: 55, category: "Trial Class", timeStart: "2026-07-16T11:00", timeEnd: "2026-07-16T12:00", link: "https://zoom.us/j/1234567911", status: "Completed", description: "Simple trial explaining basic voicing coordinates to kids." },
-  { id: "cls-23", topic: "Five Pillars Presentation rehearsal", courseCode: "ISL-050", courseTitle: "Pillars of Islam Course", teacher: "Ustadha Fatima", capacity: 15, enrolled: 12, category: "Regular Class", timeStart: "2026-07-16T08:00", timeEnd: "2026-07-16T09:00", link: "https://zoom.us/j/1234567912", status: "Completed", description: "Rehearsal slides review for the daily prayer and charity modules." },
-  { id: "cls-24", topic: "Modern Islamic Financing Compliance", courseCode: "ISL-302", courseTitle: "Fiqh of Transactions Muamalat", teacher: "Sheikh Abdul Rahman", capacity: 10, enrolled: 8, category: "Regular Class", timeStart: "2026-07-23T15:00", timeEnd: "2026-07-23T16:00", link: "https://zoom.us/j/1234567913", status: "Upcoming", description: "Analyzing banking contracts under shariah rules." },
-  { id: "cls-25", topic: "Al-Jazeera News Translation tutorial", courseCode: "ARB-350", courseTitle: "Arabic Media Translation", teacher: "Ustadha Fatima", capacity: 10, enrolled: 9, category: "Regular Class", timeStart: "2026-07-16T15:00", timeEnd: "2026-07-16T16:00", link: "https://zoom.us/j/1234567914", status: "Completed", description: "Practical script check translating live media clips." },
-  { id: "cls-26", topic: "Metaphors in Quran Rhetoric check", courseCode: "ARB-302", courseTitle: "Advanced Arabic Rhetoric", teacher: "Ustadha Fatima", capacity: 15, enrolled: 11, category: "Regular Class", timeStart: "2026-07-24T16:00", timeEnd: "2026-07-24T17:00", link: "https://zoom.us/j/1234567915", status: "Upcoming", description: "Exploration of metaphor classifications in Surah Al-Rahman." },
-  { id: "cls-27", topic: "Hudaybiyyah Treaty analysis meeting", courseCode: "ISL-401", courseTitle: "Advanced Seerah Analysis", teacher: "Sheikh Abdul Rahman", capacity: 8, enrolled: 6, category: "Revision Session", timeStart: "2026-07-25T11:00", timeEnd: "2026-07-25T12:00", link: "https://zoom.us/j/1234567916", status: "Upcoming", description: "Reviewing treaty terms and conditions signed during early Medina." },
-  { id: "cls-28", topic: "Arabic Irregular Verbs exercise session", courseCode: "ARB-401", courseTitle: "Advanced Arabic Syntax", teacher: "Ustadha Fatima", capacity: 8, enrolled: 7, category: "Regular Class", timeStart: "2026-07-26T14:00", timeEnd: "2026-07-26T15:00", link: "https://zoom.us/j/1234567917", status: "Upcoming", description: "Hands-on conjugating irregular weak root verbs." },
-  { id: "cls-29", topic: "Waqf & Ibtida stopping signs check", courseCode: "TAJ-150", courseTitle: "Intermediate Tajweed Practice", teacher: "Ustadha Fatima", capacity: 25, enrolled: 22, category: "Regular Class", timeStart: "2026-07-16T15:00", timeEnd: "2026-07-16T16:00", link: "https://zoom.us/j/1234567918", status: "Completed", description: "Checking rules of Waqf and Ibtida on selected Juz 30 verses." },
-  { id: "cls-30", topic: "Basic Nouns case endings tutorial", courseCode: "ARB-101", courseTitle: "Arabic Grammar Level 1", teacher: "Ustadha Fatima", capacity: 20, enrolled: 18, category: "Quiz", timeStart: "2026-07-27T10:00", timeEnd: "2026-07-27T11:00", link: "https://zoom.us/j/1234567919", status: "Upcoming", description: "Quiz and grammar breakdown covering noun declensions." }
-];
+const INITIAL_CLASSES: any[] = [];
 
 const INITIAL_CATEGORIES = ["Regular Class", "1-on-1 Session", "Revision Session", "Guest Lecture", "Trial Class", "Quiz"];
 const STATUSES = ["All", "Upcoming", "Live", "Completed", "Cancelled"] as const;
@@ -157,6 +126,16 @@ export default function ClassesPage() {
   const [teachersList, setTeachersList] = useState<string[]>(TEACHERS);
   const [coursesList, setCoursesList] = useState(AVAILABLE_COURSES);
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+
+  // Load classes from the database.
+  useEffect(() => {
+    fetch(`${apiBase}/lms-data/classes`)
+      .then(res => res.json())
+      .then((data: any[]) => setClasses(data))
+      .catch(console.error);
+  }, [apiBase]);
+
   useEffect(() => {
     // Fetch teachers from backend
     fetchStudentsTeachers()
@@ -168,20 +147,22 @@ export default function ClassesPage() {
       })
       .catch(err => console.warn("Failed to fetch teachers from API, using fallback data", err));
 
-    // Fetch courses from backend
-    fetchStudentsCourses()
-      .then(data => {
+    // Courses come from the admin's Learning-Management catalogue (LmsCourse),
+    // so the dropdown shows real course codes/titles — never a database UUID.
+    fetch(`${apiBase}/lms-data/courses`)
+      .then(res => res.json())
+      .then((data: any[]) => {
         if (data && data.length > 0) {
-          const formatted = data.map((c, i) => ({
-            code: c.id,
+          const formatted = data.map(c => ({
+            code: c.code,
             title: c.title,
-            studentsCount: 15 + (i * 3)
+            studentsCount: c.studentsCount ?? 0,
           }));
           setCoursesList(formatted);
         }
       })
       .catch(err => console.warn("Failed to fetch courses from API, using fallback data", err));
-  }, []);
+  }, [apiBase]);
 
   // Reset page when filter triggers
   useEffect(() => {
@@ -245,13 +226,17 @@ export default function ClassesPage() {
       color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
     }).then((result) => {
       if (result.isConfirmed) {
-        setClasses(prev => prev.filter(c => c.id !== id));
-        Swal.fire({
-          title: "Deleted!",
-          text: "The class has been deleted.",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
+        fetch(`${apiBase}/lms-data/classes/${id}`, { method: "DELETE", headers: authHeader() })
+          .then(() => {
+            setClasses(prev => prev.filter(c => c.id !== id));
+            Swal.fire({
+              title: "Deleted!",
+              text: "The class has been deleted.",
+              icon: "success",
+              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+            });
+          })
+          .catch(() => Swal.fire({ title: "Error", text: "Could not delete class.", icon: "error" }));
       }
     });
   };
@@ -285,8 +270,7 @@ export default function ClassesPage() {
 
     const courseObj = coursesList.find(c => c.code === formCourseCode) || AVAILABLE_COURSES.find(c => c.code === formCourseCode)!;
 
-    const newClass = {
-      id: `cls-${Date.now()}`,
+    const payload = {
       topic: formTopic,
       courseCode: courseObj.code,
       courseTitle: courseObj.title,
@@ -301,14 +285,23 @@ export default function ClassesPage() {
       description: formDescription || "No description provided."
     };
 
-    setClasses([newClass, ...classes]);
-    setShowAddModal(false);
-    Swal.fire({
-      title: "Scheduled",
-      text: "New class successfully scheduled!",
-      icon: "success",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-    });
+    fetch(`${apiBase}/lms-data/classes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(payload),
+    })
+      .then(res => res.json())
+      .then(saved => {
+        setClasses(prev => [saved, ...prev]);
+        setShowAddModal(false);
+        Swal.fire({
+          title: "Scheduled",
+          text: "New class successfully scheduled!",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(() => Swal.fire({ title: "Error", text: "Could not schedule class.", icon: "error" }));
   };
 
   const handleOpenEditModal = (cls: typeof INITIAL_CLASSES[0]) => {
@@ -342,34 +335,38 @@ export default function ClassesPage() {
 
     const courseObj = coursesList.find(c => c.code === formCourseCode) || AVAILABLE_COURSES.find(c => c.code === formCourseCode)!;
 
-    setClasses(prev => prev.map(c => {
-      if (c.id === selectedClass.id) {
-        return {
-          ...c,
-          topic: formTopic,
-          courseCode: courseObj.code,
-          courseTitle: courseObj.title,
-          teacher: formTeacher,
-          capacity: Number(formCapacity) || 15,
-          enrolled: Number(formEnrolled) || 0,
-          category: formCategory,
-          timeStart: formTimeStart,
-          timeEnd: formTimeEnd,
-          link: formLink,
-          status: formStatus,
-          description: formDescription
-        };
-      }
-      return c;
-    }));
+    const payload = {
+      topic: formTopic,
+      courseCode: courseObj.code,
+      courseTitle: courseObj.title,
+      teacher: formTeacher,
+      capacity: Number(formCapacity) || 15,
+      enrolled: Number(formEnrolled) || 0,
+      category: formCategory,
+      timeStart: formTimeStart,
+      timeEnd: formTimeEnd,
+      link: formLink,
+      status: formStatus,
+      description: formDescription
+    };
 
-    setShowEditModal(false);
-    Swal.fire({
-      title: "Updated",
-      text: "Class schedule updated successfully!",
-      icon: "success",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-    });
+    fetch(`${apiBase}/lms-data/classes/${selectedClass.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify(payload),
+    })
+      .then(res => res.json())
+      .then(saved => {
+        setClasses(prev => prev.map(c => (c.id === saved.id ? saved : c)));
+        setShowEditModal(false);
+        Swal.fire({
+          title: "Updated",
+          text: "Class schedule updated successfully!",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(() => Swal.fire({ title: "Error", text: "Could not update class.", icon: "error" }));
   };
 
   const handleOpenViewDetails = (cls: typeof INITIAL_CLASSES[0]) => {
@@ -487,7 +484,7 @@ export default function ClassesPage() {
                   >
                     <option value="All">All Courses</option>
                     {coursesList.map(c => (
-                      <option key={c.code} value={c.code}>{c.code}</option>
+                      <option key={c.code} value={c.code}>{c.title}</option>
                     ))}
                   </select>
                 </div>
@@ -806,7 +803,7 @@ export default function ClassesPage() {
                   >
                     {coursesList.map(c => (
                       <option key={c.code} value={c.code}>
-                        {c.title} ({c.code})
+                        {c.title}
                       </option>
                     ))}
                   </select>
@@ -973,7 +970,7 @@ export default function ClassesPage() {
                   >
                     {coursesList.map(c => (
                       <option key={c.code} value={c.code}>
-                        {c.title} ({c.code})
+                        {c.title}
                       </option>
                     ))}
                   </select>

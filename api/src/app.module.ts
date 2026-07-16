@@ -19,8 +19,7 @@ import { TrialsModule } from './trials/trials.module';
 import { CategoriesModule } from './categories/categories.module';
 import { LmsDataModule } from './lms-data/lms-data.module';
 import { DashboardModule } from './dashboard/dashboard.module';
-
-
+import { PayoutsModule } from './payouts/payouts.module';
 
 @Module({
   imports: [
@@ -42,6 +41,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CategoriesModule,
     LmsDataModule,
     DashboardModule,
+    PayoutsModule,
   ],
   controllers: [HealthController],
   providers: [

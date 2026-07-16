@@ -162,7 +162,7 @@ export default function AssessmentsPage() {
   const avgPerformanceScore = gradedAssessments.length > 0 
     ? Math.round(gradedAssessments.reduce((sum, a) => sum + a.avgScore, 0) / gradedAssessments.length) 
     : 0;
-  const totalStudentsEvaluated = assessments.reduce((sum, a) => sum + a.studentsCount, 0);
+  const totalStudentsEvaluated = assessments.reduce((sum, a) => sum + (Number(a.studentsCount) || 0), 0);
   // Passing rate represents the ratio of assessments with average score >= 80%
   const passingAssessmentsCount = assessments.filter(a => a.avgScore >= 80).length;
   const passingRate = totalAssessmentsCount > 0 

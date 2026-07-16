@@ -259,4 +259,58 @@ export class LmsDataController {
   deletePackage(@Param('id') id: string) {
     return this.service.deletePackage(id);
   }
+
+  // Classes
+  @Get('classes')
+  @Public()
+  @ApiOperation({ summary: 'Get all classes' })
+  getClasses() {
+    return this.service.getClasses();
+  }
+
+  @Post('classes')
+  @ApiOperation({ summary: 'Create a class' })
+  createClass(@Body() dto: any) {
+    return this.service.createClass(dto);
+  }
+
+  @Put('classes/:id')
+  @ApiOperation({ summary: 'Update a class' })
+  updateClass(@Param('id') id: string, @Body() dto: any) {
+    return this.service.updateClass(id, dto);
+  }
+
+  @Delete('classes/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a class' })
+  deleteClass(@Param('id') id: string) {
+    return this.service.deleteClass(id);
+  }
+
+  // Meetings
+  @Get('meetings')
+  @Public()
+  @ApiOperation({ summary: 'Get all meetings' })
+  getMeetings() {
+    return this.service.getMeetings();
+  }
+
+  @Post('meetings')
+  @ApiOperation({ summary: 'Create a meeting' })
+  createMeeting(@Body() dto: any) {
+    return this.service.createMeeting(dto);
+  }
+
+  @Put('meetings/:id')
+  @ApiOperation({ summary: 'Update a meeting' })
+  updateMeeting(@Param('id') id: string, @Body() dto: any) {
+    return this.service.updateMeeting(id, dto);
+  }
+
+  @Delete('meetings/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a meeting' })
+  deleteMeeting(@Param('id') id: string) {
+    return this.service.deleteMeeting(id);
+  }
 }

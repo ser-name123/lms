@@ -17,10 +17,11 @@ export class CreateInvoiceDto {
   @IsNotEmpty()
   number!: string;
 
-  @ApiProperty({ example: 'student-id-here' })
+  // Optional: omit for a custom/external recipient (name+email go in notes).
+  @ApiPropertyOptional({ example: 'student-id-here' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  studentId!: string;
+  studentId?: string;
 
   @ApiProperty({ example: 142.5 })
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -41,6 +42,17 @@ export class CreateInvoiceDto {
   @IsOptional()
   @IsDateString()
   dueAt?: string;
+
+  // Free-form notes; the UI stores a JSON blob (bundle, cycle, tax…) here.
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @ApiPropertyOptional({ example: 'USD' })
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }
 
 export class UpdateInvoiceDto {
@@ -59,6 +71,11 @@ export class UpdateInvoiceDto {
   @IsOptional()
   @IsDateString()
   dueAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class ListInvoicesDto {

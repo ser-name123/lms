@@ -100,6 +100,7 @@ model User {
   teacherProfile TeacherProfile?
   refreshTokens  RefreshToken[]
   leaveRequests  LeaveRequest[]
+  payouts        Payout[]
 
   @@index([role, status])
 }
@@ -281,14 +282,16 @@ model Submission {
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 model Invoice {
-  id        String         @id @default(uuid())
-  number    String         @unique
-  studentId String
-  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  amount    Decimal        @db.Decimal(10, 2)
-  currency  String         @default("USD")
-  status    InvoiceStatus  @default(DRAFT)
-  issuedAt  DateTime       @default(now())
+  id        String          @id @default(uuid())
+  number    String          @unique
+  // Optional: an invoice can bill a registered student OR a custom/external
+  // recipient (whose name + email live in the notes payload).
+  studentId String?
+  student   StudentProfile? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  amount    Decimal         @db.Decimal(10, 2)
+  currency  String          @default("USD")
+  status    InvoiceStatus   @default(DRAFT)
+  issuedAt  DateTime        @default(now())
   dueAt     DateTime?
   paidAt    DateTime?
   notes     String?
@@ -480,6 +483,75 @@ model LmsPackage {
   features    String[]
   status      String   @default("Active")
   description String
+}
+
+model LmsClass {
+  id          String   @id @default(uuid())
+  topic       String
+  courseCode  String
+  courseTitle String
+  teacher     String
+  category    String
+  capacity    Int      @default(15)
+  enrolled    Int      @default(0)
+  timeStart   String
+  timeEnd     String
+  link        String?
+  status      String   @default("Upcoming")
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+model LmsMeeting {
+  id        String   @id @default(uuid())
+  topic     String
+  type      String
+  timeStart String
+  timeEnd   String
+  link      String?
+  host      String
+  status    String   @default("Upcoming")
+  agenda    String?
+  // Array of { name, role, email, status } — stored as JSON.
+  attendees Json     @default("[]")
+  createdAt DateTime @default(now())
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+enum PayoutMethod {
+  BANK_TRANSFER
+  WISE
+  PAYPAL
+  CASH
+  STRIPE
+}
+
+model Payout {
+  id                 String       @id @default(uuid())
+  userId             String
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount             Decimal      @db.Decimal(10, 2)
+  deductions         Decimal      @default(0) @db.Decimal(10, 2)
+  bonus              Decimal      @default(0) @db.Decimal(10, 2)
+  netAmount          Decimal      @db.Decimal(10, 2)
+  paymentMethod      PayoutMethod @default(BANK_TRANSFER)
+  status             PayoutStatus @default(PENDING)
+  paymentDate        DateTime?
+  referenceNumber    String?
+  billingPeriodStart DateTime
+  billingPeriodEnd   DateTime
+  notes              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([status])
 }
 
 
