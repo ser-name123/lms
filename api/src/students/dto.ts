@@ -122,6 +122,8 @@ export class CreateStudentDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(10000000)
   fees?: number;
 
   @ApiPropertyOptional()
@@ -175,6 +177,8 @@ export class UpdateStudentDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(10000000)
   fees?: number;
 
   @ApiPropertyOptional({ enum: UserStatus })

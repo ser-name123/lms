@@ -11,15 +11,19 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
-import { Public } from '../auth/decorators';
+import { Public, Roles } from '../auth/decorators';
+import { Role } from '../generated/prisma/enums';
+import { CreateCategoryDto } from './dto';
 
 @ApiTags('categories')
+@ApiBearerAuth()
 @Controller('categories')
-@Public()
+@Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
 export class CategoriesController {
   constructor(private readonly service: CategoriesService) {}
 
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Get all categories, optionally filtered by type' })
   list(@Query('type') type?: string) {
     return this.service.list(type);
@@ -27,7 +31,7 @@ export class CategoriesController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new category' })
-  create(@Body() dto: { name: string; type: string }) {
+  create(@Body() dto: CreateCategoryDto) {
     return this.service.create(dto);
   }
 

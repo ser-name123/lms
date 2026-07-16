@@ -1,13 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
+import { TrialStatus } from '../generated/prisma/enums';
+
+const GENDER_PREFS = ['Male', 'Female', 'Any'];
 
 export class CreateTrialDto {
   @ApiProperty({ example: 'Zayn Malik' })
   @IsString()
+  @IsNotEmpty()
   name!: string;
 
   @ApiProperty({ example: 'zayn@example.com' })
-  @IsString()
+  @IsEmail()
   email!: string;
 
   @ApiPropertyOptional({ example: '+1 555-0199' })
@@ -17,18 +31,23 @@ export class CreateTrialDto {
 
   @ApiProperty({ example: 'United Kingdom' })
   @IsString()
+  @IsNotEmpty()
   country!: string;
 
   @ApiProperty({ example: 'Quran' })
   @IsString()
+  @IsNotEmpty()
   course!: string;
 
   @ApiProperty({ example: 'Any' })
-  @IsString()
+  @IsIn(GENDER_PREFS)
   prefTeacherGender!: string;
 
   @ApiProperty({ example: 10 })
-  @IsNumber()
+  @Type(() => Number)
+  @IsInt()
+  @Min(3)
+  @Max(120)
   age!: number;
 
   @ApiPropertyOptional({ example: 'Trial goals details' })
@@ -36,9 +55,9 @@ export class CreateTrialDto {
   @IsString()
   goals?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: TrialStatus })
   @IsOptional()
-  @IsString()
+  @IsIn(Object.values(TrialStatus))
   status?: string;
 
   @ApiPropertyOptional()
@@ -55,6 +74,22 @@ export class CreateTrialDto {
   @IsOptional()
   @IsString()
   meetLink?: string;
+}
+
+// Edit form sends a partial trial; every field is optional but still validated.
+export class UpdateTrialDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsString() mobile?: string;
+  @IsOptional() @IsString() country?: string;
+  @IsOptional() @IsString() course?: string;
+  @IsOptional() @IsIn(GENDER_PREFS) prefTeacherGender?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(3) @Max(120) age?: number;
+  @IsOptional() @IsString() goals?: string;
+  @IsOptional() @IsIn(Object.values(TrialStatus)) status?: string;
+  @IsOptional() @IsString() scheduledTime?: string;
+  @IsOptional() @IsString() assignedTeacher?: string;
+  @IsOptional() @IsString() meetLink?: string;
 }
 
 export class ScheduleTrialDto {

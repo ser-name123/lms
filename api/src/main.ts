@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 
@@ -27,6 +28,9 @@ function allowedOrigins(): string[] | true {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Standard hardening headers (CSP off by default — this is a JSON API).
+  app.use(helmet());
+
   app.setGlobalPrefix('api');
   const origins = allowedOrigins();
   console.log(
@@ -34,7 +38,9 @@ async function bootstrap() {
   );
   app.enableCors({
     origin: origins,
-    credentials: true,
+    // Only allow credentialed cross-origin requests against an explicit
+    // allowlist; never combine "reflect any origin" with credentials.
+    credentials: origins !== true,
   });
 
   app.useGlobalPipes(
@@ -45,14 +51,17 @@ async function bootstrap() {
     }),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('LMS API')
-    .setDescription('Admin, teacher and student endpoints')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  // API docs enumerate the whole surface — keep them out of production.
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('LMS API')
+      .setDescription('Admin, teacher and student endpoints')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+  }
 
   const port = process.env.PORT ?? 5000;
   await app.listen(port);

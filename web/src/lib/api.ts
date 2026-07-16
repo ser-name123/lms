@@ -14,6 +14,16 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Authorization header for raw `fetch` calls that don't go through `api()`
+ * (e.g. the lms-data pages and multipart uploads). Spread into a headers object:
+ *   headers: { "Content-Type": "application/json", ...authHeader() }
+ */
+export const authHeader = (): Record<string, string> => {
+  const token = authSnapshot().accessToken;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export type Tokens = { accessToken: string; refreshToken: string };
 
 /* Refresh tokens are single-use on the server: two concurrent 401s that each

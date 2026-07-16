@@ -1,5 +1,7 @@
 "use client";
 
+import { authHeader } from "@/lib/api";
+
 import { useState, useEffect } from "react";
 import { 
   Plus, 
@@ -202,7 +204,7 @@ export default function PackagesPage() {
       color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
     }).then((result) => {
       if (result.isConfirmed) {
-        fetch(`${apiBase}/lms-data/packages/${id}`, { method: "DELETE" })
+        fetch(`${apiBase}/lms-data/packages/${id}`, { method: "DELETE", headers: authHeader() })
           .then(() => {
             setPackages(prev => prev.filter(p => p.id !== id));
             Swal.fire({
@@ -252,7 +254,7 @@ export default function PackagesPage() {
 
     fetch(`${apiBase}/lms-data/packages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(newPkg),
     })
       .then(res => res.json())
@@ -306,7 +308,7 @@ export default function PackagesPage() {
 
     fetch(`${apiBase}/lms-data/packages/${selectedPackage.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(updatedPayload),
     })
       .then(res => res.json())

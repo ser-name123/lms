@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard, RolesGuard } from './auth/guards';
@@ -24,6 +25,9 @@ import { DashboardModule } from './dashboard/dashboard.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Baseline rate limit for every route (100 req/min per IP); auth routes
+    // tighten this further with @Throttle. Blocks brute-force / abuse.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     AuthModule,
     StudentsModule,
@@ -41,6 +45,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
   ],
   controllers: [HealthController],
   providers: [
+    // Rate limiting runs first, before auth, so floods are shed cheaply.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Auth is deny-by-default: every route is guarded unless it opts out with
     // @Public(), so a new controller cannot be left unprotected by omission.
     { provide: APP_GUARD, useClass: JwtAuthGuard },

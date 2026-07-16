@@ -1,4 +1,15 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { UserStatus } from '../generated/prisma/enums';
 
@@ -33,16 +44,21 @@ export class ListTeachersDto {
 }
 
 export class CreateTeacherDto {
-  @IsString()
+  @IsEmail()
   email: string;
 
+  @IsOptional()
   @IsString()
+  @MinLength(8)
+  @MaxLength(72)
   password?: string;
 
   @IsString()
+  @IsNotEmpty()
   firstName: string;
 
   @IsString()
+  @IsNotEmpty()
   lastName: string;
 
   @IsOptional()
@@ -51,7 +67,9 @@ export class CreateTeacherDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100000)
   hourlyRate?: number;
 
   @IsOptional()
@@ -82,7 +100,9 @@ export class UpdateTeacherDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100000)
   hourlyRate?: number;
 
   @IsOptional()
