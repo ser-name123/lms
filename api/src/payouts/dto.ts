@@ -9,6 +9,7 @@ import {
   IsNotEmpty,
 } from 'class-validator';
 import { PayoutMethod, PayoutStatus } from '../generated/prisma/enums';
+import { Type } from 'class-transformer';
 
 export class CreatePayoutDto {
   @ApiProperty()
@@ -128,11 +129,13 @@ export class BulkGeneratePayoutsDto {
 export class ListPayoutsDto {
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   page?: number;
 
   @ApiPropertyOptional({ default: 20 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   limit?: number;
 
