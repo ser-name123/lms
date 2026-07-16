@@ -73,7 +73,7 @@ export default function MeetingsPage() {
 
   // Load meetings from the database.
   useEffect(() => {
-    fetch(`${apiBase}/lms-data/meetings`)
+    fetch(`${apiBase}/lms-data/meetings`, { headers: authHeader() })
       .then(res => res.json())
       .then((data: any[]) => setMeetings(data))
       .catch(console.error);

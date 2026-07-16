@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { authHeader, fetchDashboard, type DashboardOverview } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/store/auth";
 
 const RANGES = ["7d", "30d", "90d", "12m"] as const;
 
@@ -44,6 +45,9 @@ function relativeTime(iso: string): string {
 }
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -241,6 +245,7 @@ export default function DashboardPage() {
         {/* Quick Compose & Recent Activity row */}
         <div className="grid gap-5 lg:grid-cols-12">
           {/* Quick Compose */}
+          {isAdmin && (
           <Card className="lg:col-span-5 border border-hairline bg-surface flex flex-col">
             <CardHeader title="Quick Email Compose" />
             <CardBody className="p-5 flex-1 flex flex-col justify-between">
@@ -321,6 +326,7 @@ export default function DashboardPage() {
               </div>
             </CardBody>
           </Card>
+          )}
 
           {/* Recent activity in its own card */}
           <Card className="lg:col-span-7 border border-hairline bg-surface">

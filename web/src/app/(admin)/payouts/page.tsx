@@ -605,8 +605,9 @@ export default function PayoutsDashboard() {
             {/* Actions: Run Payroll */}
             <div className="flex items-center gap-2 flex-wrap">
               <Button 
+                variant="primary"
                 onClick={() => setShowPayrunModal(true)}
-                className="bg-accent hover:shadow-lg text-white font-bold text-xs h-10 px-5 py-2.5 rounded-xl flex items-center gap-1.5"
+                className="hover:shadow-lg font-bold text-xs h-10 px-5 py-2.5 rounded-xl flex items-center gap-1.5"
               >
                 <Plus className="size-4" />
                 Run Monthly Payroll
@@ -954,7 +955,7 @@ export default function PayoutsDashboard() {
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="h-10 text-xs font-bold text-white bg-accent hover:shadow-lg hover:shadow-accent/15 px-5 py-2.5 rounded-xl flex items-center justify-center transition-all cursor-pointer"
+                  className="h-10 text-xs font-bold text-white bg-accent hover:opacity-90 hover:shadow-lg hover:shadow-accent/15 px-5 py-2.5 rounded-xl flex items-center justify-center transition-all cursor-pointer"
                 >
                   {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null}
                   Calculate & Generate Drafts
@@ -1062,7 +1063,7 @@ export default function PayoutsDashboard() {
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="h-10 text-xs font-bold text-white bg-accent hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer"
+                  className="h-10 text-xs font-bold text-white bg-accent hover:opacity-90 hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer"
                 >
                   {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null}
                   Save Adjustments

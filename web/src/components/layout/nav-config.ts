@@ -11,6 +11,7 @@ import {
   FileText,
   Library,
   Package,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,7 +36,10 @@ export type NavGroup = {
 export const navGroups: NavGroup[] = [
   {
     label: "Overview",
-    items: [{ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Live Chat", href: "/chat", icon: MessageCircle },
+    ],
   },
   {
     label: "Academics",

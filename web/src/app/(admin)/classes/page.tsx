@@ -130,7 +130,7 @@ export default function ClassesPage() {
 
   // Load classes from the database.
   useEffect(() => {
-    fetch(`${apiBase}/lms-data/classes`)
+    fetch(`${apiBase}/lms-data/classes`, { headers: authHeader() })
       .then(res => res.json())
       .then((data: any[]) => setClasses(data))
       .catch(console.error);

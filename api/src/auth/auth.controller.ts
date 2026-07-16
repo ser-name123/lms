@@ -36,7 +36,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Exchange credentials for OTP requirement' })
   login(
     @Body() dto: LoginDto,
-  ): Promise<TokensDto | { otpRequired: boolean; email: string }> {
+  ): Promise<TokensDto | { otpRequired: boolean; email: string; otp?: string }> {
     return this.auth.login(dto.email, dto.password);
   }
 

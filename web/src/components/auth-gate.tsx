@@ -37,11 +37,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [isError, error, clear, router]);
 
   useEffect(() => {
-    if (data && data.id !== user?.id) {
+    if (!data) return;
+    /* Always trust the server's identity over the persisted copy. localStorage
+       is user-editable: someone can change the stored role to "ADMIN" while
+       keeping the same id. Syncing only when the id differed let a tampered
+       role survive; compare role/email/id and overwrite whenever any drifts so
+       the panel guards always run against the server's real role. */
+    const stale =
+      data.id !== user?.id ||
+      data.role !== user?.role ||
+      data.email !== user?.email;
+    if (stale) {
       const { accessToken: a, refreshToken: r } = useAuth.getState();
       if (a && r) setSession({ accessToken: a, refreshToken: r }, data);
     }
-  }, [data, user?.id, setSession]);
+  }, [data, user?.id, user?.role, user?.email, setSession]);
 
   if (!hydrated || !accessToken) {
     return (

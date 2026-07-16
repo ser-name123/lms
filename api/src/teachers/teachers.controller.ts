@@ -44,7 +44,7 @@ export class TeachersController {
   }
 
   @Post()
-  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH, Role.SUPERVISOR)
   @ApiOperation({
     summary: 'Create a teacher (also creates their user account)',
   })
@@ -53,7 +53,7 @@ export class TeachersController {
   }
 
   @Patch(':id')
-  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH, Role.SUPERVISOR)
   @ApiOperation({ summary: 'Update a teacher profile' })
   update(
     @Param('id', ParseUUIDPipe) id: string,

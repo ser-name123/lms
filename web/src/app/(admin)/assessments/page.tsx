@@ -108,7 +108,7 @@ export default function AssessmentsPage() {
 
   // Fetch assessments on mount
   useEffect(() => {
-    fetch(`${apiBase}/lms-data/assessments`)
+    fetch(`${apiBase}/lms-data/assessments`, { headers: authHeader() })
       .then(res => res.json())
       .then((data: any[]) => {
         setAssessments(data);

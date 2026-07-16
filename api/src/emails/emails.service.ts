@@ -136,7 +136,7 @@ export class EmailsService {
     const { transporter, from } = await this.getTransporter();
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Edumin Console" <${from}>`,
+      from: `"AL FURQAN Console" <${from}>`,
       to,
       subject,
       text,

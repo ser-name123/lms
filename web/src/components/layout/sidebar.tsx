@@ -3,11 +3,26 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen, GraduationCap, X, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  GraduationCap,
+  X,
+  ChevronDown,
+  ChevronRight,
+  LayoutDashboard,
+  CalendarDays,
+  ClipboardList,
+  Users,
+  MessageCircle,
+  HelpCircle,
+  type LucideIcon,
+} from "lucide-react";
 
 import { navGroups, type NavItem } from "./nav-config";
 import { useUI } from "@/store/ui";
 import { useSettingsStore } from "@/store/settings";
+import { useAuth } from "@/store/auth";
 import { cn } from "@/lib/utils";
 
 function SidebarItem({
@@ -154,7 +169,34 @@ function SidebarItem({
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav, theme } = useUI();
   const { settings } = useSettingsStore();
+  const { user } = useAuth();
   const pathname = usePathname();
+
+  const coachNavItems = [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Trial Management", href: "/evaluation", icon: ClipboardList },
+    { label: "Manage Students", href: "/students", icon: Users },
+    { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
+    {
+      label: "Schedule",
+      icon: CalendarDays,
+      children: [
+        { label: "Classes", href: "/classes", icon: CalendarDays },
+        { label: "Meetings", href: "/meetings", icon: Users },
+      ],
+    },
+    { label: "Messages", href: "/chat", icon: MessageCircle },
+    { label: "Support", href: "/support", icon: HelpCircle },
+  ];
+
+  const supervisorNavItems = [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Recruitment", href: "/teachers?tab=recruitment", icon: Users },
+    { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
+    { label: "Teachers", href: "/teachers", icon: GraduationCap },
+    { label: "Messages", href: "/chat", icon: MessageCircle },
+    { label: "Support", href: "/support", icon: HelpCircle },
+  ];
 
   return (
     <>
@@ -179,21 +221,25 @@ export function Sidebar() {
         {/* Brand */}
         <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-4">
           {theme === "dark" && settings?.logoDark ? (
-            <img src={settings.logoDark} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
+            <img src={settings.logoDark} alt="Logo" className="size-11 object-contain rounded-lg shrink-0 bg-white p-1" />
           ) : settings?.logo ? (
-            <img src={settings.logo} alt="Logo" className="size-9 object-contain rounded-lg shrink-0" />
+            <img src={settings.logo} alt="Logo" className="size-11 object-contain rounded-lg shrink-0 bg-white p-1" />
           ) : (
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent to-[#59A5D8] shadow-md shadow-accent/20 text-white animate-fade-in">
-              <GraduationCap className="size-5" />
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent to-[#59A5D8] shadow-md shadow-accent/20 text-white animate-fade-in">
+              <GraduationCap className="size-6" />
             </span>
           )}
           {!sidebarCollapsed && (
             <div className="min-w-0 flex-1 animate-fade-in">
               <p className="truncate text-base font-extrabold tracking-widest text-white uppercase">
-                {settings?.websiteName || "Edumin"}
+                {settings?.websiteName || "AL FURQAN"}
               </p>
               <p className="truncate text-[10px] font-bold text-sidebar-text/70 uppercase tracking-wider">
-                {settings?.adminConsoleTitle || "Admin console"}
+                {user?.role === "ACADEMIC_COACH"
+                  ? "COACH CONSOLE"
+                  : user?.role === "SUPERVISOR"
+                  ? "SUPERVISOR CONSOLE"
+                  : (settings?.adminConsoleTitle || "Admin console")}
               </p>
             </div>
           )}
@@ -208,26 +254,52 @@ export function Sidebar() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          {navGroups.map((group) => (
-            <div key={group.label} className="mb-5 last:mb-0">
-              {!sidebarCollapsed && (
-                <p className="mb-1.5 px-3 text-[10px] font-bold tracking-wider text-sidebar-text/60 uppercase">
-                  {group.label}
-                </p>
-              )}
-              <ul className="space-y-1">
-                {group.items.map((item) => (
-                  <SidebarItem
-                    key={item.href || item.label}
-                    item={item}
-                    pathname={pathname}
-                    sidebarCollapsed={sidebarCollapsed}
-                    setMobileNav={setMobileNav}
-                  />
-                ))}
-              </ul>
-            </div>
-          ))}
+          {user?.role === "ACADEMIC_COACH" ? (
+            <ul className="space-y-1">
+              {coachNavItems.map((item) => (
+                <SidebarItem
+                  key={item.href || item.label}
+                  item={item}
+                  pathname={pathname}
+                  sidebarCollapsed={sidebarCollapsed}
+                  setMobileNav={setMobileNav}
+                />
+              ))}
+            </ul>
+          ) : user?.role === "SUPERVISOR" ? (
+            <ul className="space-y-1">
+              {supervisorNavItems.map((item) => (
+                <SidebarItem
+                  key={item.href || item.label}
+                  item={item}
+                  pathname={pathname}
+                  sidebarCollapsed={sidebarCollapsed}
+                  setMobileNav={setMobileNav}
+                />
+              ))}
+            </ul>
+          ) : (
+            navGroups.map((group) => (
+              <div key={group.label} className="mb-5 last:mb-0">
+                {!sidebarCollapsed && (
+                  <p className="mb-1.5 px-3 text-[10px] font-bold tracking-wider text-sidebar-text/60 uppercase">
+                    {group.label}
+                  </p>
+                )}
+                <ul className="space-y-1">
+                  {group.items.map((item) => (
+                    <SidebarItem
+                      key={item.href || item.label}
+                      item={item}
+                      pathname={pathname}
+                      sidebarCollapsed={sidebarCollapsed}
+                      setMobileNav={setMobileNav}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
         </nav>
 
         {/* Collapse toggle — desktop only */}

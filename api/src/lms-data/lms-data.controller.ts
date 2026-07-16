@@ -68,17 +68,29 @@ const kbFileFilter = (
   cb(null, true);
 };
 
-// Reads (the catalogue GETs) and file downloads stay open so the app can render
-// content and students can fetch files; every mutating route requires a staff
-// login. Individual read routes re-open with @Public() below.
+// The whole controller is staff-only (ADMIN / SUPERVISOR / ACADEMIC_COACH).
+// These endpoints are consumed exclusively by the admin console (all its calls
+// carry a Bearer token); students and teachers get their own content through
+// the scoped /student-portal and /teacher-portal APIs. The reads used to be
+// @Public(), which exposed class/meeting join links + attendee PII and internal
+// grading metrics to the open internet — that has been closed.
+// Default scope is ADMIN only: managing the course catalogue (courses,
+// packages, assignments, assessments, knowledgebase) belongs to admins. The two
+// sub-admin roles get explicit, narrower grants via method-level @Roles below —
+// ACADEMIC_COACH on classes, both sub-admins on meetings — matching exactly what
+// their panels expose. Previously the class-level granted all three roles full
+// CRUD over everything, so a supervisor/coach could delete the whole catalogue.
 @ApiTags('lms-data')
 @ApiBearerAuth()
 @Controller('lms-data')
-@Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
+@Roles(Role.ADMIN)
 export class LmsDataController {
   constructor(private readonly service: LmsDataService) {}
 
   // Courses
+  // Low-sensitivity catalogue (titles/levels/codes), referenced by many admin
+  // dropdowns via unauthenticated fetch — kept public. Mutations below still
+  // require a staff login.
   @Get('courses')
   @Public()
   @ApiOperation({ summary: 'Get all courses' })
@@ -107,7 +119,6 @@ export class LmsDataController {
 
   // Assignments
   @Get('assignments')
-  @Public()
   @ApiOperation({ summary: 'Get all assignments' })
   getAssignments() {
     return this.service.getAssignments();
@@ -134,7 +145,6 @@ export class LmsDataController {
 
   // Assessments
   @Get('assessments')
-  @Public()
   @ApiOperation({ summary: 'Get all assessments' })
   getAssessments() {
     return this.service.getAssessments();
@@ -160,6 +170,9 @@ export class LmsDataController {
   }
 
   // Knowledgebase
+  // List of learning-material metadata (titles/formats). The files themselves
+  // are already public via the /uploads/knowledgebase static mount, so the
+  // listing stays public too; mutations require a staff login.
   @Get('knowledgebase')
   @Public()
   @ApiOperation({ summary: 'Get all knowledgebase items' })
@@ -181,6 +194,11 @@ export class LmsDataController {
     return this.service.storeKnowledgebaseFile(file);
   }
 
+  // Stays public: knowledgebase files are learning material that enrolled
+  // students download via bare <a>/window.open (no auth header possible), and
+  // the same files are already served from the public /uploads/knowledgebase
+  // static mount — so gating this endpoint would add no protection while
+  // breaking downloads.
   @Get('knowledgebase/:id/download')
   @Public()
   @ApiOperation({ summary: 'Download a resource (counts one view)' })
@@ -234,6 +252,8 @@ export class LmsDataController {
   }
 
   // Packages
+  // Pricing/bundle catalogue — low sensitivity and fetched unauthenticated by
+  // the invoices + packages admin pages. Kept public; mutations need staff auth.
   @Get('packages')
   @Public()
   @ApiOperation({ summary: 'Get all packages' })
@@ -260,54 +280,61 @@ export class LmsDataController {
     return this.service.deletePackage(id);
   }
 
-  // Classes
+  // Classes — the ACADEMIC_COACH panel manages these (its /classes page);
+  // SUPERVISOR has no /classes page so stays ADMIN+COACH only.
   @Get('classes')
-  @Public()
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Get all classes' })
   getClasses() {
     return this.service.getClasses();
   }
 
   @Post('classes')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Create a class' })
   createClass(@Body() dto: any) {
     return this.service.createClass(dto);
   }
 
   @Put('classes/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Update a class' })
   updateClass(@Param('id') id: string, @Body() dto: any) {
     return this.service.updateClass(id, dto);
   }
 
   @Delete('classes/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a class' })
   deleteClass(@Param('id') id: string) {
     return this.service.deleteClass(id);
   }
 
-  // Meetings
+  // Meetings — both sub-admin panels expose a /meetings page.
   @Get('meetings')
-  @Public()
+  @Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Get all meetings' })
   getMeetings() {
     return this.service.getMeetings();
   }
 
   @Post('meetings')
+  @Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Create a meeting' })
   createMeeting(@Body() dto: any) {
     return this.service.createMeeting(dto);
   }
 
   @Put('meetings/:id')
+  @Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Update a meeting' })
   updateMeeting(@Param('id') id: string, @Body() dto: any) {
     return this.service.updateMeeting(id, dto);
   }
 
   @Delete('meetings/:id')
+  @Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a meeting' })
   deleteMeeting(@Param('id') id: string) {

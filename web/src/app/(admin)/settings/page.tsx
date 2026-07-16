@@ -111,7 +111,7 @@ export default function SettingsPage() {
   const [pFontFamily, setPFontFamily] = useState("secondary");
 
   // Brand states
-  const [websiteName, setWebsiteName] = useState("Edumin LMS");
+  const [websiteName, setWebsiteName] = useState("AL FURQAN");
   const [logo, setLogo] = useState<string | null>(null);
   const [logoDark, setLogoDark] = useState<string | null>(null);
   const [adminConsoleTitle, setAdminConsoleTitle] = useState("Admin console");
@@ -510,7 +510,7 @@ export default function SettingsPage() {
     try {
       const fd = new FormData();
       fd.append("to", smtpTestEmail);
-      fd.append("subject", "Edumin SMTP Connection Test");
+      fd.append("subject", "AL FURQAN SMTP Connection Test");
       fd.append("message", "Your SMTP transporter connection test is successful!");
 
       const accessToken = useAuth.getState().accessToken;
@@ -654,7 +654,7 @@ export default function SettingsPage() {
                             required
                             value={websiteName}
                             onChange={(e) => setWebsiteName(e.target.value)}
-                            placeholder="Edumin LMS"
+                            placeholder="AL FURQAN"
                             className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
                           />
                         </div>

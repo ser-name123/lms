@@ -40,6 +40,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { 
   fetchTeachers, 
+  fetchLmsCourses,
   createTeacher, 
   updateTeacher, 
   deleteTeacher, 
@@ -78,7 +79,8 @@ import {
   LeaveRequestStatus,
   ApiError 
 } from "@/lib/api";
-import { cn, initials } from "@/lib/utils";
+import { cn, initials, parseUserAgent } from "@/lib/utils";
+import { useAuth } from "@/store/auth";
 
 const STATS_COLORS = ["#133C55", "#386FA4", "#59A5D8", "#84D2F6", "#10b981", "#ffb822", "#f85a6b"];
 const STATUS_FILTERS = ["All", "Active", "Inactive", "Pending"] as const;
@@ -95,6 +97,9 @@ const statusTone: Record<string, Tone> = {
 };
 
 export default function TeachersPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+
   const [activeTab, setActiveTab] = useState<"teachers" | "others" | "recruitment" | "leave">("teachers");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof STATUS_FILTERS)[number]>("All");
@@ -109,12 +114,119 @@ export default function TeachersPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
 
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(teachers.map(t => t.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(x => x !== id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const result = await Swal.fire({
+      title: `Delete ${selectedIds.length} Instructors?`,
+      text: `Are you sure you want to permanently delete the profiles for the selected ${selectedIds.length} teachers? This action is irreversible.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, delete all",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#f85a6b",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => deleteTeacher(id)));
+        Swal.fire({
+          title: "Deleted!",
+          text: `${selectedIds.length} instructors deleted successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadTeachers();
+        loadStats();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : "Failed to delete instructors.",
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleBulkStatusUpdate = async (newStatus: "ACTIVE" | "INACTIVE") => {
+    if (selectedIds.length === 0) return;
+    const actionLabel = newStatus === "ACTIVE" ? "unblock" : "block";
+
+    const result = await Swal.fire({
+      title: `${newStatus === "ACTIVE" ? "Unblock" : "Block"} ${selectedIds.length} Instructors?`,
+      text: `Are you sure you want to ${actionLabel} the selected ${selectedIds.length} instructors?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: `Yes, ${actionLabel} all`,
+      cancelButtonText: "Cancel",
+      confirmButtonColor: newStatus === "ACTIVE" ? "#10b981" : "#f85a6b",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => updateTeacher(id, { status: newStatus })));
+        Swal.fire({
+          title: "Status Updated!",
+          text: `${selectedIds.length} instructors ${newStatus === "ACTIVE" ? "unblocked" : "blocked"} successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadTeachers();
+        loadStats();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : `Failed to ${actionLabel} instructors.`,
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   // Stats Dashboard
   const [stats, setStats] = useState<TeacherStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
   // Active Dropdown Action Row
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  // Course Selection States
+  const [availableCourses, setAvailableCourses] = useState<{ id: string; title: string }[]>([]);
+  const [courseId, setCourseId] = useState("");
+  const [manageCourseId, setManageCourseId] = useState("");
 
   // Add Teacher Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -142,6 +254,7 @@ export default function TeachersPage() {
   const [manageCountry, setManageCountry] = useState("");
   const [manageTimezone, setManageTimezone] = useState("");
   const [manageStatus, setManageStatus] = useState("ACTIVE");
+  const [managePassword, setManagePassword] = useState("");
   const [manageBusy, setManageBusy] = useState(false);
   const [manageStatusMsg, setManageStatusMsg] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -174,7 +287,7 @@ export default function TeachersPage() {
   const [empLastName, setEmpLastName] = useState("");
   const [empEmail, setEmpEmail] = useState("");
   const [empPassword, setEmpPassword] = useState("");
-  const [empRole, setEmpRole] = useState("SUPERVISOR");
+  const [empRole, setEmpRole] = useState("ACADEMIC_COACH");
   const [empPhone, setEmpPhone] = useState("");
   const [empGender, setEmpGender] = useState("Male");
   const [empJoiningDate, setEmpJoiningDate] = useState("");
@@ -190,7 +303,7 @@ export default function TeachersPage() {
   const [manageEmpFirstName, setManageEmpFirstName] = useState("");
   const [manageEmpLastName, setManageEmpLastName] = useState("");
   const [manageEmpEmail, setManageEmpEmail] = useState("");
-  const [manageEmpRole, setManageEmpRole] = useState("SUPERVISOR");
+  const [manageEmpRole, setManageEmpRole] = useState("ACADEMIC_COACH");
   const [manageEmpStatus, setManageEmpStatus] = useState("ACTIVE");
   const [manageEmpPhone, setManageEmpPhone] = useState("");
   const [manageEmpGender, setManageEmpGender] = useState("Male");
@@ -263,6 +376,7 @@ export default function TeachersPage() {
   // Load teachers list
   const loadTeachers = async () => {
     setLoading(true);
+    setSelectedIds([]);
     try {
       const data = await fetchTeachers({
         page,
@@ -283,6 +397,10 @@ export default function TeachersPage() {
   };
 
   useEffect(() => {
+    setSelectedIds([]);
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab === "teachers") {
       loadTeachers();
     }
@@ -301,6 +419,11 @@ export default function TeachersPage() {
   // Load metrics stats on mount
   useEffect(() => {
     loadStats();
+    fetchLmsCourses()
+      .then((data: any[]) => {
+        setAvailableCourses(data);
+      })
+      .catch((err) => console.error("Failed to load courses:", err));
   }, []);
 
   // Handle CSV Export
@@ -358,7 +481,8 @@ export default function TeachersPage() {
         hourlyRate: hourlyRate || undefined,
         bio: bio || undefined,
         country,
-        timezone
+        timezone,
+        courseId: courseId || undefined
       });
       setModalStatus({ type: "success", message: "Teacher account created successfully!" });
       
@@ -369,6 +493,7 @@ export default function TeachersPage() {
       setPassword("");
       setHourlyRate("");
       setBio("");
+      setCourseId("");
       
       // Reload lists
       loadTeachers();
@@ -398,6 +523,8 @@ export default function TeachersPage() {
     setManageCountry(teacher.user.country || "");
     setManageTimezone(teacher.user.timezone || "");
     setManageStatus(teacher.user.status);
+    setManageCourseId(teacher.courseId || "");
+    setManagePassword("");
     setManageStatusMsg(null);
     setActiveMenuId(null);
   };
@@ -413,12 +540,14 @@ export default function TeachersPage() {
       const updated = await updateTeacher(selectedTeacher.id, {
         firstName: manageFirstName,
         lastName: manageLastName,
-        specialisation: manageSpecialisation,
+        specialisation: undefined,
         hourlyRate: manageHourlyRate || undefined,
         bio: manageBio || undefined,
         country: manageCountry || undefined,
         timezone: manageTimezone || undefined,
-        status: manageStatus
+        status: manageStatus,
+        courseId: manageCourseId || null,
+        password: managePassword || undefined,
       });
       setManageStatusMsg({ type: "success", message: "Teacher configurations updated successfully!" });
       setSelectedTeacher(updated); // Sync details
@@ -1505,6 +1634,17 @@ export default function TeachersPage() {
 
               {/* Action Buttons: Export & Add */}
               <div className="flex items-center gap-2 shrink-0">
+                {teachers.length > 0 && (
+                  <label className="flex items-center gap-1.5 px-3 py-2 border border-hairline rounded-xl text-xs font-bold text-ink-2 bg-surface hover:bg-surface-2 cursor-pointer transition select-none mr-1">
+                    <input 
+                      type="checkbox"
+                      checked={selectedIds.length === teachers.length && teachers.length > 0}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                    />
+                    <span>Select All</span>
+                  </label>
+                )}
                 <Button
                   onClick={handleExportCSV}
                   variant="outline"
@@ -1538,11 +1678,26 @@ export default function TeachersPage() {
                     const stars = (teacher.id.charCodeAt(0) % 2) + 4; // stable mock rating [4-5 stars]
                     const activeCount = teacher._count?.enrollments ?? 0;
                     const classesCount = teacher._count?.classes ?? 0;
+                    const isSelected = selectedIds.includes(teacher.id);
+
                     return (
                       <Card 
                         key={teacher.id} 
-                        className="group border border-hairline/80 rounded-3xl bg-surface hover:shadow-xl hover:border-accent/40 transition-all duration-300 flex flex-col justify-between relative"
+                        className={cn(
+                          "group border border-hairline/80 rounded-3xl bg-surface hover:shadow-xl hover:border-accent/40 transition-all duration-300 flex flex-col justify-between relative",
+                          isSelected && "ring-2 ring-accent border-accent/60 shadow-lg bg-accent-soft/5"
+                        )}
                       >
+                        {/* Select Checkbox Overlay */}
+                        <div className="absolute top-3.5 right-10 z-10">
+                          <input 
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => handleSelectRow(teacher.id, e.target.checked)}
+                            className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0 bg-white/95"
+                          />
+                        </div>
+
                         {/* Hourly Rate Pill Badge */}
                         <div className="absolute top-3 left-3 z-10">
                           <Badge tone="accent" className="font-extrabold text-[10px] px-2 py-0.5 shadow-sm">
@@ -1582,8 +1737,8 @@ export default function TeachersPage() {
                             </h4>
 
                             {/* Specialization */}
-                            <span className="block text-xs font-extrabold text-ink-2 leading-normal">
-                              {teacher.specialisation || "Quran Instructor"}
+                            <span className="block text-xs font-extrabold text-ink-3 leading-normal">
+                              Instructor
                             </span>
 
                             {/* Stars rating */}
@@ -1670,6 +1825,7 @@ export default function TeachersPage() {
                                   <Lock className="size-3.5 text-accent" />
                                   {teacher.user.status === "INACTIVE" ? "Unblock account" : "Block account"}
                                 </button>
+                                {isAdmin && (
                                 <button
                                   onClick={() => handleDeleteTeacher(teacher)}
                                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-semibold text-critical hover:bg-critical/5 transition cursor-pointer"
@@ -1677,6 +1833,7 @@ export default function TeachersPage() {
                                   <Trash2 className="size-3.5" />
                                   Delete profile
                                 </button>
+                                )}
                               </div>
                             </>
                           )}
@@ -2000,6 +2157,7 @@ export default function TeachersPage() {
                                   Portal Access
                                 </button>
                                 <div className="h-px bg-hairline my-1" />
+                                {isAdmin && (
                                 <button
                                   onClick={() => {
                                     setActiveEmployeeMenuId(null);
@@ -2010,6 +2168,7 @@ export default function TeachersPage() {
                                   <Trash2 className="size-3.5" />
                                   Remove Staff
                                 </button>
+                                )}
                               </div>
                             </>
                           )}
@@ -2822,23 +2981,13 @@ export default function TeachersPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Hourly Rate ($ / hr)</label>
                   <div className="relative">
                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3" />
                     <input type="number" required value={hourlyRate} onChange={e => setHourlyRate(e.target.value ? Number(e.target.value) : "")} placeholder="e.g. 18" className="h-10 w-full pl-9 pr-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
                   </div>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Specialisation</label>
-                  <select value={specialisation} onChange={e => setSpecialisation(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                    <option value="Quran">Quran Recitation / Hifz</option>
-                    <option value="Arabic">Arabic Language</option>
-                    <option value="Islamic">Islamic Jurisprudence / Fiqh</option>
-                    <option value="Tajweed">Tajweed Rules</option>
-                    <option value="Hadeeth">Hadeeth Studies</option>
-                  </select>
                 </div>
               </div>
 
@@ -2850,6 +2999,27 @@ export default function TeachersPage() {
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone Key</label>
                   <input type="text" value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="e.g. Africa/Cairo" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Course to Teach (Optional)</label>
+                  <select value={courseId} onChange={e => setCourseId(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
+                    <option value="">-- None --</option>
+                    {availableCourses.map(c => (
+                      <option key={c.id} value={c.id}>{c.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Profession / Role</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value="Teacher"
+                    className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface-2 opacity-75 text-xs text-ink-3 cursor-not-allowed"
+                  />
                 </div>
               </div>
 
@@ -2956,8 +3126,10 @@ export default function TeachersPage() {
                       <span className="text-ink font-semibold mt-0.5 block truncate">{selectedTeacher.user.email}</span>
                     </div>
                     <div>
-                      <span className="text-ink-3 font-bold block">Specialisation</span>
-                      <span className="text-ink font-semibold mt-0.5 block">{selectedTeacher.specialisation || "Quran"}</span>
+                      <span className="text-ink-3 font-bold block">Course Assigned</span>
+                      <span className="text-ink font-semibold mt-0.5 block">
+                        {selectedTeacher.course?.title || <span className="text-ink-3 italic">None</span>}
+                      </span>
                     </div>
                     <div>
                       <span className="text-ink-3 font-bold block">Country Location</span>
@@ -3055,14 +3227,8 @@ export default function TeachersPage() {
                       <input type="number" required value={manageHourlyRate} onChange={e => setManageHourlyRate(e.target.value ? Number(e.target.value) : "")} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Specialisation</label>
-                      <select value={manageSpecialisation} onChange={e => setManageSpecialisation(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                        <option value="Quran">Quran Recitation / Hifz</option>
-                        <option value="Arabic">Arabic Language</option>
-                        <option value="Islamic">Islamic Jurisprudence / Fiqh</option>
-                        <option value="Tajweed">Tajweed Rules</option>
-                        <option value="Hadeeth">Hadeeth Studies</option>
-                      </select>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Update Password</label>
+                      <input type="password" value={managePassword} onChange={e => setManagePassword(e.target.value)} placeholder="Leave blank to keep unchanged" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
                     </div>
                   </div>
 
@@ -3074,6 +3240,27 @@ export default function TeachersPage() {
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone</label>
                       <input type="text" value={manageTimezone} onChange={e => setManageTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Course to Teach (Optional)</label>
+                      <select value={manageCourseId} onChange={e => setManageCourseId(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
+                        <option value="">-- None --</option>
+                        {availableCourses.map(c => (
+                          <option key={c.id} value={c.id}>{c.title}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Profession / Role</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value="Teacher"
+                        className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface-2 opacity-75 text-xs text-ink-3 cursor-not-allowed"
+                      />
                     </div>
                   </div>
 
@@ -3126,19 +3313,21 @@ export default function TeachersPage() {
                         <Laptop className="size-3.5 text-accent" />
                         {sess.ipAddress || "0.0.0.0"}
                       </div>
-                      <span className="block text-[10px] text-ink-3 max-w-[280px] truncate">{sess.userAgent || "Unknown Browser Agent"}</span>
+                      <span className="block text-[10px] text-ink-3 max-w-[280px] truncate" title={sess.userAgent || "Unknown Browser Agent"}>{parseUserAgent(sess.userAgent)}</span>
                       <div className="flex items-center gap-1 text-[9px] text-ink-3">
                         <Clock className="size-3" />
                         Logged in: {new Date(sess.createdAt).toLocaleString()}
                       </div>
                     </div>
 
+                    {isAdmin && (
                     <button
                       onClick={() => handleRevokeSession(sess.id)}
                       className="h-8 rounded-lg hover:bg-critical/10 text-critical border border-critical/10 font-bold text-[10px] px-2.5 transition shrink-0 cursor-pointer"
                     >
                       Revoke
                     </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3218,9 +3407,9 @@ export default function TeachersPage() {
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Staff Role Type</label>
                   <select value={empRole} onChange={e => setEmpRole(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                    <option value="SUPERVISOR">Supervisor</option>
                     <option value="ACADEMIC_COACH">Academic Coach</option>
-                    <option value="ADMIN">Administrator</option>
+                    <option value="SUPERVISOR">Supervisor</option>
+                    <option value="ADMIN">Other</option>
                   </select>
                 </div>
                 <div>
@@ -3463,9 +3652,9 @@ export default function TeachersPage() {
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Staff Role Type</label>
                       <select value={manageEmpRole} onChange={e => setManageEmpRole(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                        <option value="SUPERVISOR">Supervisor</option>
                         <option value="ACADEMIC_COACH">Academic Coach</option>
-                        <option value="ADMIN">Administrator</option>
+                        <option value="SUPERVISOR">Supervisor</option>
+                        <option value="ADMIN">Other</option>
                       </select>
                     </div>
                     <div>
@@ -3556,19 +3745,21 @@ export default function TeachersPage() {
                         <Laptop className="size-3.5 text-accent" />
                         {sess.ipAddress || "0.0.0.0"}
                       </div>
-                      <span className="block text-[10px] text-ink-3 max-w-[280px] truncate">{sess.userAgent || "Unknown Browser Agent"}</span>
+                      <span className="block text-[10px] text-ink-3 max-w-[280px] truncate" title={sess.userAgent || "Unknown Browser Agent"}>{parseUserAgent(sess.userAgent)}</span>
                       <div className="flex items-center gap-1 text-[9px] text-ink-3">
                         <Clock className="size-3" />
                         Logged in: {new Date(sess.createdAt).toLocaleString()}
                       </div>
                     </div>
 
+                    {isAdmin && (
                     <button
                       onClick={() => handleRevokeEmployeeSession(sess.id)}
                       className="h-8 rounded-lg hover:bg-critical/10 text-critical border border-critical/10 font-bold text-[10px] px-2.5 transition shrink-0 cursor-pointer"
                     >
                       Revoke
                     </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3809,6 +4000,47 @@ export default function TeachersPage() {
                 </div>
               </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-surface border border-hairline px-5 py-3 rounded-2xl shadow-2xl animate-fade-in select-none">
+          <div className="text-xs font-bold text-ink flex items-center gap-2">
+            <Users className="size-4 text-accent" />
+            <span>Selected <span className="tnum font-extrabold text-accent">{selectedIds.length}</span> instructors</span>
+          </div>
+          <div className="h-5 w-hairline bg-hairline" />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => handleBulkStatusUpdate("ACTIVE")}
+              className="bg-good hover:bg-good/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="size-3.5" />
+              Unblock
+            </Button>
+            <Button
+              onClick={() => handleBulkStatusUpdate("INACTIVE")}
+              className="bg-surface-3 hover:bg-surface-4 text-ink-2 font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Lock className="size-3.5" />
+              Block
+            </Button>
+            {isAdmin && (
+            <Button
+              onClick={handleBulkDelete}
+              className="bg-critical hover:bg-critical/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+            )}
+            <button
+              onClick={() => setSelectedIds([])}
+              className="text-xs font-bold text-ink-3 hover:text-ink hover:underline px-2 cursor-pointer"
+            >
+              Clear
+            </button>
           </div>
         </div>
       )}

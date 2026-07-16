@@ -83,6 +83,10 @@ export class CreateTeacherDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  @IsOptional()
+  @IsString()
+  courseId?: string;
 }
 
 export class UpdateTeacherDto {
@@ -120,4 +124,14 @@ export class UpdateTeacherDto {
   @IsOptional()
   @IsEnum(UserStatus)
   status?: UserStatus;
+
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  password?: string;
 }

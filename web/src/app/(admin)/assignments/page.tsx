@@ -107,7 +107,7 @@ export default function AssignmentsPage() {
 
   // Fetch assignments on mount
   useEffect(() => {
-    fetch(`${apiBase}/lms-data/assignments`)
+    fetch(`${apiBase}/lms-data/assignments`, { headers: authHeader() })
       .then(res => res.json())
       .then((data: any[]) => {
         setAssignments(data);

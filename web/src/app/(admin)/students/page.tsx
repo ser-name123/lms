@@ -11,6 +11,7 @@ import {
   X, 
   Loader2, 
   User, 
+  Users,
   Mail, 
   Lock, 
   Phone, 
@@ -50,7 +51,8 @@ import {
   StudentSession,
   ApiError 
 } from "@/lib/api";
-import { cn, initials } from "@/lib/utils";
+import { cn, initials, parseUserAgent } from "@/lib/utils";
+import { useAuth } from "@/store/auth";
 
 const FILTERS = ["All", "Active", "Trial", "Pending", "Paused"] as const;
 // Default items per page limit config
@@ -70,6 +72,9 @@ const statusTone: Record<string, Tone> = {
 };
 
 export default function StudentsPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [page, setPage] = useState(1);
@@ -80,6 +85,136 @@ export default function StudentsPage() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(students.map((s) => s.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds((prev) => [...prev, id]);
+    } else {
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const result = await Swal.fire({
+      title: `Delete ${selectedIds.length} Students?`,
+      text: `Are you sure you want to permanently delete the profiles for the selected ${selectedIds.length} students? This action is irreversible.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, delete all",
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "rounded-3xl border border-hairline bg-surface text-ink",
+        title: "text-lg font-bold text-ink",
+        htmlContainer: "text-sm text-ink-3",
+        confirmButton: "bg-critical text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer",
+        cancelButton: "bg-surface-3 text-ink-2 px-5 py-2.5 rounded-xl font-bold hover:bg-surface-4 transition-all ml-3 cursor-pointer"
+      },
+      buttonsStyling: false
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map((id) => deleteStudent(id)));
+        Swal.fire({
+          title: "Deleted!",
+          text: `${selectedIds.length} student profiles deleted successfully.`,
+          icon: "success",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+        setSelectedIds([]);
+        loadStudents();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : "Failed to delete student profiles.",
+          icon: "error",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleBulkStatusUpdate = async (newStatus: "ACTIVE" | "INACTIVE") => {
+    if (selectedIds.length === 0) return;
+    const actionLabel = newStatus === "ACTIVE" ? "activate" : "block";
+
+    const result = await Swal.fire({
+      title: `${newStatus === "ACTIVE" ? "Activate" : "Block"} ${selectedIds.length} Students?`,
+      text: `Are you sure you want to ${actionLabel} the selected ${selectedIds.length} students?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: `Yes, ${actionLabel} all`,
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "rounded-3xl border border-hairline bg-surface text-ink",
+        title: "text-lg font-bold text-ink",
+        htmlContainer: "text-sm text-ink-3",
+        confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer",
+        cancelButton: "bg-surface-3 text-ink-2 px-5 py-2.5 rounded-xl font-bold hover:bg-surface-4 transition-all ml-3 cursor-pointer"
+      },
+      buttonsStyling: false
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map((id) => updateStudent(id, { status: newStatus })));
+        Swal.fire({
+          title: "Status Updated!",
+          text: `${selectedIds.length} student profiles ${newStatus === "ACTIVE" ? "activated" : "blocked"} successfully.`,
+          icon: "success",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+        setSelectedIds([]);
+        loadStudents();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : `Failed to ${actionLabel} students.`,
+          icon: "error",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+  };
 
   // Stats Dashboard
   const [stats, setStats] = useState<StudentStats | null>(null);
@@ -121,7 +256,7 @@ export default function StudentsPage() {
   const [gender, setGender] = useState("Male");
   const [country, setCountry] = useState("India");
   const [guardianName, setGuardianName] = useState("");
-  const [profession, setProfession] = useState("");
+  const [profession, setProfession] = useState("Student");
   const [fees, setFees] = useState<number | "">("");
   const [joiningDate, setJoiningDate] = useState("");
   const [lastPaymentDate, setLastPaymentDate] = useState("");
@@ -141,7 +276,7 @@ export default function StudentsPage() {
   const [manageGender, setManageGender] = useState("Male");
   const [manageCountry, setManageCountry] = useState("");
   const [manageGuardianName, setManageGuardianName] = useState("");
-  const [manageProfession, setManageProfession] = useState("");
+  const [manageProfession, setManageProfession] = useState("Student");
   const [manageFees, setManageFees] = useState<number | "">("");
   const [manageJoiningDate, setManageJoiningDate] = useState("");
   const [manageLastPaymentDate, setManageLastPaymentDate] = useState("");
@@ -198,6 +333,7 @@ export default function StudentsPage() {
   // Load students from database
   const loadStudents = async () => {
     setLoading(true);
+    setSelectedIds([]);
     try {
       const data = await fetchStudents({
         page,
@@ -938,6 +1074,14 @@ export default function StudentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-hairline bg-surface-2 text-left">
+                    <th className="px-4 py-3 w-4">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.length === students.length && students.length > 0}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                      />
+                    </th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student ID</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
@@ -962,13 +1106,24 @@ export default function StudentsPage() {
                     const packageName = firstEnrollment?.package?.name || "—";
                     const classesCount = firstEnrollment?.package?.classesPerMonth ?? null;
                     const statusText = row.user.status;
+                    const isSelected = selectedIds.includes(row.id);
 
                     return (
                       <tr
                         key={row.id}
-                        className="border-b border-hairline last:border-0 hover:bg-surface-2/30 transition-colors duration-150 relative"
+                        className={cn(
+                          "border-b border-hairline last:border-0 hover:bg-surface-2/30 transition-colors duration-150 relative",
+                          isSelected && "bg-accent-soft/20 hover:bg-accent-soft/25"
+                        )}
                       >
-                        {/* Student Name */}
+                        <td className="px-4 py-3 w-4">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            onChange={(e) => handleSelectRow(row.id, e.target.checked)}
+                            className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent via-[#386FA4] to-[#59A5D8] text-[11px] font-bold text-white shadow-sm shadow-accent/10">
@@ -1080,6 +1235,7 @@ export default function StudentsPage() {
                                     {row.user.status === "INACTIVE" ? "Unblock Student" : "Block Student"}
                                   </button>
                                   <div className="border-t border-hairline my-1" />
+                                  {isAdmin && (
                                   <button
                                     onClick={() => {
                                       setActiveMenuId(null);
@@ -1090,6 +1246,7 @@ export default function StudentsPage() {
                                     <Trash2 className="size-3.5" />
                                     Delete Student
                                   </button>
+                                  )}
                                 </div>
                               </>
                             )}
@@ -1317,10 +1474,9 @@ export default function StudentsPage() {
                     <Briefcase className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
                     <input
                       type="text"
+                      readOnly
                       value={profession}
-                      onChange={(e) => setProfession(e.target.value)}
-                      placeholder="Student / Engineer"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface-2 opacity-75 pr-3 pl-10 text-sm text-ink-3 cursor-not-allowed transition-all"
                     />
                   </div>
                 </div>
@@ -1615,10 +1771,9 @@ export default function StudentsPage() {
                     <Briefcase className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
                     <input
                       type="text"
+                      readOnly
                       value={manageProfession}
-                      onChange={(e) => setManageProfession(e.target.value)}
-                      placeholder="Student / Developer"
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface-2 opacity-75 pr-3 pl-10 text-sm text-ink-3 cursor-not-allowed transition-all"
                     />
                   </div>
                 </div>
@@ -1735,6 +1890,7 @@ export default function StudentsPage() {
 
               {/* Actions Bar */}
               <div className="flex items-center justify-between border-t border-hairline pt-4.5 bg-surface">
+                {isAdmin && (
                 <Button
                   type="button"
                   variant="outline"
@@ -1745,6 +1901,7 @@ export default function StudentsPage() {
                   <Trash2 className="size-4 shrink-0" />
                   Delete Student
                 </Button>
+                )}
                 <div className="flex items-center gap-3">
                   <Button
                     type="button"
@@ -1809,7 +1966,7 @@ export default function StudentsPage() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-ink truncate max-w-[200px]" title={s.userAgent || "Unknown Device"}>
-                            {s.userAgent || "Unknown Device"}
+                            {parseUserAgent(s.userAgent)}
                           </p>
                           <div className="flex flex-wrap items-center gap-x-2 mt-1 text-[10px] font-semibold text-ink-3">
                             <span className="flex items-center gap-1">
@@ -1939,6 +2096,47 @@ export default function StudentsPage() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-surface border border-hairline px-5 py-3 rounded-2xl shadow-2xl animate-fade-in select-none">
+          <div className="text-xs font-bold text-ink flex items-center gap-2">
+            <Users className="size-4 text-accent" />
+            <span>Selected <span className="tnum font-extrabold text-accent">{selectedIds.length}</span> students</span>
+          </div>
+          <div className="h-5 w-hairline bg-hairline" />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => handleBulkStatusUpdate("ACTIVE")}
+              className="bg-good hover:bg-good/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="size-3.5" />
+              Activate
+            </Button>
+            <Button
+              onClick={() => handleBulkStatusUpdate("INACTIVE")}
+              className="bg-surface-3 hover:bg-surface-4 text-ink-2 font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Lock className="size-3.5" />
+              Block
+            </Button>
+            {isAdmin && (
+            <Button
+              onClick={handleBulkDelete}
+              className="bg-critical hover:bg-critical/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+            )}
+            <button
+              onClick={() => setSelectedIds([])}
+              className="text-xs font-bold text-ink-3 hover:text-ink hover:underline px-2 cursor-pointer"
+            >
+              Clear
+            </button>
           </div>
         </div>
       )}

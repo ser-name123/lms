@@ -1,0 +1,56 @@
+# Render Blueprint for the LMS API (NestJS).
+#
+# Why this file exists: NODE_ENV=production MUST be set in production. Without it
+# the app exposes Swagger docs at /docs and logs OTP codes. Pinning it here makes
+# that reviewable in git instead of depending on an invisible dashboard toggle.
+#
+# Secrets (marked `sync: false`) are NOT stored here — set their values in the
+# Render dashboard. Never commit real DATABASE_URL / JWT secrets / SMTP keys.
+services:
+  - type: web
+    name: lms-api
+    runtime: node
+    rootDir: api
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      # Hardening switch — keep this exactly "production".
+      - key: NODE_ENV
+        value: production
+
+      # Lock CORS to the deployed web origin(s). Comma-separate if more than one.
+      # Example: https://your-app.vercel.app
+      - key: CORS_ORIGIN
+        sync: false
+
+      # Postgres (Supabase). DATABASE_URL is the pooled URL the app runs on;
+      # DIRECT_URL is the direct connection used only for migrations.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # JWT signing keys — MUST be long random strings, never the dev
+      # "*-change-me" placeholders. Generate e.g. `openssl rand -base64 48`.
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 7d
+
+      # SMTP (Brevo) for OTP + notification email.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false

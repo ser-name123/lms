@@ -44,6 +44,9 @@ async function refreshAccessToken(): Promise<string | null> {
 
   if (!res.ok) {
     clear();
+    if (typeof window !== "undefined") {
+      window.location.href = "/signin";
+    }
     return null;
   }
 
@@ -281,6 +284,18 @@ export const fetchStudentsCourses = () => api<{ id: string; title: string }[]>("
 // student on creation. Public GET.
 export const fetchLmsCourses = () =>
   api<{ id: string; code: string; title: string; category: string; level: string; status: string }[]>("/lms-data/courses");
+export const fetchLmsAssignments = () => api<any[]>("/lms-data/assignments");
+export const createLmsAssignment = (dto: any) => api<any>("/lms-data/assignments", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+export const updateLmsAssignment = (id: string, dto: any) => api<any>(`/lms-data/assignments/${id}`, {
+  method: "PUT",
+  body: JSON.stringify(dto),
+});
+export const deleteLmsAssignment = (id: string) => api<any>(`/lms-data/assignments/${id}`, {
+  method: "DELETE",
+});
 export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string; email: string } }[]>("/students/teachers");
 
 export const createStudent = (dto: any) => api<StudentProfile>("/students", {
@@ -348,6 +363,11 @@ export type TeacherProfile = {
   specialisation: string | null;
   hourlyRate: number | null;
   bio: string | null;
+  courseId?: string | null;
+  course?: {
+    id: string;
+    title: string;
+  } | null;
   user: {
     id: string;
     email: string;
@@ -1020,6 +1040,114 @@ export const resolveFileUrl = (ref: string | null | undefined): string => {
   if (!ref) return "";
   if (/^(https?:|data:)/i.test(ref)) return ref; // already absolute / external
   return `${BASE}/${ref.replace(/^\/+/, "")}`;
+};
+
+/**
+ * Fetch an auth-protected file (e.g. an expense receipt) with the caller's token
+ * and return an object URL usable as an <img>/<iframe> `src`. Browsers cannot
+ * attach an Authorization header to a bare tag load, so protected files must be
+ * fetched here and handed over as a blob URL. Remember to URL.revokeObjectURL it.
+ */
+export const fetchProtectedFileUrl = async (path: string): Promise<string> => {
+  const res = await fetch(`${BASE}${path}`, { headers: { ...authHeader() } });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return URL.createObjectURL(await res.blob());
+};
+
+/**
+ * Resolve a receipt reference for rendering. Inline (`data:`) and external
+ * (`http(s):`) refs pass straight through; a stored `uploads/receipts/<file>`
+ * ref is fetched through the authenticated `/expenses/receipt/:filename`
+ * endpoint (receipts are no longer served as open static files).
+ */
+export const resolveReceiptSrc = async (
+  ref: string | null | undefined,
+): Promise<string> => {
+  if (!ref) return "";
+  if (/^(https?:|data:)/i.test(ref)) return ref;
+  const filename = ref.split("/").pop() ?? "";
+  return fetchProtectedFileUrl(`/expenses/receipt/${encodeURIComponent(filename)}`);
+};
+
+// ─── Student Portal calls ──────────────────────────────────────────────────────
+
+export const fetchStudentDashboard = () => api<any>("/student-portal/dashboard");
+export const fetchStudentEnrollments = () => api<any[]>("/student-portal/enrollments");
+export const fetchStudentClasses = () => api<any[]>("/student-portal/classes");
+export const attendStudentClass = (classId: string) => api<any>(`/student-portal/classes/${classId}/attend`, {
+  method: "POST",
+});
+export const fetchStudentAssignments = () => api<any[]>("/student-portal/assignments");
+export const submitStudentAssignment = (assignmentId: string, content: string, fileUrl?: string) => api<any>(`/student-portal/assignments/${assignmentId}/submit`, {
+  method: "POST",
+  body: JSON.stringify({ content, fileUrl }),
+});
+export const fetchStudentInvoices = () => api<any[]>("/student-portal/invoices");
+export const payStudentInvoice = (invoiceId: string) => api<any>(`/student-portal/invoices/${invoiceId}/pay`, {
+  method: "POST",
+});
+export const fetchStudentProfile = () => api<any>("/student-portal/profile");
+export const updateStudentProfile = (payload: any) => api<any>("/student-portal/profile", {
+  method: "PATCH",
+  body: JSON.stringify(payload),
+});
+export const fetchStudentMeetings = () => api<any[]>("/student-portal/meetings");
+export const fetchStudentKnowledgebase = () => api<any[]>("/student-portal/knowledgebase");
+
+export const uploadStudentAvatar = async (file: File): Promise<{ url: string; fileName: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/student-portal/profile/avatar-upload`, {
+    method: "POST",
+    headers: { ...authHeader() },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return res.json() as Promise<{ url: string; fileName: string }>;
+};
+
+// ─── Live Chat Calls ───────────────────────────────────────────────────────────
+
+export const fetchStudentChatMessages = () => api<any[]>("/chat/student");
+export const sendStudentChatMessage = (content: string) => api<any>("/chat/student", {
+  method: "POST",
+  body: JSON.stringify({ content }),
+});
+
+export const fetchAdminChatThreads = () => api<any[]>("/chat/admin/threads");
+export const fetchAdminThreadMessages = (studentId: string) => api<any[]>(`/chat/admin/threads/${studentId}`);
+export const sendAdminChatMessage = (studentId: string, content: string) => api<any>(`/chat/admin/threads/${studentId}`, {
+  method: "POST",
+  body: JSON.stringify({ content }),
+});
+
+// ─── Teacher Portal Calls ───────────────────────────────────────────────────────
+
+export const fetchTeacherDashboard = () => api<any>("/teacher-portal/dashboard");
+export const fetchTeacherClasses = () => api<any[]>("/teacher-portal/classes");
+export const fetchTeacherStudents = () => api<any[]>("/teacher-portal/students");
+export const fetchTeacherAssignments = () => api<any[]>("/teacher-portal/assignments");
+export const gradeStudentSubmission = (submissionId: string, grade: number, feedback: string) => api<any>(`/teacher-portal/assignments/${submissionId}/grade`, {
+  method: "POST",
+  body: JSON.stringify({ grade, feedback }),
+});
+export const fetchTeacherPayouts = () => api<any[]>("/teacher-portal/payouts");
+export const fetchTeacherProfile = () => api<any>("/teacher-portal/profile");
+export const fetchTeacherMeetings = () => api<any[]>("/teacher-portal/meetings");
+export const updateTeacherProfile = (payload: any) => api<any>("/teacher-portal/profile", {
+  method: "PATCH",
+  body: JSON.stringify(payload),
+});
+export const uploadTeacherAvatar = async (file: File): Promise<{ url: string; fileName: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/teacher-portal/profile/avatar-upload`, {
+    method: "POST",
+    headers: { ...authHeader() },
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return res.json() as Promise<{ url: string; fileName: string }>;
 };
 
 

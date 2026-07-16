@@ -21,10 +21,12 @@ import {
 } from './dto';
 import { TrialsService } from './trials.service';
 
+// Trial evaluation is the ACADEMIC_COACH panel's core job (/evaluation page),
+// so coaches get everything except delete, which stays ADMIN-only.
 @ApiTags('trials')
 @ApiBearerAuth()
 @Controller('trials')
-@Roles(Role.ADMIN)
+@Roles(Role.ADMIN, Role.ACADEMIC_COACH)
 export class TrialsController {
   constructor(private readonly service: TrialsService) {}
 
@@ -50,6 +52,7 @@ export class TrialsController {
   }
 
   @Delete(':id')
+  @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete trial class inquiry' })
   delete(@Param('id') id: string) {

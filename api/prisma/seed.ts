@@ -1,9 +1,19 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'node:crypto';
 
 import { PrismaClient } from '../src/generated/prisma/client';
 import { CourseStatus, EnrollmentStatus, Role } from '../src/generated/prisma/enums';
+
+// Guard: never let a demo seed silently create a known-password admin on a
+// production database. Run against prod only with an explicit opt-in flag.
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_PROD_SEED !== 'true') {
+  console.error(
+    'Refusing to seed with NODE_ENV=production. Set ALLOW_PROD_SEED=true to override.',
+  );
+  process.exit(1);
+}
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({
@@ -11,10 +21,22 @@ const prisma = new PrismaClient({
   }),
 });
 
-const ADMIN = { email: 'objectsquarerajan@gmail.com', password: 'admin123' };
+// A strong random password so a leaked seed script is not a login. Override the
+// admin via SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD for a reproducible dev login.
+const strongPassword = () => randomBytes(12).toString('base64url');
+
+const ADMIN = {
+  email: process.env.SEED_ADMIN_EMAIL ?? 'admin@lms.local',
+  password: process.env.SEED_ADMIN_PASSWORD ?? strongPassword(),
+};
+// Demo teacher/student get their own random passwords, printed once below.
+const TEACHER_PASSWORD = process.env.SEED_TEACHER_PASSWORD ?? strongPassword();
+const STUDENT_PASSWORD = process.env.SEED_STUDENT_PASSWORD ?? strongPassword();
 
 async function main() {
   const passwordHash = await bcrypt.hash(ADMIN.password, 12);
+  const teacherHash = await bcrypt.hash(TEACHER_PASSWORD, 12);
+  const studentHash = await bcrypt.hash(STUDENT_PASSWORD, 12);
 
   const admin = await prisma.user.upsert({
     where: { email: ADMIN.email },
@@ -56,7 +78,7 @@ async function main() {
     update: {},
     create: {
       email: 'bilal@lms.local',
-      passwordHash,
+      passwordHash: teacherHash,
       firstName: 'Bilal',
       lastName: 'Ahmed',
       role: Role.TEACHER,
@@ -72,7 +94,7 @@ async function main() {
     update: {},
     create: {
       email: 'ayesha@lms.local',
-      passwordHash,
+      passwordHash: studentHash,
       firstName: 'Ayesha',
       lastName: 'Khan',
       role: Role.STUDENT,
@@ -99,10 +121,10 @@ async function main() {
     });
   }
 
-  console.log('Seeded.');
+  console.log('Seeded. Credentials (save these — random ones are shown only now):');
   console.log(`  admin   ${ADMIN.email} / ${ADMIN.password}`);
-  console.log(`  teacher bilal@lms.local / ${ADMIN.password}`);
-  console.log(`  student ayesha@lms.local / ${ADMIN.password}`);
+  console.log(`  teacher bilal@lms.local / ${TEACHER_PASSWORD}`);
+  console.log(`  student ayesha@lms.local / ${STUDENT_PASSWORD}`);
   console.log(`  admin id: ${admin.id}`);
 }
 

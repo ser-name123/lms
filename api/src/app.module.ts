@@ -21,6 +21,9 @@ import { LmsDataModule } from './lms-data/lms-data.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { StudentPortalModule } from './student-portal/student-portal.module';
+import { ChatModule } from './chat/chat.module';
+import { TeacherPortalModule } from './teacher-portal/teacher-portal.module';
 
 @Module({
   imports: [
@@ -44,6 +47,9 @@ import { ExpensesModule } from './expenses/expenses.module';
     DashboardModule,
     PayoutsModule,
     ExpensesModule,
+    StudentPortalModule,
+    ChatModule,
+    TeacherPortalModule,
   ],
   controllers: [HealthController],
   providers: [

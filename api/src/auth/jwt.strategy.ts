@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserStatus } from '../generated/prisma/enums';
 import type { AuthUser } from './decorators';
 
-export type AccessTokenPayload = { sub: string };
+export type AccessTokenPayload = { sub: string; sid?: string };
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -22,8 +22,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  /* Re-read the user on every request so a deactivated account loses access
-     immediately, rather than when its access token happens to expire. */
+  /* Re-read the user on every request so a deactivated account or revoked
+     session loses access immediately. */
   async validate(payload: AccessTokenPayload): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
@@ -32,6 +32,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       throw new UnauthorizedException('Account is not active');
+    }
+
+    if (payload.sid) {
+      const session = await this.prisma.refreshToken.findUnique({
+        where: { id: payload.sid },
+        select: { revokedAt: true },
+      });
+      if (!session || session.revokedAt) {
+        throw new UnauthorizedException('Session has been revoked');
+      }
     }
 
     return { id: user.id, email: user.email, role: user.role };

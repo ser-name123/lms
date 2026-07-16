@@ -6,7 +6,7 @@ import { Role, UserStatus } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
 import type { CreateEmployeeDto, ListEmployeesDto, UpdateEmployeeDto } from './dto';
 
-const EMPLOYEE_SELECT = {
+const EMPLOYEE_SELECT_BASE = {
   id: true,
   email: true,
   firstName: true,
@@ -19,16 +19,20 @@ const EMPLOYEE_SELECT = {
   phone: true,
   gender: true,
   joiningDate: true,
-  salary: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
+
+// Salary is compensation PII. Only ADMIN sees it; SUPERVISOR / ACADEMIC_COACH
+// can manage employees but get the profile without the salary field.
+const employeeSelect = (isAdmin: boolean): Prisma.UserSelect =>
+  isAdmin ? { ...EMPLOYEE_SELECT_BASE, salary: true } : EMPLOYEE_SELECT_BASE;
 
 @Injectable()
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(dto: ListEmployeesDto) {
+  async list(dto: ListEmployeesDto, isAdmin: boolean) {
     const { page, limit, search, role, status, sortBy } = dto;
 
     const employeeRoles = [Role.SUPERVISOR, Role.ACADEMIC_COACH];
@@ -58,7 +62,7 @@ export class EmployeesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
-        select: EMPLOYEE_SELECT,
+        select: employeeSelect(isAdmin),
         orderBy,
         skip: (page - 1) * limit,
         take: limit,
@@ -72,14 +76,14 @@ export class EmployeesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, isAdmin = false) {
     const employeeRoles = [Role.SUPERVISOR, Role.ACADEMIC_COACH];
     const employee = await this.prisma.user.findFirst({
       where: {
         id,
         role: { in: employeeRoles },
       },
-      select: EMPLOYEE_SELECT,
+      select: employeeSelect(isAdmin),
     });
 
     if (!employee) throw new NotFoundException(`Employee ${id} not found`);
@@ -107,7 +111,7 @@ export class EmployeesService {
         joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : null,
         salary: dto.salary,
       },
-      select: EMPLOYEE_SELECT,
+      select: employeeSelect(true),
     });
   }
 
@@ -135,7 +139,7 @@ export class EmployeesService {
     return this.prisma.user.update({
       where: { id },
       data,
-      select: EMPLOYEE_SELECT,
+      select: employeeSelect(true),
     });
   }
 
@@ -169,7 +173,7 @@ export class EmployeesService {
     });
   }
 
-  async getStats() {
+  async getStats(isAdmin = false) {
     const employeeRoles = [Role.SUPERVISOR, Role.ACADEMIC_COACH];
     
     const [total, active, inactive, pending, totalSalary, adminsCount, supervisorsCount, coachesCount] = await Promise.all([
@@ -204,7 +208,8 @@ export class EmployeesService {
       active,
       inactive,
       pending,
-      totalSalary: Number(totalSalary._sum.salary || 0),
+      // Aggregate payroll total is compensation data — ADMIN only.
+      totalSalary: isAdmin ? Number(totalSalary._sum.salary || 0) : 0,
       adminsCount,
       supervisorsCount,
       coachesCount,

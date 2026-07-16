@@ -28,7 +28,7 @@ import { createReadStream, existsSync, mkdirSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import type { Response } from 'express';
 import { ExpensesService } from './expenses.service';
-import { Public, Roles } from '../auth/decorators';
+import { Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 import { ListExpensesDto, CreateExpenseDto, UpdateExpenseDto } from './dto';
 import { CreateCategoryDto } from './categories/dto';
@@ -111,9 +111,11 @@ export class ExpensesController {
     return this.service.storeReceiptFile(file);
   }
 
+  // Receipts are financial documents — ADMIN only (class-level @Roles applies).
+  // They are NOT served from the open /uploads static mount anymore; the client
+  // fetches them here with its token and renders the response as a blob.
   @Get('receipt/:filename')
-  @Public()
-  @ApiOperation({ summary: 'Serve a stored receipt inline' })
+  @ApiOperation({ summary: 'Serve a stored receipt inline (admin only)' })
   serveReceipt(
     @Param('filename') filename: string,
     @Res({ passthrough: true }) res: Response,

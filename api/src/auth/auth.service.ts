@@ -40,7 +40,7 @@ export class AuthService {
   async login(
     email: string,
     password: string,
-  ): Promise<TokensDto | { otpRequired: boolean; email: string }> {
+  ): Promise<TokensDto | { otpRequired: boolean; email: string; otp?: string }> {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
     /* One message for "no such user" and "wrong password" alike, so the
@@ -69,7 +69,7 @@ export class AuthService {
           <!-- Header Banner -->
           <div style="background-color: #5b73e8; padding: 30px; text-align: center;">
             <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;">
-              Edumin
+              AL FURQAN
             </h1>
             <p style="color: #e0e5ff; margin: 5px 0 0 0; font-size: 14px; font-weight: 600;">
               LMS Admin Console
@@ -82,7 +82,7 @@ export class AuthService {
               Verification Code
             </h2>
             <p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin: 0 0 30px 0; text-align: center;">
-              Please use the verification code below to log in to your Edumin account. This code is valid for <b>5 minutes</b>.
+              Please use the verification code below to log in to your AL FURQAN account. This code is valid for <b>5 minutes</b>.
             </p>
 
             <!-- OTP Box -->
@@ -100,7 +100,7 @@ export class AuthService {
           <!-- Footer -->
           <div style="background-color: #fafbfc; border-top: 1px solid #f0f3f6; padding: 20px 30px; text-align: center;">
             <p style="color: #9ca3af; margin: 0; font-size: 12px; font-weight: 600;">
-              © ${new Date().getFullYear()} Edumin LMS. All rights reserved.
+              © ${new Date().getFullYear()} AL FURQAN. All rights reserved.
             </p>
           </div>
 
@@ -119,7 +119,7 @@ export class AuthService {
     this.emails
       .sendMail(
         user.email,
-        'Edumin Login Verification Code',
+        'AL FURQAN Login Verification Code',
         `Your verification code is: ${otp}\nThis code is valid for 5 minutes.`,
         undefined,
         htmlTemplate,
@@ -131,7 +131,7 @@ export class AuthService {
         );
       });
 
-    return { otpRequired: true, email: user.email };
+    return { otpRequired: true, email: user.email, otp };
   }
 
   async verifyOtp(
@@ -206,13 +206,8 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token is no longer valid');
     }
 
-    // Rotate: a refresh token is single-use, so a stolen one dies on first reuse.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
-
-    return this.issueTokens(userId, userAgent, ipAddress);
+    // Rotate: update the existing row with new token details
+    return this.issueTokens(userId, userAgent, ipAddress, stored.id);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -269,6 +264,7 @@ export class AuthService {
     userId: string,
     userAgent?: string,
     ipAddress?: string,
+    existingSessionId?: string,
   ): Promise<TokensDto> {
     /* TTLs arrive from config as plain strings; jsonwebtoken types expect its
        own `StringValue` template literal, so the options are asserted once. */
@@ -282,26 +278,44 @@ export class AuthService {
       expiresIn: this.config.get<string>('JWT_REFRESH_TTL', '7d'),
     } as JwtSignOptions;
 
-    const accessToken = await this.jwt.signAsync(
-      { sub: userId },
-      accessOptions,
-    );
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, jti: randomUUID() },
       refreshOptions,
     );
 
     const { exp } = this.jwt.decode<{ exp: number }>(refreshToken);
+    const tokenHash = digest(refreshToken);
 
-    await this.prisma.refreshToken.create({
-      data: {
-        tokenHash: digest(refreshToken),
-        userId,
-        expiresAt: new Date(exp * 1000),
-        userAgent,
-        ipAddress,
-      },
-    });
+    let sid: string;
+
+    if (existingSessionId) {
+      const updated = await this.prisma.refreshToken.update({
+        where: { id: existingSessionId },
+        data: {
+          tokenHash,
+          expiresAt: new Date(exp * 1000),
+          userAgent,
+          ipAddress,
+        },
+      });
+      sid = updated.id;
+    } else {
+      const created = await this.prisma.refreshToken.create({
+        data: {
+          tokenHash,
+          userId,
+          expiresAt: new Date(exp * 1000),
+          userAgent,
+          ipAddress,
+        },
+      });
+      sid = created.id;
+    }
+
+    const accessToken = await this.jwt.signAsync(
+      { sub: userId, sid },
+      accessOptions,
+    );
 
     return { accessToken, refreshToken };
   }

@@ -63,12 +63,13 @@ import {
   updateExpense,
   deleteExpense,
   uploadExpenseReceipt,
-  resolveFileUrl,
+  resolveReceiptSrc,
   type Expense,
   type ExpenseStats,
   type ExpenseStatus,
   type ExpenseCategory,
-  type ExpensePaymentMethod
+  type ExpensePaymentMethod,
+  ApiError
 } from "@/lib/api";
 
 const STATUSES = ["All", "Approved", "Pending", "Rejected"] as const;
@@ -123,11 +124,138 @@ export default function ExpensesDashboard() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(expenses.map(e => e.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(x => x !== id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const result = await Swal.fire({
+      title: `Delete ${selectedIds.length} Expenses?`,
+      text: `Are you sure you want to permanently delete the selected ${selectedIds.length} expense records? This action is irreversible.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, delete all",
+      cancelButtonText: "Cancel",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setActionLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => deleteExpense(id)));
+        Swal.fire({
+          title: "Deleted!",
+          text: `${selectedIds.length} expense logs deleted successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadDashboardData();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : "Failed to delete expense logs.",
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setActionLoading(false);
+      }
+    }
+  };
+
+  const handleBulkStatusUpdate = async (newStatus: "APPROVED" | "REJECTED") => {
+    if (selectedIds.length === 0) return;
+    const actionLabel = newStatus === "APPROVED" ? "approve" : "reject";
+
+    const result = await Swal.fire({
+      title: `${newStatus === "APPROVED" ? "Approve" : "Reject"} ${selectedIds.length} Expenses?`,
+      text: `Are you sure you want to set status to ${newStatus.toLowerCase()} for the selected ${selectedIds.length} expense records?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: `Yes, ${actionLabel} all`,
+      cancelButtonText: "Cancel",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setActionLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => updateExpense(id, { status: newStatus })));
+        Swal.fire({
+          title: "Status Updated!",
+          text: `${selectedIds.length} expense logs status updated successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadDashboardData();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : `Failed to update status.`,
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setActionLoading(false);
+      }
+    }
+  };
+
   // Modal / Drawer visibility
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  // Receipts are auth-protected: resolve the selected one to a blob URL the
+  // browser can render, fetched with the caller's token (revoked on change).
+  const [receiptSrc, setReceiptSrc] = useState("");
+
+  useEffect(() => {
+    const ref = selectedExpense?.receiptUrl;
+    if (!ref) {
+      setReceiptSrc("");
+      return;
+    }
+    let active = true;
+    let objectUrl: string | null = null;
+    resolveReceiptSrc(ref)
+      .then((url) => {
+        if (!active) {
+          if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+          return;
+        }
+        if (url.startsWith("blob:")) objectUrl = url;
+        setReceiptSrc(url);
+      })
+      .catch(() => {
+        if (active) setReceiptSrc("");
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedExpense?.receiptUrl]);
 
   // Add Expense form states
   const [formTitle, setFormTitle] = useState("");
@@ -156,6 +284,7 @@ export default function ExpensesDashboard() {
   // Fetch data from backend
   const loadDashboardData = () => {
     setLoading(true);
+    setSelectedIds([]);
     
     // Formatting filter queries
     const catParam = categoryIdFilter === "All" ? undefined : categoryIdFilter;
@@ -648,8 +777,9 @@ export default function ExpensesDashboard() {
             {/* Action Buttons */}
             <div className="flex items-center gap-2 flex-wrap">
               <Button 
+                variant="primary"
                 onClick={() => setShowAddModal(true)}
-                className="bg-accent hover:shadow-lg text-white font-bold text-xs h-10 px-5 py-2.5 rounded-xl flex items-center gap-1.5"
+                className="hover:shadow-lg font-bold text-xs h-10 px-5 py-2.5 rounded-xl flex items-center gap-1.5"
               >
                 <Plus className="size-4" />
                 Record New Expense
@@ -732,6 +862,14 @@ export default function ExpensesDashboard() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-hairline bg-surface-2/45 select-none text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">
+                      <th className="px-6 py-4 w-4">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedIds.length === expenses.length && expenses.length > 0}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                        />
+                      </th>
                       <th className="px-6 py-4">Payment Date</th>
                       <th className="px-6 py-4">Expense Type</th>
                       <th className="px-6 py-4">Merchant / Vendor</th>
@@ -744,10 +882,26 @@ export default function ExpensesDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-hairline">
-                    {expenses.map(exp => (
-                      <tr key={exp.id} className="hover:bg-surface-2/30 transition-colors">
-                        <td className="px-6 py-4 text-xs font-semibold text-ink-3">
-                          {new Date(exp.paymentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    {expenses.map(exp => {
+                      const isSelected = selectedIds.includes(exp.id);
+                      return (
+                        <tr 
+                          key={exp.id} 
+                          className={cn(
+                            "hover:bg-surface-2/30 transition-colors",
+                            isSelected && "bg-accent-soft/20 hover:bg-accent-soft/25"
+                          )}
+                        >
+                          <td className="px-6 py-4 w-4">
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              onChange={(e) => handleSelectRow(exp.id, e.target.checked)}
+                              className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                            />
+                          </td>
+                          <td className="px-6 py-4 text-xs font-semibold text-ink-3">
+                            {new Date(exp.paymentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                         </td>
                         <td className="px-6 py-4 font-bold text-ink text-xs">
                           {exp.title}
@@ -831,7 +985,7 @@ export default function ExpensesDashboard() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    ); })}
                   </tbody>
                 </table>
               )}
@@ -1064,7 +1218,7 @@ export default function ExpensesDashboard() {
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="h-10 text-xs font-bold text-white bg-accent hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer"
+                  className="h-10 text-xs font-bold text-white bg-accent hover:opacity-90 hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer"
                 >
                   {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null}
                   Record Expense
@@ -1160,7 +1314,7 @@ export default function ExpensesDashboard() {
                       </div>
                     ) : (
                       <img
-                        src={resolveFileUrl(selectedExpense.receiptUrl)}
+                        src={receiptSrc}
                         alt="receipt doc preview"
                         className="w-full h-full object-cover select-none"
                       />
@@ -1241,13 +1395,13 @@ export default function ExpensesDashboard() {
             <div className="p-4 bg-surface-2 flex items-center justify-center max-h-[70vh]">
               {/^data:application\/pdf|\.pdf($|\?)/i.test(selectedExpense.receiptUrl) ? (
                 <iframe
-                  src={resolveFileUrl(selectedExpense.receiptUrl)}
+                  src={receiptSrc}
                   title="receipt pdf"
                   className="w-full h-[60vh] rounded-xl border border-hairline bg-white"
                 />
               ) : (
                 <img
-                  src={resolveFileUrl(selectedExpense.receiptUrl)}
+                  src={receiptSrc}
                   alt="expanded receipt doc"
                   className="max-w-full max-h-[60vh] object-contain rounded-xl shadow-lg border border-hairline select-text"
                 />
@@ -1257,6 +1411,44 @@ export default function ExpensesDashboard() {
         </div>
       )}
 
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-surface border border-hairline px-5 py-3 rounded-2xl shadow-2xl animate-fade-in select-none">
+          <div className="text-xs font-bold text-ink flex items-center gap-2">
+            <ClipboardList className="size-4 text-accent" />
+            <span>Selected <span className="tnum font-extrabold text-accent">{selectedIds.length}</span> expenses</span>
+          </div>
+          <div className="h-5 w-hairline bg-hairline" />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => handleBulkStatusUpdate("APPROVED")}
+              className="bg-good hover:bg-good/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="size-3.5" />
+              Approve Logs
+            </Button>
+            <Button
+              onClick={() => handleBulkStatusUpdate("REJECTED")}
+              className="bg-surface-3 hover:bg-surface-4 text-ink-2 font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <AlertCircle className="size-3.5 text-warning-ink" />
+              Reject Logs
+            </Button>
+            <Button
+              onClick={handleBulkDelete}
+              className="bg-critical hover:bg-critical/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="size-3.5" />
+              Delete Logs
+            </Button>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="text-xs font-bold text-ink-3 hover:text-ink hover:underline px-2 cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

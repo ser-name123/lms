@@ -4,6 +4,21 @@ import { Role, PayoutStatus, PayoutMethod } from '../generated/prisma/enums';
 import { ListPayoutsDto, CreatePayoutDto, UpdatePayoutDto, BulkGeneratePayoutsDto } from './dto';
 import type { Prisma } from '../generated/prisma/client';
 
+/* The only User fields a payout response should ever carry. Prevents
+   `include: { user: true }` from serialising the bcrypt passwordHash and the
+   employee's base salary into the HTTP response. */
+const PAYOUT_USER_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  role: true,
+  status: true,
+  phone: true,
+  gender: true,
+  avatarUrl: true,
+} satisfies Prisma.UserSelect;
+
 @Injectable()
 export class PayoutsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -134,7 +149,7 @@ export class PayoutsService {
         billingPeriodEnd: new Date(dto.billingPeriodEnd),
         notes: dto.notes || null,
       },
-      include: { user: true },
+      include: { user: { select: PAYOUT_USER_SELECT } },
     });
   }
 
@@ -159,7 +174,7 @@ export class PayoutsService {
         referenceNumber: dto.referenceNumber,
         notes: dto.notes,
       },
-      include: { user: true },
+      include: { user: { select: PAYOUT_USER_SELECT } },
     });
   }
 
@@ -255,7 +270,7 @@ export class PayoutsService {
         paymentMethod: dto.paymentMethod ?? undefined,
         notes: dto.notes ? dto.notes : undefined,
       },
-      include: { user: true },
+      include: { user: { select: PAYOUT_USER_SELECT } },
     });
   }
 

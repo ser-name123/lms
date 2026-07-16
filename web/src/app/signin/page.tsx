@@ -13,7 +13,7 @@ import { useUI } from "@/store/ui";
 export default function SignInPage() {
   const router = useRouter();
   const hydrated = useAuthHydrated();
-  const { accessToken, setSession, setTokens, clear } = useAuth();
+  const { accessToken, user, setSession, setTokens, clear } = useAuth();
   
   const { settings, initialized, loadSettings } = useSettingsStore();
   const theme = useUI((s) => s.theme);
@@ -27,6 +27,7 @@ export default function SignInPage() {
   // OTP state
   const [otpRequired, setOtpRequired] = useState(false);
   const [otpCode, setOtpCode] = useState("");
+  const [visibleOtp, setVisibleOtp] = useState<string | null>(null);
 
   // Load dynamic settings if not initialized
   useEffect(() => {
@@ -37,8 +38,16 @@ export default function SignInPage() {
 
   // Already signed in? Don't show the form again.
   useEffect(() => {
-    if (hydrated && accessToken) router.replace("/dashboard");
-  }, [hydrated, accessToken, router]);
+    if (hydrated && accessToken && user) {
+      if (user.role === "STUDENT") {
+        router.replace("/student/dashboard");
+      } else if (user.role === "TEACHER") {
+        router.replace("/teacher/dashboard");
+      } else {
+        router.replace("/dashboard");
+      }
+    }
+  }, [hydrated, accessToken, user, router]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +69,7 @@ export default function SignInPage() {
       const res = await login(trimmedEmail, password);
       if ("otpRequired" in res && res.otpRequired) {
         setOtpRequired(true);
+        setVisibleOtp((res as any).otp || null);
         setBusy(false);
         return;
       }
@@ -68,14 +78,21 @@ export default function SignInPage() {
       const tokens = res as any;
       setTokens(tokens);
 
-      const user = await fetchMe();
-      if (user.role !== "ADMIN") {
+      const fetchedUser = await fetchMe();
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
+      if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
-        throw new ApiError(403, "This console is for administrators only.");
+        throw new ApiError(403, "This console is for authorized users only.");
       }
 
-      setSession(tokens, user);
-      router.replace("/dashboard");
+      setSession(tokens, fetchedUser);
+      if (fetchedUser.role === "STUDENT") {
+        router.replace("/student/dashboard");
+      } else if (fetchedUser.role === "TEACHER") {
+        router.replace("/teacher/dashboard");
+      } else {
+        router.replace("/dashboard");
+      }
     } catch (err) {
       clear();
       setError(err instanceof ApiError ? err.message : "Could not reach the server.");
@@ -98,14 +115,21 @@ export default function SignInPage() {
       const tokens = await verifyOtp(email, otpCode);
       setTokens(tokens);
 
-      const user = await fetchMe();
-      if (user.role !== "ADMIN") {
+      const fetchedUser = await fetchMe();
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
+      if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
-        throw new ApiError(403, "This console is for administrators only.");
+        throw new ApiError(403, "This console is for authorized users only.");
       }
 
-      setSession(tokens, user);
-      router.replace("/dashboard");
+      setSession(tokens, fetchedUser);
+      if (fetchedUser.role === "STUDENT") {
+        router.replace("/student/dashboard");
+      } else if (fetchedUser.role === "TEACHER") {
+        router.replace("/teacher/dashboard");
+      } else {
+        router.replace("/dashboard");
+      }
     } catch (err) {
       clear();
       setError(err instanceof ApiError ? err.message : "Verification failed. Please try again.");
@@ -135,7 +159,7 @@ export default function SignInPage() {
             )}
             <div className="flex flex-col items-start min-w-0">
               <span className="text-xl font-black tracking-widest text-ink uppercase leading-none">
-                {settings?.websiteName || "Edumin"}
+                {settings?.websiteName || "AL FURQAN"}
               </span>
               {settings?.adminConsoleTitle && (
                 <span className="text-[10px] font-bold text-ink-3 uppercase tracking-wider mt-1.5 leading-none">
@@ -293,6 +317,12 @@ export default function SignInPage() {
               <p className="mt-2 text-xs text-ink-3">
                 Please enter the 6-digit code sent to your registered email address.
               </p>
+              {visibleOtp && (
+                <div className="mt-4 p-3 bg-accent-soft/30 border border-accent/20 rounded-2xl text-center animate-fade-in">
+                  <p className="text-[10px] text-ink-3 font-extrabold uppercase tracking-wider">Development OTP Bypass Code</p>
+                  <p className="text-xl font-mono font-black text-accent mt-1 tracking-[0.25em] pl-[0.25em]">{visibleOtp}</p>
+                </div>
+              )}
             </div>
 
             {error && (

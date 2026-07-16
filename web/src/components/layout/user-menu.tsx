@@ -108,24 +108,35 @@ export function UserMenu() {
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                router.push("/profile");
+                if (user.role === "STUDENT") {
+                  router.push("/student/profile");
+                } else if (user.role === "TEACHER") {
+                  router.push("/teacher/profile");
+                } else {
+                  router.push("/profile");
+                }
               }}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
             >
               <UserIcon className="size-4" />
               Profile
             </button>
-            <button
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                router.push("/settings");
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              <Settings className="size-4" />
-              Settings
-            </button>
+            {user.role !== "STUDENT" &&
+              user.role !== "TEACHER" &&
+              user.role !== "ACADEMIC_COACH" &&
+              user.role !== "SUPERVISOR" && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  router.push("/settings");
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <Settings className="size-4" />
+                Settings
+              </button>
+            )}
           </div>
 
           <div className="border-t border-hairline p-1.5">

@@ -354,7 +354,7 @@ export class SettingsService {
       adminConsoleTitle:
         settingsMap.get('ADMIN_CONSOLE_TITLE') || 'Admin console',
       favicon: settingsMap.get('WEBSITE_FAVICON') || null,
-      websiteName: settingsMap.get('WEBSITE_NAME') || 'Edumin LMS',
+      websiteName: settingsMap.get('WEBSITE_NAME') || 'AL FURQAN',
       defaultTheme,
       googleTags: settingsMap.get('GOOGLE_TAGS') || '',
       loaderEnabled: settingsMap.get('WEBSITE_LOADER_ENABLED') || 'true',
@@ -477,7 +477,7 @@ export class SettingsService {
       { key: 'WEBSITE_FAVICON', value: dto.favicon || '' },
       { key: 'WEBSITE_THEME', value: JSON.stringify(themeObj) },
       { key: 'GOOGLE_TAGS', value: dto.googleTags || '' },
-      { key: 'WEBSITE_NAME', value: dto.websiteName || 'Edumin LMS' },
+      { key: 'WEBSITE_NAME', value: dto.websiteName || 'AL FURQAN' },
       { key: 'WEBSITE_LOADER_ENABLED', value: dto.loaderEnabled || 'true' },
       { key: 'WEBSITE_LOADER_URL', value: dto.loaderUrl || '' },
     ];

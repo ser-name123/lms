@@ -14,6 +14,13 @@ const TEACHER_SELECT = {
   specialisation: true,
   hourlyRate: true,
   bio: true,
+  courseId: true,
+  course: {
+    select: {
+      id: true,
+      title: true,
+    },
+  },
   user: {
     select: {
       id: true,
@@ -183,6 +190,7 @@ export class TeachersService {
           specialisation: dto.specialisation || null,
           hourlyRate: dto.hourlyRate || null,
           bio: dto.bio || null,
+          courseId: dto.courseId || null,
           userId: user.id,
         },
         select: TEACHER_SELECT,
@@ -205,15 +213,21 @@ export class TeachersService {
     }
 
     const updatedProfile = await this.prisma.$transaction(async (tx) => {
+      const userData: any = {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        country: dto.country,
+        timezone: dto.timezone,
+        status: dto.status,
+      };
+
+      if (dto.password) {
+        userData.passwordHash = await bcrypt.hash(dto.password, 12);
+      }
+
       await tx.user.update({
         where: { id: teacher.userId },
-        data: {
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          country: dto.country,
-          timezone: dto.timezone,
-          status: dto.status,
-        },
+        data: userData,
       });
 
       return tx.teacherProfile.update({
@@ -222,6 +236,7 @@ export class TeachersService {
           specialisation: dto.specialisation,
           hourlyRate: dto.hourlyRate,
           bio: dto.bio,
+          courseId: dto.courseId === undefined ? undefined : (dto.courseId || null),
         },
         select: TEACHER_SELECT,
       });

@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
-import { Roles } from '../auth/decorators';
+import { CurrentUser, Roles, type AuthUser } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 import { CreateEmployeeDto, ListEmployeesDto, UpdateEmployeeDto } from './dto';
 import { EmployeesService } from './employees.service';
@@ -27,20 +27,20 @@ export class EmployeesController {
 
   @Get()
   @ApiOperation({ summary: 'Paginated, searchable employee list' })
-  list(@Query() query: ListEmployeesDto) {
-    return this.service.list(query);
+  list(@Query() query: ListEmployeesDto, @CurrentUser() user: AuthUser) {
+    return this.service.list(query, user.role === Role.ADMIN);
   }
 
   @Get('stats')
   @ApiOperation({ summary: 'Get employee dashboard stats' })
-  getStats() {
-    return this.service.getStats();
+  getStats(@CurrentUser() user: AuthUser) {
+    return this.service.getStats(user.role === Role.ADMIN);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'One employee profile details' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOne(id, user.role === Role.ADMIN);
   }
 
   @Post()
@@ -68,13 +68,18 @@ export class EmployeesController {
     return this.service.remove(id);
   }
 
+  // Viewing/revoking another user's active sessions (with IP + device) is an
+  // admin-only power everywhere else (students, teachers) — keep it consistent
+  // so a SUPERVISOR/ACADEMIC_COACH cannot force-logout a fellow staff member.
   @Get(':id/sessions')
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Get active login sessions for the employee' })
   getSessions(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getSessions(id);
   }
 
   @Delete(':id/sessions/:sessionId')
+  @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Revoke a specific employee login session' })
   revokeSession(

@@ -28,7 +28,8 @@ import {
   Download,
   CreditCard,
   Building,
-  Loader2
+  Loader2,
+  CheckCircle2
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -42,7 +43,8 @@ import {
   fetchInvoices, 
   createInvoice, 
   updateInvoice, 
-  deleteInvoice 
+  deleteInvoice,
+  ApiError
 } from "@/lib/api";
 
 const STATUSES = ["Paid", "Pending", "Overdue", "Refunded"] as const;
@@ -92,6 +94,104 @@ export default function InvoicesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(invoices.map(inv => inv.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelectRow = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedIds(prev => [...prev, id]);
+    } else {
+      setSelectedIds(prev => prev.filter(x => x !== id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const result = await Swal.fire({
+      title: `Void & Delete ${selectedIds.length} Invoices?`,
+      text: `Are you sure you want to permanently delete/void the selected ${selectedIds.length} invoice records? This action is irreversible.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, delete all",
+      cancelButtonText: "Cancel",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => deleteInvoice(id)));
+        Swal.fire({
+          title: "Deleted!",
+          text: `${selectedIds.length} invoices deleted successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadInvoicesFromDb();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : "Failed to delete invoices.",
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleBulkStatusUpdate = async (newStatus: "PAID" | "OVERDUE" | "SENT" | "VOID") => {
+    if (selectedIds.length === 0) return;
+    const actionLabel = newStatus.toLowerCase();
+
+    const result = await Swal.fire({
+      title: `Mark ${selectedIds.length} Invoices as ${newStatus}?`,
+      text: `Are you sure you want to change the status of selected ${selectedIds.length} invoices to ${actionLabel}?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, update status",
+      cancelButtonText: "Cancel",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    });
+
+    if (result.isConfirmed) {
+      setLoading(true);
+      try {
+        await Promise.all(selectedIds.map(id => updateInvoice(id, { status: newStatus })));
+        Swal.fire({
+          title: "Status Updated!",
+          text: `${selectedIds.length} invoices status updated successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+        setSelectedIds([]);
+        loadInvoicesFromDb();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : "Failed to update invoices status.",
+          icon: "error",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -193,6 +293,7 @@ export default function InvoicesPage() {
   // Load backend data
   const loadInvoicesFromDb = () => {
     setLoading(true);
+    setSelectedIds([]);
     fetchInvoices({
       page: currentPage,
       limit: pageSize,
@@ -848,12 +949,19 @@ export default function InvoicesPage() {
                 </Button>
               </div>
             </div>
-
             {/* Invoices Table Grid */}
             <div className="overflow-x-auto border border-hairline rounded-xl">
               <table className="w-full border-collapse text-left text-sm text-ink-2">
                 <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
                   <tr>
+                    <th scope="col" className="px-6 py-4 w-4">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.length === invoices.length && invoices.length > 0}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                      />
+                    </th>
                     <th scope="col" className="px-6 py-4">Invoice #</th>
                     <th scope="col" className="px-6 py-4">Billed Student</th>
                     <th scope="col" className="px-6 py-4">Product / Course</th>
@@ -867,9 +975,9 @@ export default function InvoicesPage() {
                 <tbody className="divide-y divide-hairline bg-surface">
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-ink-3">
+                      <td colSpan={9} className="px-6 py-12 text-center text-ink-3">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <Loader2 className="size-8 animate-spin text-accent" />
+                           <Loader2 className="size-8 animate-spin text-accent" />
                           <p className="font-semibold text-sm">Querying database invoices...</p>
                         </div>
                       </td>
@@ -894,11 +1002,23 @@ export default function InvoicesPage() {
                         "Refunded": "neutral"
                       };
 
+                      const isSelected = selectedIds.includes(inv.id);
                       return (
                         <tr 
                           key={`${inv.id}-${idx}`} 
-                          className="hover:bg-surface-2/60 transition-colors"
+                          className={cn(
+                            "hover:bg-surface-2/60 transition-colors",
+                            isSelected && "bg-accent-soft/20 hover:bg-accent-soft/25"
+                          )}
                         >
+                          <td className="px-6 py-4 w-4">
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              onChange={(e) => handleSelectRow(inv.id, e.target.checked)}
+                              className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
+                            />
+                          </td>
                           <td className="px-6 py-4 font-mono font-bold text-xs text-ink">
                             {inv.number}
                           </td>
@@ -970,7 +1090,7 @@ export default function InvoicesPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-ink-3">
+                      <td colSpan={9} className="px-6 py-12 text-center text-ink-3">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <Receipt className="size-8 text-ink-3/60" />
                           <p className="font-semibold text-sm">No database invoices found.</p>
@@ -1499,6 +1619,45 @@ export default function InvoicesPage() {
                 </Button>
               </footer>
             </form>
+          </div>
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-surface border border-hairline px-5 py-3 rounded-2xl shadow-2xl animate-fade-in select-none">
+          <div className="text-xs font-bold text-ink flex items-center gap-2">
+            <Receipt className="size-4 text-accent" />
+            <span>Selected <span className="tnum font-extrabold text-accent">{selectedIds.length}</span> invoices</span>
+          </div>
+          <div className="h-5 w-hairline bg-hairline" />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => handleBulkStatusUpdate("PAID")}
+              className="bg-good hover:bg-good/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="size-3.5" />
+              Mark Paid
+            </Button>
+            <Button
+              onClick={() => handleBulkStatusUpdate("OVERDUE")}
+              className="bg-surface-3 hover:bg-surface-4 text-ink-2 font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <AlertCircle className="size-3.5 text-warning-ink" />
+              Mark Overdue
+            </Button>
+            <Button
+              onClick={handleBulkDelete}
+              className="bg-critical hover:bg-critical/95 text-white font-bold text-xs h-8.5 px-3.5 rounded-xl flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="size-3.5" />
+              Void / Delete
+            </Button>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="text-xs font-bold text-ink-3 hover:text-ink hover:underline px-2 cursor-pointer"
+            >
+              Clear
+            </button>
           </div>
         </div>
       )}

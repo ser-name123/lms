@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
@@ -27,6 +28,27 @@ function allowedOrigins(): string[] | true {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Increase payload limits to support base64 image uploads (e.g. logo, favicon)
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
+
+  // Serve only the upload folders that browsers must load via bare <img>/<a>
+  // tags (which cannot carry an auth header): profile avatars and knowledgebase
+  // learning materials. Receipts are deliberately NOT served here — they are
+  // financial documents and are streamed through the auth-guarded
+  // GET /api/expenses/receipt/:filename endpoint instead. Serving the whole
+  // uploads/ dir statically used to expose every receipt to the open internet.
+  const express = require('express');
+  const path = require('path');
+  const uploadsRoot = path.join(process.cwd(), 'uploads');
+  for (const prefix of ['/uploads', '/api/uploads']) {
+    app.use(`${prefix}/avatars`, express.static(path.join(uploadsRoot, 'avatars')));
+    app.use(
+      `${prefix}/knowledgebase`,
+      express.static(path.join(uploadsRoot, 'knowledgebase')),
+    );
+  }
 
   // Standard hardening headers (CSP off by default — this is a JSON API).
   app.use(helmet());
