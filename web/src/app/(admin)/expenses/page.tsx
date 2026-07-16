@@ -34,7 +34,8 @@ import {
   Upload,
   ArrowUpRight,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  Tag
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { 
@@ -46,8 +47,7 @@ import {
   Tooltip,
   PieChart,
   Pie,
-  Cell,
-  Legend
+  Cell
 } from "recharts";
 
 import { Topbar } from "@/components/layout/topbar";
@@ -58,6 +58,8 @@ import { cn } from "@/lib/utils";
 import {
   fetchExpenses,
   fetchExpenseStats,
+  fetchExpenseCategories,
+  createExpenseCategory,
   createExpense,
   updateExpense,
   deleteExpense,
@@ -69,19 +71,18 @@ import {
   type ExpensePaymentMethod
 } from "@/lib/api";
 
-const CATEGORIES = ["All", "Salary", "Rent", "Utilities", "Marketing", "Software", "Office Supplies", "Travel", "Others"] as const;
 const STATUSES = ["All", "Approved", "Pending", "Rejected"] as const;
 const METHODS = ["All", "Bank Transfer", "Credit Card", "PayPal", "Cash", "Wise"] as const;
 
 const CHART_COLORS = [
-  "#386FA4", // Software / Blue
-  "#10b981", // Salary / Green
-  "#f59e0b", // Utilities / Amber
-  "#f85a6b", // Rent / Rose
-  "#8b5cf6", // Marketing / Purple
-  "#06b6d4", // Office Supplies / Cyan
-  "#ec4899", // Travel / Pink
-  "#6b7280"  // Others / Gray
+  "#386FA4", // Blue
+  "#10b981", // Green
+  "#f59e0b", // Amber
+  "#f85a6b", // Rose
+  "#8b5cf6", // Purple
+  "#06b6d4", // Cyan
+  "#ec4899", // Pink
+  "#6b7280"  // Gray
 ];
 
 const statusBadgeTone: Record<ExpenseStatus, Tone> = {
@@ -104,26 +105,16 @@ const methodLabel: Record<ExpensePaymentMethod, string> = {
   WISE: "Wise"
 };
 
-const categoryLabel: Record<ExpenseCategory, string> = {
-  SALARY: "Salaries & Wages",
-  RENT: "Office Rent",
-  UTILITIES: "Utilities & Bills",
-  MARKETING: "Marketing & Ads",
-  SOFTWARE: "Subscriptions & SaaS",
-  OFFICE_SUPPLIES: "Office Supplies",
-  TRAVEL: "Travel & Training",
-  OTHERS: "Miscellaneous"
-};
-
 export default function ExpensesDashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [stats, setStats] = useState<ExpenseStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
   // Filters, sorting, and pagination
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [categoryIdFilter, setCategoryIdFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [methodFilter, setMethodFilter] = useState("All");
   const [sortBy, setSortBy] = useState("date_desc");
@@ -141,7 +132,7 @@ export default function ExpensesDashboard() {
   // Add Expense form states
   const [formTitle, setFormTitle] = useState("");
   const [formAmount, setFormAmount] = useState("");
-  const [formCategory, setFormCategory] = useState<ExpenseCategory>("OTHERS");
+  const [formCategory, setFormCategory] = useState("");
   const [formMethod, setFormMethod] = useState<ExpensePaymentMethod>("BANK_TRANSFER");
   const [formMerchant, setFormMerchant] = useState("");
   const [formReferenceNo, setFormReferenceNo] = useState("");
@@ -153,20 +144,31 @@ export default function ExpensesDashboard() {
   // Simulated uploader states
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
 
-  // Load dashboard tables and aggregated metrics
+  // Fetch data from backend
   const loadDashboardData = () => {
     setLoading(true);
     
-    // Formatting filter query structures
-    const catParam = categoryFilter === "All" ? undefined : categoryFilter;
+    // Formatting filter queries
+    const catParam = categoryIdFilter === "All" ? undefined : categoryIdFilter;
     const statusParam = statusFilter === "All" ? undefined : statusFilter.toUpperCase();
     const methodParam = methodFilter === "All" ? undefined : methodFilter;
+
+    // Load dynamic categories
+    fetchExpenseCategories()
+      .then(res => {
+        setCategories(res);
+        // Default select first category in form if none selected
+        if (res.length > 0 && !formCategory) {
+          setFormCategory(res[0].id);
+        }
+      })
+      .catch(err => console.error("Failed to load categories", err));
 
     fetchExpenses({
       page: currentPage,
       limit: pageSize,
       search: searchQuery || undefined,
-      category: catParam,
+      categoryId: catParam,
       status: statusParam,
       paymentMethod: methodParam,
       sortBy
@@ -188,7 +190,7 @@ export default function ExpensesDashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [currentPage, pageSize, categoryFilter, statusFilter, methodFilter, sortBy]);
+  }, [currentPage, pageSize, categoryIdFilter, statusFilter, methodFilter, sortBy]);
 
   // Handle Search Submission
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -197,7 +199,7 @@ export default function ExpensesDashboard() {
     loadDashboardData();
   };
 
-  // Seed dummy historical analytics
+  // Seed mock data
   const handleSeedExpenses = () => {
     setActionLoading(true);
     seedExpenses()
@@ -218,6 +220,46 @@ export default function ExpensesDashboard() {
       .finally(() => setActionLoading(false));
   };
 
+  // Create new Category inline
+  const handleAddCategory = () => {
+    Swal.fire({
+      title: "Create Expense Category",
+      input: "text",
+      inputPlaceholder: "Enter new category name (e.g. Server Hosting)...",
+      showCancelButton: true,
+      confirmButtonText: "Create",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#386FA4",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      inputValidator: (value) => {
+        if (!value || value.trim().length < 2) {
+          return "Please enter a valid category name (min 2 characters).";
+        }
+      }
+    }).then(result => {
+      if (result.isConfirmed && result.value) {
+        setActionLoading(true);
+        createExpenseCategory(result.value.trim())
+          .then(newCat => {
+            setCategories(prev => [...prev, newCat]);
+            setFormCategory(newCat.id); // auto-select the newly created category!
+            Swal.fire({
+              toast: true,
+              position: "top-end",
+              icon: "success",
+              title: `Category "${newCat.name}" created and selected!`,
+              showConfirmButton: false,
+              timer: 2000
+            });
+          })
+          .catch(err => {
+            Swal.fire({ title: "Failed", text: err.message || "Failed to create category.", icon: "error" });
+          })
+          .finally(() => setActionLoading(false));
+      }
+    });
+  };
+
   // Open single detail drawer
   const handleOpenDetails = (expense: Expense) => {
     setSelectedExpense(expense);
@@ -227,13 +269,13 @@ export default function ExpensesDashboard() {
   // Handle create new expense submit
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle || !formAmount) return;
+    if (!formTitle || !formAmount || !formCategory) return;
 
     setActionLoading(true);
     createExpense({
       title: formTitle,
       amount: Number(formAmount),
-      category: formCategory,
+      categoryId: formCategory,
       paymentMethod: formMethod,
       merchant: formMerchant || undefined,
       referenceNo: formReferenceNo || undefined,
@@ -247,8 +289,6 @@ export default function ExpensesDashboard() {
         // Reset form fields
         setFormTitle("");
         setFormAmount("");
-        setFormCategory("OTHERS");
-        setFormMethod("BANK_TRANSFER");
         setFormMerchant("");
         setFormReferenceNo("");
         setFormNotes("");
@@ -274,7 +314,6 @@ export default function ExpensesDashboard() {
   const simulateReceiptUpload = () => {
     setUploadingReceipt(true);
     setTimeout(() => {
-      // Pick a random mock receipt image URL
       const urls = [
         "https://images.unsplash.com/photo-1554415707-6e8cfc93fe23?w=600&auto=format&fit=crop&q=60",
         "https://images.unsplash.com/photo-1450133064473-71024230f91b?w=600&auto=format&fit=crop&q=60",
@@ -518,7 +557,7 @@ export default function ExpensesDashboard() {
                     {/* Styled custom legends list */}
                     <div className="w-full mt-4 grid grid-cols-2 gap-2 text-[10px] font-bold text-ink-3">
                       {stats.categoryBreakdown.slice(0, 6).map((item, idx) => (
-                        <div key={item.name} className="flex items-center gap-1.5 truncate">
+                        <div key={item.id} className="flex items-center gap-1.5 truncate">
                           <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
                           <span className="truncate">{item.name}:</span>
                           <span className="text-ink font-extrabold">${item.value.toLocaleString()}</span>
@@ -618,11 +657,12 @@ export default function ExpensesDashboard() {
             <div className="flex items-center gap-1.5">
               <span>Category:</span>
               <select
-                value={categoryFilter}
-                onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-                className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink focus:outline-none cursor-pointer"
+                value={categoryIdFilter}
+                onChange={(e) => { setCategoryIdFilter(e.target.value); setCurrentPage(1); }}
+                className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink focus:outline-none cursor-pointer hover:border-hairline"
               >
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="All">All Categories</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
 
@@ -714,7 +754,7 @@ export default function ExpensesDashboard() {
                         </td>
                         <td className="px-6 py-4 text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">
                           <span className="px-2 py-0.5 rounded-md bg-surface-3 border border-hairline">
-                            {exp.category.replace("_", " ")}
+                            {exp.category?.name || "Uncategorized"}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-xs font-bold text-ink-2">
@@ -905,20 +945,26 @@ export default function ExpensesDashboard() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Category</label>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1 flex items-center justify-between">
+                    <span>Category</span>
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      className="text-[10px] text-accent font-extrabold hover:underline uppercase flex items-center gap-0.5"
+                    >
+                      <Plus className="size-3" />
+                      Create Category
+                    </button>
+                  </label>
                   <select
                     value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value as ExpenseCategory)}
+                    required
+                    onChange={(e) => setFormCategory(e.target.value)}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
                   >
-                    <option value="SALARY">Salaries & Wages</option>
-                    <option value="RENT">Office Rent</option>
-                    <option value="UTILITIES">Utilities & Bills</option>
-                    <option value="MARKETING">Marketing & Ads</option>
-                    <option value="SOFTWARE">Subscriptions & SaaS</option>
-                    <option value="OFFICE_SUPPLIES">Office Supplies</option>
-                    <option value="TRAVEL">Travel & Training</option>
-                    <option value="OTHERS">Miscellaneous</option>
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -1063,7 +1109,7 @@ export default function ExpensesDashboard() {
 
                 <div className="flex items-center justify-between text-xs border-b border-hairline pb-2.5">
                   <span className="text-ink-3 font-semibold">Category Classification</span>
-                  <span className="text-ink font-bold">{categoryLabel[selectedExpense.category]}</span>
+                  <span className="text-ink font-bold">{selectedExpense.category?.name || "Uncategorized"}</span>
                 </div>
 
                 <div className="flex items-center justify-between text-xs border-b border-hairline pb-2.5">
@@ -1160,7 +1206,7 @@ export default function ExpensesDashboard() {
         >
           <div 
             className="bg-surface border border-hairline rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl relative"
-            onClick={(e) => e.stopPropagation()} // stop close on container click
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30">
               <h3 className="font-bold text-ink text-sm">Receipt Attachment Preview</h3>

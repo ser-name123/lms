@@ -909,15 +909,11 @@ export const seedPayouts = () => api<{ seededCount: number }>("/payouts/seed", {
 
 // ─── Expense Calls & Types ──────────────────────────────────────────────────────
 
-export type ExpenseCategory = 
-  | "SALARY" 
-  | "RENT" 
-  | "UTILITIES" 
-  | "MARKETING" 
-  | "SOFTWARE" 
-  | "OFFICE_SUPPLIES" 
-  | "TRAVEL" 
-  | "OTHERS";
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  createdAt?: string;
+}
 
 export type ExpenseStatus = "APPROVED" | "PENDING" | "REJECTED";
 export type ExpensePaymentMethod = "BANK_TRANSFER" | "CREDIT_CARD" | "PAYPAL" | "CASH" | "WISE";
@@ -926,6 +922,7 @@ export interface Expense {
   id: string;
   title: string;
   amount: number;
+  categoryId: string;
   category: ExpenseCategory;
   paymentMethod: ExpensePaymentMethod;
   status: ExpenseStatus;
@@ -943,7 +940,7 @@ export interface ExpenseStats {
   pendingExpense: number;
   revenue: number;
   balance: number;
-  categoryBreakdown: { name: string; value: number; count: number }[];
+  categoryBreakdown: { id: string; name: string; value: number; count: number }[];
   trend: { month: string; revenue: number; expenses: number }[];
 }
 
@@ -951,7 +948,7 @@ export const fetchExpenses = (params: {
   page: number;
   limit: number;
   search?: string;
-  category?: string;
+  categoryId?: string;
   status?: string;
   paymentMethod?: string;
   sortBy?: string;
@@ -961,7 +958,7 @@ export const fetchExpenses = (params: {
     limit: String(params.limit),
   };
   if (params.search) queryObj.search = params.search;
-  if (params.category && params.category !== "All") queryObj.category = params.category.toUpperCase();
+  if (params.categoryId && params.categoryId !== "All") queryObj.categoryId = params.categoryId;
   if (params.status && params.status !== "All") queryObj.status = params.status.toUpperCase();
   if (params.paymentMethod && params.paymentMethod !== "All") {
     queryObj.paymentMethod = params.paymentMethod.toUpperCase().replace(" ", "_");
@@ -973,6 +970,13 @@ export const fetchExpenses = (params: {
 };
 
 export const fetchExpenseStats = () => api<ExpenseStats>("/expenses/stats");
+
+export const fetchExpenseCategories = () => api<ExpenseCategory[]>("/expenses/categories");
+
+export const createExpenseCategory = (name: string) => api<ExpenseCategory>("/expenses/categories", {
+  method: "POST",
+  body: JSON.stringify({ name }),
+});
 
 export const createExpense = (dto: any) => api<Expense>("/expenses", {
   method: "POST",

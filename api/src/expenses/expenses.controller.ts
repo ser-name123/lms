@@ -15,6 +15,7 @@ import { ExpensesService } from './expenses.service';
 import { Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 import { ListExpensesDto, CreateExpenseDto, UpdateExpenseDto } from './dto';
+import { CreateCategoryDto } from './categories/dto';
 
 @ApiTags('expenses')
 @ApiBearerAuth()
@@ -33,6 +34,18 @@ export class ExpensesController {
   @ApiOperation({ summary: 'Get expenses totals and category breakdowns' })
   getStats() {
     return this.service.getStats();
+  }
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Get list of dynamic expense categories' })
+  listCategories() {
+    return this.service.listCategories();
+  }
+
+  @Post('categories')
+  @ApiOperation({ summary: 'Create a new custom expense category' })
+  createCategory(@Body() dto: CreateCategoryDto) {
+    return this.service.createCategory(dto);
   }
 
   @Post('seed')

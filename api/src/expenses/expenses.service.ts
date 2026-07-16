@@ -1,18 +1,64 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ExpenseCategory, ExpenseStatus, ExpensePaymentMethod, InvoiceStatus } from '../generated/prisma/enums';
+import { ExpenseStatus, ExpensePaymentMethod, InvoiceStatus } from '../generated/prisma/enums';
 import { ListExpensesDto, CreateExpenseDto, UpdateExpenseDto } from './dto';
+import { CreateCategoryDto } from './categories/dto';
 import type { Prisma } from '../generated/prisma/client';
 
 @Injectable()
 export class ExpensesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Automatically seeds standard categories if the table is empty
+  async ensureDefaultCategories() {
+    const count = await this.prisma.expenseCategory.count();
+    if (count > 0) return;
+
+    const defaults = [
+      'Salaries & Wages',
+      'Office Rent',
+      'Utilities & Bills',
+      'Marketing & Ads',
+      'Subscriptions & SaaS',
+      'Office Supplies',
+      'Travel & Training',
+      'Miscellaneous',
+    ];
+
+    for (const name of defaults) {
+      await this.prisma.expenseCategory.create({
+        data: { name },
+      }).catch(() => {});
+    }
+  }
+
+  async listCategories() {
+    await this.ensureDefaultCategories();
+    return this.prisma.expenseCategory.findMany({
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createCategory(dto: CreateCategoryDto) {
+    const normalized = dto.name.trim();
+    const existing = await this.prisma.expenseCategory.findUnique({
+      where: { name: normalized },
+    });
+    if (existing) {
+      throw new ConflictException(`Category "${normalized}" already exists.`);
+    }
+
+    return this.prisma.expenseCategory.create({
+      data: { name: normalized },
+    });
+  }
+
   async list(dto: ListExpensesDto) {
-    const { page = 1, limit = 20, search, category, status, paymentMethod, sortBy } = dto;
+    await this.ensureDefaultCategories();
+    const { page = 1, limit = 20, search, categoryId, status, paymentMethod, sortBy } = dto;
 
     const where: Prisma.ExpenseWhereInput = {
-      ...(category ? { category } : {}),
+      ...(categoryId ? { categoryId } : {}),
       ...(status ? { status } : {}),
       ...(paymentMethod ? { paymentMethod } : {}),
       ...(search
@@ -43,6 +89,7 @@ export class ExpensesService {
         orderBy,
         skip: (page - 1) * limit,
         take: limit,
+        include: { category: true },
       }),
       this.prisma.expense.count({ where }),
     ]);
@@ -61,6 +108,7 @@ export class ExpensesService {
   async getOne(id: string) {
     const expense = await this.prisma.expense.findUnique({
       where: { id },
+      include: { category: true },
     });
     if (!expense) throw new NotFoundException(`Expense ID ${id} not found`);
     return expense;
@@ -71,7 +119,7 @@ export class ExpensesService {
       data: {
         title: dto.title,
         amount: Number(dto.amount),
-        category: dto.category,
+        categoryId: dto.categoryId,
         paymentMethod: dto.paymentMethod,
         status: dto.status ?? ExpenseStatus.PENDING,
         paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : new Date(),
@@ -80,6 +128,7 @@ export class ExpensesService {
         receiptUrl: dto.receiptUrl || null,
         notes: dto.notes || null,
       },
+      include: { category: true },
     });
   }
 
@@ -91,7 +140,7 @@ export class ExpensesService {
       data: {
         title: dto.title,
         amount: dto.amount !== undefined ? Number(dto.amount) : undefined,
-        category: dto.category,
+        categoryId: dto.categoryId,
         paymentMethod: dto.paymentMethod,
         status: dto.status,
         paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined,
@@ -100,6 +149,7 @@ export class ExpensesService {
         receiptUrl: dto.receiptUrl,
         notes: dto.notes,
       },
+      include: { category: true },
     });
   }
 
@@ -110,6 +160,8 @@ export class ExpensesService {
   }
 
   async getStats() {
+    await this.ensureDefaultCategories();
+
     // 1. Calculate Total Expense
     const totalExpensesAgg = await this.prisma.expense.aggregate({
       _sum: { amount: true },
@@ -128,30 +180,30 @@ export class ExpensesService {
       where: { status: InvoiceStatus.PAID },
       _sum: { amount: true },
     });
-    
-    // Fallback seed baseline revenue if database has no records (matches screenshot style $57,600)
     const baseRevenue = Number(paidInvoicesAgg._sum.amount || 0);
     const revenue = baseRevenue > 0 ? baseRevenue : 57600;
 
     // 4. Balance
     const balance = revenue - totalExpense;
 
-    // 5. Category-wise Breakdown
-    const categories = Object.values(ExpenseCategory);
-    const categoryBreakdown = await Promise.all(
-      categories.map(async (cat) => {
-        const catAgg = await this.prisma.expense.aggregate({
-          where: { category: cat },
-          _sum: { amount: true },
-          _count: { id: true },
-        });
-        return {
-          name: cat.replace('_', ' '),
-          value: Number(catAgg._sum.amount || 0),
-          count: catAgg._count.id,
-        };
-      })
-    );
+    // 5. Category-wise Breakdown (Dynamic categories)
+    const categories = await this.prisma.expenseCategory.findMany({
+      include: {
+        expenses: {
+          select: { amount: true },
+        },
+      },
+    });
+
+    const categoryBreakdown = categories.map((cat) => {
+      const sum = cat.expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
+      return {
+        id: cat.id,
+        name: cat.name,
+        value: sum,
+        count: cat.expenses.length,
+      };
+    });
 
     // Filter categories that have actual expenses to render on charts nicely
     const filteredBreakdown = categoryBreakdown.filter((c) => c.value > 0);
@@ -186,7 +238,7 @@ export class ExpensesService {
 
       trend.push({
         month: targetDate.toLocaleString('en-US', { month: 'short' }),
-        revenue: mRevenue > 0 ? mRevenue : 9600 - (i * 300), // dynamic mock fallback for clean charts
+        revenue: mRevenue > 0 ? mRevenue : 9600 - (i * 300),
         expenses: mExpenses,
       });
     }
@@ -202,23 +254,33 @@ export class ExpensesService {
   }
 
   async seedDemoExpenses() {
+    await this.ensureDefaultCategories();
+
     const count = await this.prisma.expense.count();
     if (count > 0) return { seededCount: 0 };
+
+    const categories = await this.prisma.expenseCategory.findMany();
+    
+    // Find category mappings helper
+    const getCatId = (name: string) => {
+      const found = categories.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
+      return found ? found.id : categories[categories.length - 1].id;
+    };
 
     const now = new Date();
     let seededCount = 0;
 
     const mockExpenses = [
-      { title: 'Office Space Rent', amount: 1500, category: ExpenseCategory.RENT, method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Apex Properties', notes: 'Monthly headquarter rent payment.' },
-      { title: 'Cloud Infrastructure Subscriptions', amount: 450, category: ExpenseCategory.SOFTWARE, method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Amazon Web Services', notes: 'API server hosting and storage.' },
-      { title: 'High-speed Fiber Internet Connection', amount: 120, category: ExpenseCategory.UTILITIES, method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Comcast Business', notes: 'Office broadband internet.' },
-      { title: 'Teacher Training Workshop Expenses', amount: 350, category: ExpenseCategory.TRAVEL, method: ExpensePaymentMethod.CASH, merchant: 'Intercontinental Hotels', notes: 'Accommodation for regional academic leads.' },
-      { title: 'Google Workspace Licenses', amount: 90, category: ExpenseCategory.SOFTWARE, method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Google LLC', notes: 'Email and storage licenses for supervisors.' },
-      { title: 'Social Media Ad Campaign Ads', amount: 800, category: ExpenseCategory.MARKETING, method: ExpensePaymentMethod.PAYPAL, merchant: 'Meta Platforms Inc', notes: 'Student acquisition campaigns.' },
-      { title: 'Whiteboards and Markers Refills', amount: 75, category: ExpenseCategory.OFFICE_SUPPLIES, method: ExpensePaymentMethod.CASH, merchant: 'Staples', notes: 'Academic markers and presentation boards.' },
-      { title: 'Corporate Wise Remittance Fees', amount: 45, category: ExpenseCategory.OTHERS, method: ExpensePaymentMethod.WISE, merchant: 'Wise Transfer', notes: 'International teacher payment fees.' },
-      { title: 'Staff Zoom Webinar Accounts Upgrade', amount: 150, category: ExpenseCategory.SOFTWARE, method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Zoom Video', notes: 'Webinar hosting licenses.' },
-      { title: 'Office Electricity Bill', amount: 280, category: ExpenseCategory.UTILITIES, method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Con Edison', notes: 'Monthly electrical power consumption.' }
+      { title: 'Office Space Rent', amount: 1500, category: 'rent', method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Apex Properties', notes: 'Monthly headquarter rent payment.' },
+      { title: 'Cloud Infrastructure Subscriptions', amount: 450, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Amazon Web Services', notes: 'API server hosting and storage.' },
+      { title: 'High-speed Fiber Internet Connection', amount: 120, category: 'utilities', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Comcast Business', notes: 'Office broadband internet.' },
+      { title: 'Teacher Training Workshop Expenses', amount: 350, category: 'travel', method: ExpensePaymentMethod.CASH, merchant: 'Intercontinental Hotels', notes: 'Accommodation for regional academic leads.' },
+      { title: 'Google Workspace Licenses', amount: 90, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Google LLC', notes: 'Email and storage licenses for supervisors.' },
+      { title: 'Social Media Ad Campaign Ads', amount: 800, category: 'marketing', method: ExpensePaymentMethod.PAYPAL, merchant: 'Meta Platforms Inc', notes: 'Student acquisition campaigns.' },
+      { title: 'Whiteboards and Markers Refills', amount: 75, category: 'supplies', method: ExpensePaymentMethod.CASH, merchant: 'Staples', notes: 'Academic markers and presentation boards.' },
+      { title: 'Corporate Wise Remittance Fees', amount: 45, category: 'miscellaneous', method: ExpensePaymentMethod.WISE, merchant: 'Wise Transfer', notes: 'International teacher payment fees.' },
+      { title: 'Staff Zoom Webinar Accounts Upgrade', amount: 150, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Zoom Video', notes: 'Webinar hosting licenses.' },
+      { title: 'Office Electricity Bill', amount: 280, category: 'utilities', method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Con Edison', notes: 'Monthly electrical power consumption.' }
     ];
 
     // Seed mock data spread over the last 3 months
@@ -226,17 +288,14 @@ export class ExpensesService {
       const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 15);
       
       for (const item of mockExpenses) {
-        // Spread dates slightly
         const targetDate = new Date(monthDate.getTime() + (seededCount * 12 * 3600 * 1000));
-        
-        // Paid for historical months, pending/approved mix for current month
         const status = i > 0 || seededCount % 3 !== 0 ? ExpenseStatus.APPROVED : ExpenseStatus.PENDING;
 
         await this.prisma.expense.create({
           data: {
             title: `${item.title} (Cycle-${i})`,
             amount: item.amount,
-            category: item.category,
+            categoryId: getCatId(item.category),
             paymentMethod: item.method,
             status,
             paymentDate: targetDate,

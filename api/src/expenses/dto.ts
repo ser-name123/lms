@@ -8,8 +8,8 @@ import {
   IsDateString,
   IsNotEmpty,
 } from 'class-validator';
+import { ExpenseStatus, ExpensePaymentMethod } from '../generated/prisma/enums';
 import { Type } from 'class-transformer';
-import { ExpenseCategory, ExpenseStatus, ExpensePaymentMethod } from '../generated/prisma/enums';
 
 export class CreateExpenseDto {
   @ApiProperty()
@@ -22,9 +22,10 @@ export class CreateExpenseDto {
   @Min(0)
   amount!: number;
 
-  @ApiProperty({ enum: ExpenseCategory })
-  @IsEnum(ExpenseCategory)
-  category!: ExpenseCategory;
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  categoryId!: string;
 
   @ApiProperty({ enum: ExpensePaymentMethod })
   @IsEnum(ExpensePaymentMethod)
@@ -73,10 +74,10 @@ export class UpdateExpenseDto {
   @Min(0)
   amount?: number;
 
-  @ApiPropertyOptional({ enum: ExpenseCategory })
+  @ApiPropertyOptional()
   @IsOptional()
-  @IsEnum(ExpenseCategory)
-  category?: ExpenseCategory;
+  @IsString()
+  categoryId?: string;
 
   @ApiPropertyOptional({ enum: ExpensePaymentMethod })
   @IsOptional()
@@ -132,10 +133,10 @@ export class ListExpensesDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ enum: ExpenseCategory })
+  @ApiPropertyOptional()
   @IsOptional()
-  @IsEnum(ExpenseCategory)
-  category?: ExpenseCategory;
+  @IsString()
+  categoryId?: string;
 
   @ApiPropertyOptional({ enum: ExpenseStatus })
   @IsOptional()
