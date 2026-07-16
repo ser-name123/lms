@@ -140,6 +140,19 @@ export class CreateStudentDto {
   @IsOptional()
   @IsString()
   nextPaymentDate?: string;
+
+  // Optional enrolment: assign the student to a course (by catalogue code) and,
+  // optionally, a teacher at creation time. Omit both to create an unassigned
+  // student.
+  @ApiPropertyOptional({ description: 'LmsCourse code to enrol the student into' })
+  @IsOptional()
+  @IsString()
+  courseCode?: string;
+
+  @ApiPropertyOptional({ description: 'TeacherProfile id to assign for the enrolment' })
+  @IsOptional()
+  @IsString()
+  teacherId?: string;
 }
 
 export class UpdateStudentDto {
@@ -211,4 +224,16 @@ export class UpdateStudentDto {
   @IsString()
   @MinLength(8)
   password?: string;
+
+  // Optional enrolment management: assign/change the student's course (by
+  // catalogue code) and/or teacher. Omit to leave enrolments untouched.
+  @ApiPropertyOptional({ description: 'LmsCourse code to enrol the student into' })
+  @IsOptional()
+  @IsString()
+  courseCode?: string;
+
+  @ApiPropertyOptional({ description: 'TeacherProfile id to assign for the enrolment' })
+  @IsOptional()
+  @IsString()
+  teacherId?: string;
 }

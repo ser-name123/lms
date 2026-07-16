@@ -41,6 +41,7 @@ import {
   deleteStudent, 
   fetchStudentsCourses,
   fetchStudentsTeachers,
+  fetchLmsCourses,
   fetchStudentStats,
   fetchStudentSessions,
   revokeStudentSession,
@@ -125,6 +126,10 @@ export default function StudentsPage() {
   const [joiningDate, setJoiningDate] = useState("");
   const [lastPaymentDate, setLastPaymentDate] = useState("");
   const [nextPaymentDate, setNextPaymentDate] = useState("");
+  // Optional enrolment at creation time (both may be left blank).
+  const [formCourseCode, setFormCourseCode] = useState("");
+  const [formTeacherId, setFormTeacherId] = useState("");
+  const [catalogCourses, setCatalogCourses] = useState<{ id: string; code: string; title: string }[]>([]);
   const [modalBusy, setModalBusy] = useState(false);
   const [modalStatus, setModalStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -141,6 +146,8 @@ export default function StudentsPage() {
   const [manageJoiningDate, setManageJoiningDate] = useState("");
   const [manageLastPaymentDate, setManageLastPaymentDate] = useState("");
   const [manageNextPaymentDate, setManageNextPaymentDate] = useState("");
+  const [manageCourseCode, setManageCourseCode] = useState("");
+  const [manageTeacherId, setManageTeacherId] = useState("");
   const [manageStatus, setManageStatus] = useState("ACTIVE");
   const [manageBusy, setManageBusy] = useState(false);
   const [manageStatusMsg, setManageStatusMsg] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -160,12 +167,14 @@ export default function StudentsPage() {
   useEffect(() => {
     const loadFilterHelpers = async () => {
       try {
-        const [courses, teachers] = await Promise.all([
+        const [courses, teachers, catalog] = await Promise.all([
           fetchStudentsCourses(),
-          fetchStudentsTeachers()
+          fetchStudentsTeachers(),
+          fetchLmsCourses()
         ]);
         setCoursesList(courses);
         setTeachersList(teachers);
+        setCatalogCourses(catalog.map(c => ({ id: c.id, code: c.code, title: c.title })));
       } catch (err) {
         console.error("Failed to load search filter options:", err);
       }
@@ -259,6 +268,8 @@ export default function StudentsPage() {
         joiningDate: joiningDate || undefined,
         lastPaymentDate: lastPaymentDate || undefined,
         nextPaymentDate: nextPaymentDate || undefined,
+        courseCode: formCourseCode || undefined,
+        teacherId: formTeacherId || undefined,
       });
 
       setModalStatus({ type: "success", message: "Student added successfully!" });
@@ -277,6 +288,8 @@ export default function StudentsPage() {
       setJoiningDate("");
       setLastPaymentDate("");
       setNextPaymentDate("");
+      setFormCourseCode("");
+      setFormTeacherId("");
 
       // Reload list & close modal
       loadStudents();
@@ -315,6 +328,13 @@ export default function StudentsPage() {
     setManageLastPaymentDate(formatDateForInput(student.lastPaymentDate));
     setManageNextPaymentDate(formatDateForInput(student.nextPaymentDate));
     setManageStatus(student.user.status);
+    // Pre-fill course + teacher from the student's first existing enrolment.
+    const firstEnr = student.enrollments?.[0];
+    const matchedCourse = firstEnr
+      ? catalogCourses.find(c => c.title === firstEnr.course.title)
+      : undefined;
+    setManageCourseCode(matchedCourse?.code || "");
+    setManageTeacherId(firstEnr?.teacher?.id || "");
     setManageStatusMsg(null);
   };
 
@@ -367,7 +387,9 @@ export default function StudentsPage() {
         joiningDate: manageJoiningDate || null,
         lastPaymentDate: manageLastPaymentDate || null,
         nextPaymentDate: manageNextPaymentDate || null,
-        status: manageStatus
+        status: manageStatus,
+        courseCode: manageCourseCode || undefined,
+        teacherId: manageTeacherId || undefined,
       });
 
       setManageStatusMsg({ type: "success", message: "Student configurations saved successfully." });
@@ -933,9 +955,12 @@ export default function StudentsPage() {
                   {students.map((row) => {
                     const firstEnrollment = row.enrollments?.[0];
                     const courseName = firstEnrollment ? firstEnrollment.course.title : "Not Enrolled";
-                    const teacherName = firstEnrollment ? `${firstEnrollment.teacher.user.firstName} ${firstEnrollment.teacher.user.lastName}` : "Not Assigned";
-                    const packageName = firstEnrollment?.package?.name || "Simple";
-                    const classesCount = firstEnrollment?.package?.classesPerMonth || 17;
+                    // A course can be assigned without a teacher, so guard `teacher`.
+                    const teacherName = firstEnrollment?.teacher
+                      ? `${firstEnrollment.teacher.user.firstName} ${firstEnrollment.teacher.user.lastName}`
+                      : "Not Assigned";
+                    const packageName = firstEnrollment?.package?.name || "—";
+                    const classesCount = firstEnrollment?.package?.classesPerMonth ?? null;
                     const statusText = row.user.status;
 
                     return (
@@ -986,7 +1011,7 @@ export default function StudentsPage() {
                         <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.phone || "—"}</td>
 
                         {/* Scheduled Classes */}
-                        <td className="tnum px-4 py-3 text-xs font-bold text-ink">{classesCount} Classes</td>
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink">{classesCount != null ? `${classesCount} Classes` : "—"}</td>
 
                         {/* Level (mocked fallback level 1 as shown in user reference) */}
                         <td className="tnum px-4 py-3 text-xs font-bold text-ink-2">Level 1</td>
@@ -1373,6 +1398,45 @@ export default function StudentsPage() {
                 </div>
               </div>
 
+              {/* Optional enrolment: assign a course + teacher (both optional) */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 border-t border-hairline pt-4">
+                <div className="sm:col-span-2 -mb-1">
+                  <p className="text-[11px] font-semibold text-ink-3">Enrolment <span className="font-normal">(optional — leave blank to add an unassigned student)</span></p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Course</label>
+                  <div className="relative">
+                    <Briefcase className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                    <select
+                      value={formCourseCode}
+                      onChange={(e) => setFormCourseCode(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
+                    >
+                      <option value="">— No course —</option>
+                      {catalogCourses.map(c => (
+                        <option key={c.id} value={c.code}>{c.title} ({c.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Teacher</label>
+                  <div className="relative">
+                    <User className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                    <select
+                      value={formTeacherId}
+                      onChange={(e) => setFormTeacherId(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
+                    >
+                      <option value="">— No teacher —</option>
+                      {teachersList.map(t => (
+                        <option key={t.id} value={t.id}>{t.user.firstName} {t.user.lastName}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* Actions Bar */}
               <div className="flex items-center justify-end gap-3 border-t border-hairline pt-4.5 bg-surface">
                 <Button
@@ -1626,6 +1690,45 @@ export default function StudentsPage() {
                       placeholder="Guardian Name"
                       className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
                     />
+                  </div>
+                </div>
+              </div>
+
+              {/* Optional enrolment: assign / change course + teacher (both optional) */}
+              <div className="grid grid-cols-2 gap-4 border-t border-hairline pt-4">
+                <div className="col-span-2 -mb-1">
+                  <p className="text-[11px] font-semibold text-ink-3">Enrolment <span className="font-normal">(optional — assign or change the student's course &amp; teacher)</span></p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Course</label>
+                  <div className="relative">
+                    <Briefcase className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                    <select
+                      value={manageCourseCode}
+                      onChange={(e) => setManageCourseCode(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
+                    >
+                      <option value="">— No course —</option>
+                      {catalogCourses.map(c => (
+                        <option key={c.id} value={c.code}>{c.title} ({c.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-3">Teacher</label>
+                  <div className="relative">
+                    <User className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+                    <select
+                      value={manageTeacherId}
+                      onChange={(e) => setManageTeacherId(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface pr-3 pl-10 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all cursor-pointer"
+                    >
+                      <option value="">— No teacher —</option>
+                      {teachersList.map(t => (
+                        <option key={t.id} value={t.id}>{t.user.firstName} {t.user.lastName}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>

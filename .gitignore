@@ -9,6 +9,10 @@ build/
 .env.*
 !.env.example
 
+# DB dumps hold password hashes, session tokens and personal data — never commit.
+api/backup/
+uploads/
+
 *.log
 .DS_Store
 .vercel

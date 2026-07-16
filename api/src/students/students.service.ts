@@ -6,7 +6,11 @@ import {
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '../generated/prisma/enums';
+import {
+  Role,
+  CourseStatus,
+  EnrollmentStatus,
+} from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
 import type {
   CreateStudentDto,
@@ -173,38 +177,113 @@ export class StudentsService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    return this.prisma.studentProfile.create({
-      data: {
-        studentCode: await this.nextStudentCode(),
-        phone: dto.phone,
-        gender: dto.gender,
-        guardianName: dto.guardianName,
-        profession: dto.profession,
-        fees: dto.fees,
-        joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : null,
-        lastPaymentDate: dto.lastPaymentDate
-          ? new Date(dto.lastPaymentDate)
-          : null,
-        nextPaymentDate: dto.nextPaymentDate
-          ? new Date(dto.nextPaymentDate)
-          : null,
-        user: {
-          create: {
-            email: dto.email,
-            passwordHash,
-            firstName: dto.firstName,
-            lastName: dto.lastName,
-            country: dto.country,
-            role: Role.STUDENT,
+    // Optional enrolment: validate the referenced teacher up front (clear error
+    // instead of a foreign-key failure mid-transaction).
+    if (dto.teacherId) {
+      const teacher = await this.prisma.teacherProfile.findUnique({
+        where: { id: dto.teacherId },
+      });
+      if (!teacher) {
+        throw new NotFoundException(
+          `Teacher profile with ID ${dto.teacherId} not found`,
+        );
+      }
+    }
+
+    const studentCode = await this.nextStudentCode();
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const profile = await tx.studentProfile.create({
+        data: {
+          studentCode,
+          phone: dto.phone,
+          gender: dto.gender,
+          guardianName: dto.guardianName,
+          profession: dto.profession,
+          fees: dto.fees,
+          joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : null,
+          lastPaymentDate: dto.lastPaymentDate
+            ? new Date(dto.lastPaymentDate)
+            : null,
+          nextPaymentDate: dto.nextPaymentDate
+            ? new Date(dto.nextPaymentDate)
+            : null,
+          user: {
+            create: {
+              email: dto.email,
+              passwordHash,
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              country: dto.country,
+              role: Role.STUDENT,
+            },
           },
         },
-      },
-      select: PROFILE_SELECT,
+        select: { id: true },
+      });
+
+      // If a course was chosen, enrol the student. The catalogue lives in
+      // LmsCourse; enrolments need a relational Course, so we mirror the
+      // catalogue entry into Course on demand (find-or-create by slug).
+      if (dto.courseCode) {
+        const lms = await tx.lmsCourse.findUnique({
+          where: { code: dto.courseCode },
+        });
+        if (!lms) {
+          throw new NotFoundException(
+            `Course with code ${dto.courseCode} not found`,
+          );
+        }
+
+        const slug = dto.courseCode.toLowerCase();
+        const course = await tx.course.upsert({
+          where: { slug },
+          update: {},
+          create: {
+            title: lms.title,
+            slug,
+            description: lms.description,
+            price: 0,
+            status: CourseStatus.PUBLISHED,
+          },
+        });
+
+        await tx.enrollment.create({
+          data: {
+            studentId: profile.id,
+            courseId: course.id,
+            teacherId: dto.teacherId ?? null,
+            status: EnrollmentStatus.ACTIVE,
+            startedAt: new Date(),
+          },
+        });
+
+        // Keep the catalogue's student tally in step with real enrolments.
+        await tx.lmsCourse.update({
+          where: { id: lms.id },
+          data: { studentsCount: { increment: 1 } },
+        });
+      }
+
+      return profile;
     });
+
+    return this.findOne(created.id);
   }
 
   async update(id: string, dto: UpdateStudentDto) {
     await this.findOne(id);
+
+    if (dto.teacherId) {
+      const teacher = await this.prisma.teacherProfile.findUnique({
+        where: { id: dto.teacherId },
+      });
+      if (!teacher) {
+        throw new NotFoundException(
+          `Teacher profile with ID ${dto.teacherId} not found`,
+        );
+      }
+    }
 
     const userUpdate: any = {
       firstName: dto.firstName,
@@ -217,38 +296,94 @@ export class StudentsService {
       userUpdate.passwordHash = await bcrypt.hash(dto.password, 12);
     }
 
-    return this.prisma.studentProfile.update({
-      where: { id },
-      data: {
-        phone: dto.phone,
-        gender: dto.gender,
-        guardianName: dto.guardianName,
-        profession: dto.profession,
-        fees: dto.fees,
-        joiningDate:
-          dto.joiningDate !== undefined
-            ? dto.joiningDate
-              ? new Date(dto.joiningDate)
-              : null
-            : undefined,
-        lastPaymentDate:
-          dto.lastPaymentDate !== undefined
-            ? dto.lastPaymentDate
-              ? new Date(dto.lastPaymentDate)
-              : null
-            : undefined,
-        nextPaymentDate:
-          dto.nextPaymentDate !== undefined
-            ? dto.nextPaymentDate
-              ? new Date(dto.nextPaymentDate)
-              : null
-            : undefined,
-        user: {
-          update: userUpdate,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.studentProfile.update({
+        where: { id },
+        data: {
+          phone: dto.phone,
+          gender: dto.gender,
+          guardianName: dto.guardianName,
+          profession: dto.profession,
+          fees: dto.fees,
+          joiningDate:
+            dto.joiningDate !== undefined
+              ? dto.joiningDate
+                ? new Date(dto.joiningDate)
+                : null
+              : undefined,
+          lastPaymentDate:
+            dto.lastPaymentDate !== undefined
+              ? dto.lastPaymentDate
+                ? new Date(dto.lastPaymentDate)
+                : null
+              : undefined,
+          nextPaymentDate:
+            dto.nextPaymentDate !== undefined
+              ? dto.nextPaymentDate
+                ? new Date(dto.nextPaymentDate)
+                : null
+              : undefined,
+          user: {
+            update: userUpdate,
+          },
         },
-      },
-      select: PROFILE_SELECT,
+      });
+
+      // Optional enrolment change: assign/update the course + teacher. Existing
+      // enrolment for the same course → update its teacher; otherwise create a
+      // new one. Other enrolments are left untouched.
+      if (dto.courseCode) {
+        const lms = await tx.lmsCourse.findUnique({
+          where: { code: dto.courseCode },
+        });
+        if (!lms) {
+          throw new NotFoundException(
+            `Course with code ${dto.courseCode} not found`,
+          );
+        }
+
+        const slug = dto.courseCode.toLowerCase();
+        const course = await tx.course.upsert({
+          where: { slug },
+          update: {},
+          create: {
+            title: lms.title,
+            slug,
+            description: lms.description,
+            price: 0,
+            status: CourseStatus.PUBLISHED,
+          },
+        });
+
+        const existing = await tx.enrollment.findUnique({
+          where: {
+            studentId_courseId: { studentId: id, courseId: course.id },
+          },
+        });
+        if (existing) {
+          await tx.enrollment.update({
+            where: { id: existing.id },
+            data: { teacherId: dto.teacherId ?? null },
+          });
+        } else {
+          await tx.enrollment.create({
+            data: {
+              studentId: id,
+              courseId: course.id,
+              teacherId: dto.teacherId ?? null,
+              status: EnrollmentStatus.ACTIVE,
+              startedAt: new Date(),
+            },
+          });
+          await tx.lmsCourse.update({
+            where: { id: lms.id },
+            data: { studentsCount: { increment: 1 } },
+          });
+        }
+      }
     });
+
+    return this.findOne(id);
   }
 
   async remove(id: string) {

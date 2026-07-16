@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   Plus, 
   Search, 
@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  Sparkles,
   DollarSign,
   Wallet,
   CheckCircle2,
@@ -63,7 +62,8 @@ import {
   createExpense,
   updateExpense,
   deleteExpense,
-  seedExpenses,
+  uploadExpenseReceipt,
+  resolveFileUrl,
   type Expense,
   type ExpenseStats,
   type ExpenseStatus,
@@ -138,11 +138,20 @@ export default function ExpensesDashboard() {
   const [formReferenceNo, setFormReferenceNo] = useState("");
   const [formNotes, setFormNotes] = useState("");
   const [formReceiptUrl, setFormReceiptUrl] = useState("");
+  const [formReceiptName, setFormReceiptName] = useState("");
   const [formStatus, setFormStatus] = useState<ExpenseStatus>("PENDING");
   const [formDate, setFormDate] = useState(() => new Date().toISOString().split("T")[0]);
 
-  // Simulated uploader states
+  // Real receipt uploader state
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  // Human-readable month-over-month caption from a real percentage value
+  const trendCaption = (pct: number | null | undefined) => {
+    if (pct === undefined || pct === null) return "No prior month data";
+    if (pct === 0) return "No change vs last month";
+    return `${Math.abs(pct)}% ${pct > 0 ? "increase" : "decrease"} vs last month`;
+  };
 
   // Fetch data from backend
   const loadDashboardData = () => {
@@ -197,27 +206,6 @@ export default function ExpensesDashboard() {
     e.preventDefault();
     setCurrentPage(1);
     loadDashboardData();
-  };
-
-  // Seed mock data
-  const handleSeedExpenses = () => {
-    setActionLoading(true);
-    seedExpenses()
-      .then(res => {
-        Swal.fire({
-          title: "Database Seeded!",
-          text: res.seededCount > 0 
-            ? `Successfully seeded ${res.seededCount} historical operational expense transactions.`
-            : "Database already contains expense records. No seeding required.",
-          icon: "success",
-          confirmButtonColor: "#386FA4"
-        });
-        loadDashboardData();
-      })
-      .catch(err => {
-        Swal.fire({ title: "Seeding Failed", text: err.message || "Failed to seed demo data.", icon: "error" });
-      })
-      .finally(() => setActionLoading(false));
   };
 
   // Create new Category inline
@@ -293,6 +281,7 @@ export default function ExpensesDashboard() {
         setFormReferenceNo("");
         setFormNotes("");
         setFormReceiptUrl("");
+        setFormReceiptName("");
         setFormStatus("PENDING");
         setFormDate(new Date().toISOString().split("T")[0]);
 
@@ -310,28 +299,32 @@ export default function ExpensesDashboard() {
       .finally(() => setActionLoading(false));
   };
 
-  // Simulated Receipt Uploader
-  const simulateReceiptUpload = () => {
+  // Real Receipt Uploader — sends the chosen file to the backend
+  const handleReceiptSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setUploadingReceipt(true);
-    setTimeout(() => {
-      const urls = [
-        "https://images.unsplash.com/photo-1554415707-6e8cfc93fe23?w=600&auto=format&fit=crop&q=60",
-        "https://images.unsplash.com/photo-1450133064473-71024230f91b?w=600&auto=format&fit=crop&q=60",
-        "https://images.unsplash.com/photo-1557200134-90327ee9fafa?w=600&auto=format&fit=crop&q=60"
-      ];
-      const randomUrl = urls[Math.floor(Math.random() * urls.length)];
-      setFormReceiptUrl(randomUrl);
-      setUploadingReceipt(false);
-      
-      Swal.fire({
-        toast: true,
-        position: "top-end",
-        icon: "success",
-        title: "Mock receipt document uploaded!",
-        showConfirmButton: false,
-        timer: 1500
+    uploadExpenseReceipt(file)
+      .then(res => {
+        setFormReceiptUrl(res.url);
+        setFormReceiptName(res.fileName);
+        Swal.fire({
+          toast: true,
+          position: "top-end",
+          icon: "success",
+          title: `Receipt "${res.fileName}" attached!`,
+          showConfirmButton: false,
+          timer: 1800
+        });
+      })
+      .catch(err => {
+        Swal.fire({ title: "Upload Failed", text: err.message || "Could not upload receipt.", icon: "error" });
+      })
+      .finally(() => {
+        setUploadingReceipt(false);
+        if (receiptInputRef.current) receiptInputRef.current.value = "";
       });
-    }, 1200);
   };
 
   // Toggle single expense approval status (Approve / Reject)
@@ -394,25 +387,24 @@ export default function ExpensesDashboard() {
 
       <div className="animate-fade-up p-4 sm:p-6 space-y-6">
 
-        {/* Empty Alert & Seed Action */}
+        {/* Empty-state prompt: no expenses yet → record the first one */}
         {expenses.length === 0 && !loading && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl border border-hairline bg-surface shadow-sm">
             <div className="flex items-center gap-3">
               <div className="bg-amber-500/10 p-2.5 rounded-xl">
-                <AlertCircle className="size-5 text-amber-500 animate-bounce" />
+                <AlertCircle className="size-5 text-amber-500" />
               </div>
               <div>
                 <h4 className="text-sm font-bold text-ink">No Expense Entries Found</h4>
-                <p className="text-xs text-ink-3">Would you like to seed mock historical data (Rent, Marketing, SaaS) to view analytic breakdowns?</p>
+                <p className="text-xs text-ink-3">Record your first operational expense to start tracking category-wise cashflow.</p>
               </div>
             </div>
             <Button
-              onClick={handleSeedExpenses}
-              disabled={actionLoading}
+              onClick={() => setShowAddModal(true)}
               className="bg-accent hover:shadow-lg text-white font-bold px-4 py-2 text-xs rounded-xl"
             >
-              {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-              Seed Expense Data
+              <Plus className="size-3.5 mr-1.5" />
+              Record New Expense
             </Button>
           </div>
         )}
@@ -429,15 +421,17 @@ export default function ExpensesDashboard() {
                   </div>
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Total Expense</span>
                 </div>
-                <span className="text-xs font-bold text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  +60%
-                </span>
+                {stats?.expenseChangePct != null && (
+                  <span className="text-xs font-bold text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                    {stats.expenseChangePct > 0 ? "+" : ""}{stats.expenseChangePct}%
+                  </span>
+                )}
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
                   ${stats ? stats.totalExpense.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">60% Increase than Last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">{trendCaption(stats?.expenseChangePct)}</p>
               </div>
             </CardBody>
           </Card>
@@ -452,15 +446,17 @@ export default function ExpensesDashboard() {
                   </div>
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Pending</span>
                 </div>
-                <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  +60%
-                </span>
+                {stats?.pendingChangePct != null && (
+                  <span className="text-xs font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                    {stats.pendingChangePct > 0 ? "+" : ""}{stats.pendingChangePct}%
+                  </span>
+                )}
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
                   ${stats ? stats.pendingExpense.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">60% increase than Last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">{trendCaption(stats?.pendingChangePct)}</p>
               </div>
             </CardBody>
           </Card>
@@ -475,15 +471,20 @@ export default function ExpensesDashboard() {
                   </div>
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Revenue</span>
                 </div>
-                <span className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  +60%
-                </span>
+                {stats?.revenueChangePct != null && (
+                  <span className={cn(
+                    "text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5",
+                    stats.revenueChangePct < 0 ? "text-rose-500 bg-rose-500/10" : "text-emerald-500 bg-emerald-500/10"
+                  )}>
+                    {stats.revenueChangePct > 0 ? "+" : ""}{stats.revenueChangePct}%
+                  </span>
+                )}
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
-                  ${stats ? stats.revenue.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "57,600"}
+                  ${stats ? stats.revenue.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">60% increase than Last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">{trendCaption(stats?.revenueChangePct)}</p>
               </div>
             </CardBody>
           </Card>
@@ -498,15 +499,20 @@ export default function ExpensesDashboard() {
                   </div>
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Balance</span>
                 </div>
-                <span className="text-xs font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                  +60%
-                </span>
+                {stats?.balanceChangePct != null && (
+                  <span className={cn(
+                    "text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5",
+                    stats.balanceChangePct < 0 ? "text-rose-500 bg-rose-500/10" : "text-blue-500 bg-blue-500/10"
+                  )}>
+                    {stats.balanceChangePct > 0 ? "+" : ""}{stats.balanceChangePct}%
+                  </span>
+                )}
               </div>
               <div>
                 <h2 className="text-2xl font-extrabold text-ink tracking-tight Outfit leading-none">
-                  ${stats ? stats.balance.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "57,600"}
+                  ${stats ? stats.balance.toLocaleString("en-US", { minimumFractionDigits: 0 }) : "0"}
                 </h2>
-                <p className="text-[10px] font-medium text-ink-3 mt-1.5">60% Increase than Last Month</p>
+                <p className="text-[10px] font-medium text-ink-3 mt-1.5">Revenue minus total expenses</p>
               </div>
             </CardBody>
           </Card>
@@ -1006,24 +1012,31 @@ export default function ExpensesDashboard() {
                 </div>
               </div>
 
-              {/* Receipt Simulated Uploader */}
+              {/* Receipt Document Uploader (real file upload) */}
               <div>
                 <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Receipt Document Attachment</label>
-                <div className="flex items-center gap-3">
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.gif,.webp"
+                  onChange={handleReceiptSelected}
+                  className="hidden"
+                />
+                <div className="flex items-center gap-3 flex-wrap">
                   <Button
                     type="button"
-                    onClick={simulateReceiptUpload}
+                    onClick={() => receiptInputRef.current?.click()}
                     disabled={uploadingReceipt}
                     className="bg-surface-3 hover:bg-surface-4 text-ink-2 font-bold text-xs h-10 px-4 rounded-xl flex items-center gap-1 cursor-pointer"
                   >
                     {uploadingReceipt ? <RefreshCw className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-                    Simulate Attachment Upload
+                    {formReceiptUrl ? "Replace Receipt" : "Upload Receipt (PDF / Image)"}
                   </Button>
-                  
+
                   {formReceiptUrl && (
-                    <span className="text-xs text-emerald-500 font-bold flex items-center gap-1 select-none">
-                      <CheckCircle2 className="size-3.5" />
-                      receipt_doc.pdf attached
+                    <span className="text-xs text-emerald-500 font-bold flex items-center gap-1 select-none max-w-[200px] truncate">
+                      <CheckCircle2 className="size-3.5 shrink-0" />
+                      {formReceiptName || "Receipt attached"}
                     </span>
                   )}
                 </div>
@@ -1140,11 +1153,18 @@ export default function ExpensesDashboard() {
                     onClick={() => setShowReceiptModal(true)}
                     className="relative rounded-2xl border border-hairline overflow-hidden aspect-video bg-surface-2 group cursor-zoom-in hover:brightness-95 transition-all"
                   >
-                    <img 
-                      src={selectedExpense.receiptUrl} 
-                      alt="receipt doc preview"
-                      className="w-full h-full object-cover select-none"
-                    />
+                    {/^data:application\/pdf|\.pdf($|\?)/i.test(selectedExpense.receiptUrl) ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 text-ink-3">
+                        <FileText className="size-8" />
+                        <span className="text-[10px] font-bold uppercase">PDF Receipt</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={resolveFileUrl(selectedExpense.receiptUrl)}
+                        alt="receipt doc preview"
+                        className="w-full h-full object-cover select-none"
+                      />
+                    )}
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-xs font-bold text-white opacity-0 group-hover:opacity-100 transition-opacity">
                       Click to expand preview
                     </div>
@@ -1219,11 +1239,19 @@ export default function ExpensesDashboard() {
             </div>
             
             <div className="p-4 bg-surface-2 flex items-center justify-center max-h-[70vh]">
-              <img 
-                src={selectedExpense.receiptUrl} 
-                alt="expanded receipt doc"
-                className="max-w-full max-h-[60vh] object-contain rounded-xl shadow-lg border border-hairline select-text"
-              />
+              {/^data:application\/pdf|\.pdf($|\?)/i.test(selectedExpense.receiptUrl) ? (
+                <iframe
+                  src={resolveFileUrl(selectedExpense.receiptUrl)}
+                  title="receipt pdf"
+                  className="w-full h-[60vh] rounded-xl border border-hairline bg-white"
+                />
+              ) : (
+                <img
+                  src={resolveFileUrl(selectedExpense.receiptUrl)}
+                  alt="expanded receipt doc"
+                  className="max-w-full max-h-[60vh] object-contain rounded-xl shadow-lg border border-hairline select-text"
+                />
+              )}
             </div>
           </div>
         </div>

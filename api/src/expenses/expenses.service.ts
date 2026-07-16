@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ExpenseStatus, ExpensePaymentMethod, InvoiceStatus } from '../generated/prisma/enums';
+import { ExpenseStatus, InvoiceStatus } from '../generated/prisma/enums';
 import { ListExpensesDto, CreateExpenseDto, UpdateExpenseDto } from './dto';
 import { CreateCategoryDto } from './categories/dto';
 import type { Prisma } from '../generated/prisma/client';
@@ -175,13 +180,12 @@ export class ExpensesService {
     });
     const pendingExpense = Number(pendingExpensesAgg._sum.amount || 0);
 
-    // 3. Calculate Revenue from Paid Invoices
+    // 3. Calculate Revenue from Paid Invoices (real figure, no placeholder)
     const paidInvoicesAgg = await this.prisma.invoice.aggregate({
       where: { status: InvoiceStatus.PAID },
       _sum: { amount: true },
     });
-    const baseRevenue = Number(paidInvoicesAgg._sum.amount || 0);
-    const revenue = baseRevenue > 0 ? baseRevenue : 57600;
+    const revenue = Number(paidInvoicesAgg._sum.amount || 0);
 
     // 4. Balance
     const balance = revenue - totalExpense;
@@ -238,77 +242,77 @@ export class ExpensesService {
 
       trend.push({
         month: targetDate.toLocaleString('en-US', { month: 'short' }),
-        revenue: mRevenue > 0 ? mRevenue : 9600 - (i * 300),
+        revenue: mRevenue, // real monthly revenue, no fabricated fallback
         expenses: mExpenses,
       });
     }
+
+    // 7. Real month-over-month change % (this month vs previous month).
+    // Returns null when there is no prior-month baseline to compare against.
+    const changePct = (current: number, previous: number): number | null => {
+      if (!previous) return null;
+      return Math.round(((current - previous) / previous) * 100);
+    };
+
+    const thisMonth = trend[trend.length - 1];
+    const lastMonth = trend[trend.length - 2] ?? { revenue: 0, expenses: 0 };
+
+    // Pending is a live status snapshot, so compare pending logged this month
+    // against pending logged last month (by payment date).
+    const monthStart = (offset: number) =>
+      new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const monthEnd = (offset: number) =>
+      new Date(now.getFullYear(), now.getMonth() - offset + 1, 0);
+    const [pendingThisAgg, pendingLastAgg] = await Promise.all([
+      this.prisma.expense.aggregate({
+        where: {
+          status: ExpenseStatus.PENDING,
+          paymentDate: { gte: monthStart(0), lte: monthEnd(0) },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: {
+          status: ExpenseStatus.PENDING,
+          paymentDate: { gte: monthStart(1), lte: monthEnd(1) },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+    const pendingThis = Number(pendingThisAgg._sum.amount || 0);
+    const pendingLast = Number(pendingLastAgg._sum.amount || 0);
+
+    const expenseChangePct = changePct(thisMonth.expenses, lastMonth.expenses);
+    const revenueChangePct = changePct(thisMonth.revenue, lastMonth.revenue);
+    const pendingChangePct = changePct(pendingThis, pendingLast);
+    const balanceChangePct = changePct(
+      thisMonth.revenue - thisMonth.expenses,
+      lastMonth.revenue - lastMonth.expenses,
+    );
 
     return {
       totalExpense,
       pendingExpense,
       revenue,
       balance,
+      expenseChangePct,
+      pendingChangePct,
+      revenueChangePct,
+      balanceChangePct,
       categoryBreakdown: filteredBreakdown,
       trend,
     };
   }
 
-  async seedDemoExpenses() {
-    await this.ensureDefaultCategories();
-
-    const count = await this.prisma.expense.count();
-    if (count > 0) return { seededCount: 0 };
-
-    const categories = await this.prisma.expenseCategory.findMany();
-    
-    // Find category mappings helper
-    const getCatId = (name: string) => {
-      const found = categories.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
-      return found ? found.id : categories[categories.length - 1].id;
-    };
-
-    const now = new Date();
-    let seededCount = 0;
-
-    const mockExpenses = [
-      { title: 'Office Space Rent', amount: 1500, category: 'rent', method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Apex Properties', notes: 'Monthly headquarter rent payment.' },
-      { title: 'Cloud Infrastructure Subscriptions', amount: 450, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Amazon Web Services', notes: 'API server hosting and storage.' },
-      { title: 'High-speed Fiber Internet Connection', amount: 120, category: 'utilities', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Comcast Business', notes: 'Office broadband internet.' },
-      { title: 'Teacher Training Workshop Expenses', amount: 350, category: 'travel', method: ExpensePaymentMethod.CASH, merchant: 'Intercontinental Hotels', notes: 'Accommodation for regional academic leads.' },
-      { title: 'Google Workspace Licenses', amount: 90, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Google LLC', notes: 'Email and storage licenses for supervisors.' },
-      { title: 'Social Media Ad Campaign Ads', amount: 800, category: 'marketing', method: ExpensePaymentMethod.PAYPAL, merchant: 'Meta Platforms Inc', notes: 'Student acquisition campaigns.' },
-      { title: 'Whiteboards and Markers Refills', amount: 75, category: 'supplies', method: ExpensePaymentMethod.CASH, merchant: 'Staples', notes: 'Academic markers and presentation boards.' },
-      { title: 'Corporate Wise Remittance Fees', amount: 45, category: 'miscellaneous', method: ExpensePaymentMethod.WISE, merchant: 'Wise Transfer', notes: 'International teacher payment fees.' },
-      { title: 'Staff Zoom Webinar Accounts Upgrade', amount: 150, category: 'subscriptions', method: ExpensePaymentMethod.CREDIT_CARD, merchant: 'Zoom Video', notes: 'Webinar hosting licenses.' },
-      { title: 'Office Electricity Bill', amount: 280, category: 'utilities', method: ExpensePaymentMethod.BANK_TRANSFER, merchant: 'Con Edison', notes: 'Monthly electrical power consumption.' }
-    ];
-
-    // Seed mock data spread over the last 3 months
-    for (let i = 3; i >= 0; i--) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 15);
-      
-      for (const item of mockExpenses) {
-        const targetDate = new Date(monthDate.getTime() + (seededCount * 12 * 3600 * 1000));
-        const status = i > 0 || seededCount % 3 !== 0 ? ExpenseStatus.APPROVED : ExpenseStatus.PENDING;
-
-        await this.prisma.expense.create({
-          data: {
-            title: `${item.title} (Cycle-${i})`,
-            amount: item.amount,
-            categoryId: getCatId(item.category),
-            paymentMethod: item.method,
-            status,
-            paymentDate: targetDate,
-            merchant: item.merchant,
-            referenceNo: `EXP-INV-${Math.floor(100000 + Math.random() * 900000)}`,
-            receiptUrl: 'https://images.unsplash.com/photo-1554415707-6e8cfc93fe23?w=600&auto=format&fit=crop&q=60',
-            notes: item.notes,
-          },
-        });
-        seededCount++;
-      }
+  /** Stores an uploaded receipt file and returns its served reference. */
+  storeReceiptFile(file?: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('No file was uploaded');
     }
-
-    return { seededCount };
+    return {
+      // Served (inline) via GET /expenses/receipt/:filename below.
+      url: `expenses/receipt/${file.filename}`,
+      fileName: file.originalname,
+    };
   }
 }

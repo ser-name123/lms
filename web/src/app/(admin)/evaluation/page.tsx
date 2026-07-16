@@ -27,7 +27,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchTrials, createTrial, scheduleTrial, evaluateTrial, updateTrial, deleteTrial } from "@/lib/api";
+import { fetchTrials, createTrial, scheduleTrial, evaluateTrial, updateTrial, deleteTrial, fetchTeachers } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
 interface RequestItem {
@@ -57,8 +57,9 @@ interface RequestItem {
 
 const INITIAL_REQUESTS: RequestItem[] = [];
 
-const TEACHERS = ["Ustadh Yusuf", "Ustadha Maryam", "Ustadh Bilal", "Ustadha Zainab"];
-const LEVELS = ["Beginner Alphabet", "Quran — Level 1", "Quran — Level 2", "Quran — Level 3", "Arabic Conversational — Level 1", "Islamic Studies Junior"];
+// Fallback course tracks — only used until real teachers (and their
+// specialisations) load from the database.
+const FALLBACK_COURSES = ["Quran", "Arabic", "Islamic Studies"];
 
 const PIE_COLORS = ["#133C55", "#386FA4", "#ffb822"];
 
@@ -86,16 +87,21 @@ export default function EvaluationDashboard() {
   const [formAge, setFormAge] = useState(10);
   const [formGoals, setFormGoals] = useState("");
   const [scheduleOnCreate, setScheduleOnCreate] = useState(false);
-  const [formAddTeacher, setFormAddTeacher] = useState(TEACHERS[0]);
+  const [formAddTeacher, setFormAddTeacher] = useState("");
   const [formAddDateTime, setFormAddDateTime] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingTrialId, setEditingTrialId] = useState("");
   const [formMeetLink, setFormMeetLink] = useState("");
   const [formAddMeetLink, setFormAddMeetLink] = useState("");
   const [formEditStatus, setFormEditStatus] = useState<"PENDING" | "SCHEDULED" | "COMPLETED">("PENDING");
-  const [formEditTeacher, setFormEditTeacher] = useState(TEACHERS[0]);
+  const [formEditTeacher, setFormEditTeacher] = useState("");
   const [formEditDateTime, setFormEditDateTime] = useState("");
   const [modalError, setModalError] = useState("");
+
+  // Dynamic dropdown sources — real teachers and their specialisations (courses)
+  // pulled from the database, so admins only ever pick what actually exists.
+  const [teacherOptions, setTeacherOptions] = useState<string[]>([]);
+  const [courseOptions, setCourseOptions] = useState<string[]>(FALLBACK_COURSES);
 
   const getMinDateTimeString = () => {
     const now = new Date();
@@ -138,6 +144,32 @@ export default function EvaluationDashboard() {
 
   useEffect(() => {
     loadTrialsFromDb();
+  }, []);
+
+  // Load the real, available teachers from the DB so every "assign teacher"
+  // dropdown lists actual staff (not hardcoded names). Course options are
+  // derived from the teachers' specialisations — i.e. what the academy offers.
+  useEffect(() => {
+    fetchTeachers({ page: 1, limit: 100, status: "ACTIVE" })
+      .then((res) => {
+        const names = res.items.map((t) => `${t.user.firstName} ${t.user.lastName}`);
+        const specs = Array.from(
+          new Set(res.items.map((t) => t.specialisation).filter((s): s is string => !!s)),
+        );
+        setTeacherOptions(names);
+        setCourseOptions(specs.length ? specs : FALLBACK_COURSES);
+
+        // Seed the form defaults from the first available option.
+        if (names.length) {
+          setFormAddTeacher((prev) => prev || names[0]);
+          setFormEditTeacher((prev) => prev || names[0]);
+          setScheduleForm((prev) => ({ ...prev, teacher: prev.teacher || names[0] }));
+        }
+        const courseList = specs.length ? specs : FALLBACK_COURSES;
+        setFormCourse((prev) => prev || courseList[0]);
+        setEvaluationForm((prev) => ({ ...prev, recommendedLevel: prev.recommendedLevel || courseList[0] }));
+      })
+      .catch((err) => console.warn("Failed to load teachers for dropdowns", err));
   }, []);
 
   const handleAddRequest = (e: React.FormEvent) => {
@@ -212,8 +244,8 @@ export default function EvaluationDashboard() {
       .finally(() => setLoading(false));
   };
 
-  const [scheduleForm, setScheduleForm] = useState({ teacher: TEACHERS[0], dateTime: "", note: "", meetLink: "" });
-  const [evaluationForm, setEvaluationForm] = useState({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: LEVELS[1], notes: "" });
+  const [scheduleForm, setScheduleForm] = useState({ teacher: "", dateTime: "", note: "", meetLink: "" });
+  const [evaluationForm, setEvaluationForm] = useState({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: "", notes: "" });
 
   // Handle schedule submit
   const handleScheduleRequest = (e: React.FormEvent) => {
@@ -243,7 +275,7 @@ export default function EvaluationDashboard() {
       .then(() => {
         setScheduleModalOpen(false);
         setSelectedStudent(null);
-        setScheduleForm({ teacher: TEACHERS[0], dateTime: "", note: "", meetLink: "" });
+        setScheduleForm({ teacher: teacherOptions[0] || "", dateTime: "", note: "", meetLink: "" });
         setActiveTab("scheduled");
         setModalError("");
         loadTrialsFromDb();
@@ -279,7 +311,7 @@ export default function EvaluationDashboard() {
       .then(() => {
         setEvaluationModalOpen(false);
         setSelectedStudent(null);
-        setEvaluationForm({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: LEVELS[1], notes: "" });
+        setEvaluationForm({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: courseOptions[0] || "", notes: "" });
         setActiveTab("completed");
         loadTrialsFromDb();
         Swal.fire({
@@ -308,7 +340,7 @@ export default function EvaluationDashboard() {
     setFormGoals(req.goals || "");
     setFormMeetLink(req.meetLink || "");
     setFormEditStatus(req.status);
-    setFormEditTeacher(req.assignedTeacher || TEACHERS[0]);
+    setFormEditTeacher(req.assignedTeacher || teacherOptions[0] || "");
     setFormEditDateTime(req.scheduledTime || "");
     setEditModalOpen(true);
   };
@@ -941,7 +973,8 @@ export default function EvaluationDashboard() {
                   onChange={(e) => setScheduleForm(prev => ({ ...prev, teacher: e.target.value }))}
                   className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
                 >
-                  {TEACHERS.map(t => <option key={t} value={t}>{t}</option>)}
+                  {teacherOptions.length === 0 && <option value="">No teachers available</option>}
+                  {teacherOptions.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
 
@@ -1079,7 +1112,7 @@ export default function EvaluationDashboard() {
                   onChange={(e) => setEvaluationForm(prev => ({ ...prev, recommendedLevel: e.target.value }))}
                   className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none"
                 >
-                  {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  {courseOptions.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
               </div>
 
@@ -1324,9 +1357,7 @@ export default function EvaluationDashboard() {
                     onChange={(e) => setFormCourse(e.target.value)}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
                   >
-                    <option value="Quran">Quran</option>
-                    <option value="Arabic">Arabic</option>
-                    <option value="Islamic Studies">Islamic Studies</option>
+                    {courseOptions.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
@@ -1393,7 +1424,8 @@ export default function EvaluationDashboard() {
                       onChange={(e) => setFormEditTeacher(e.target.value)}
                       className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
                     >
-                      {TEACHERS.map(t => (
+                      {teacherOptions.length === 0 && <option value="">No teachers available</option>}
+                      {teacherOptions.map(t => (
                         <option key={t} value={t}>{t}</option>
                       ))}
                     </select>
@@ -1513,9 +1545,7 @@ export default function EvaluationDashboard() {
                     onChange={(e) => setFormCourse(e.target.value)}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
                   >
-                    <option value="Quran">Quran</option>
-                    <option value="Arabic">Arabic</option>
-                    <option value="Islamic Studies">Islamic Studies</option>
+                    {courseOptions.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
@@ -1579,7 +1609,8 @@ export default function EvaluationDashboard() {
                         onChange={(e) => setFormAddTeacher(e.target.value)}
                         className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
                       >
-                        {TEACHERS.map(t => (
+                        {teacherOptions.length === 0 && <option value="">No teachers available</option>}
+                        {teacherOptions.map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>

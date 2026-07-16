@@ -238,7 +238,7 @@ export type StudentProfile = {
     status: string;
     progress: number;
     course: { id: string; title: string };
-    teacher: { id: string; user: { firstName: string; lastName: string } };
+    teacher: { id: string; user: { firstName: string; lastName: string } } | null;
     package?: { id: string; name: string; price: number; classesPerMonth: number } | null;
   }[];
 };
@@ -276,6 +276,11 @@ export const fetchStudents = (params: {
 };
 
 export const fetchStudentsCourses = () => api<{ id: string; title: string }[]>("/students/courses");
+
+// The course catalogue admins actually manage (LmsCourse), used to enrol a
+// student on creation. Public GET.
+export const fetchLmsCourses = () =>
+  api<{ id: string; code: string; title: string; category: string; level: string; status: string }[]>("/lms-data/courses");
 export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string; email: string } }[]>("/students/teachers");
 
 export const createStudent = (dto: any) => api<StudentProfile>("/students", {
@@ -940,6 +945,11 @@ export interface ExpenseStats {
   pendingExpense: number;
   revenue: number;
   balance: number;
+  // Real month-over-month change %; null when there is no prior-month baseline.
+  expenseChangePct: number | null;
+  pendingChangePct: number | null;
+  revenueChangePct: number | null;
+  balanceChangePct: number | null;
   categoryBreakdown: { id: string; name: string; value: number; count: number }[];
   trend: { month: string; revenue: number; expenses: number }[];
 }
@@ -992,9 +1002,25 @@ export const deleteExpense = (id: string) => api<void>(`/expenses/${id}`, {
   method: "DELETE",
 });
 
-export const seedExpenses = () => api<{ seededCount: number }>("/expenses/seed", {
-  method: "POST",
-});
+/** Upload a receipt file (image/pdf). Returns a served, inline-viewable URL. */
+export const uploadExpenseReceipt = async (file: File): Promise<{ url: string; fileName: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/expenses/receipt-upload`, {
+    method: "POST",
+    headers: { ...authHeader() }, // no Content-Type: browser sets the multipart boundary
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return res.json() as Promise<{ url: string; fileName: string }>;
+};
+
+/** Resolve a stored file reference to a full URL the browser can load. */
+export const resolveFileUrl = (ref: string | null | undefined): string => {
+  if (!ref) return "";
+  if (/^(https?:|data:)/i.test(ref)) return ref; // already absolute / external
+  return `${BASE}/${ref.replace(/^\/+/, "")}`;
+};
 
 
 
