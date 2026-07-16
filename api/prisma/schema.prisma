@@ -463,6 +463,11 @@ model LmsKnowledgebase {
   downloads   Int      @default(0)
   status      String   @default("Active")
   description String
+  // Points at the stored file (relative path under /uploads) for uploaded
+  // resources, or an external URL for "Link" resources. Null until a file is
+  // attached. fileName keeps the original name for the download prompt.
+  fileUrl     String?
+  fileName    String?
 }
 
 model LmsPackage {

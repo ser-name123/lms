@@ -1,5 +1,7 @@
 "use client";
 
+import { authHeader } from "@/lib/api";
+
 import { useState, useEffect } from "react";
 import { 
   Plus, 
@@ -167,7 +169,7 @@ export default function CoursesPage() {
       color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
     }).then((result) => {
       if (result.isConfirmed) {
-        fetch(`${apiBase}/lms-data/courses/${id}`, { method: "DELETE" })
+        fetch(`${apiBase}/lms-data/courses/${id}`, { method: "DELETE", headers: authHeader() })
           .then(() => {
             setCourses(prev => prev.filter(c => c.id !== id));
             Swal.fire({
@@ -226,7 +228,7 @@ export default function CoursesPage() {
 
     fetch(`${apiBase}/lms-data/courses`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(newCourse),
     })
       .then(res => res.json())
@@ -278,7 +280,7 @@ export default function CoursesPage() {
 
     fetch(`${apiBase}/lms-data/courses/${selectedCourse.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(updatedPayload),
     })
       .then(res => res.json())
@@ -942,7 +944,7 @@ export default function CoursesPage() {
                     }
                     fetch(`${apiBase}/categories`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", ...authHeader() },
                       body: JSON.stringify({ name: trimmed, type: "COURSE" }),
                     })
                       .then(res => res.json())
@@ -1021,7 +1023,7 @@ export default function CoursesPage() {
                                 const categoryId = categoryIds[cat.toLowerCase()];
                                 if (categoryId) {
                                   fetch(`${apiBase}/categories/${categoryId}`, {
-                                    method: "DELETE",
+                                    method: "DELETE", headers: authHeader(),
                                   })
                                     .then(() => {
                                       setCategories(categories.filter(c => c !== cat));

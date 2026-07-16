@@ -6,3 +6,6 @@
 
 # Prisma generated client
 /src/generated
+
+# Uploaded knowledgebase files
+uploads/

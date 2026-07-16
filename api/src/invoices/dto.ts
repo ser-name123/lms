@@ -1,19 +1,30 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { InvoiceStatus } from '../generated/prisma/enums';
 
 export class CreateInvoiceDto {
   @ApiProperty({ example: 'INV-2026-001' })
   @IsString()
+  @IsNotEmpty()
   number!: string;
 
   @ApiProperty({ example: 'student-id-here' })
   @IsString()
+  @IsNotEmpty()
   studentId!: string;
 
-  @ApiProperty({ example: 142.50 })
-  @IsNumber()
+  @ApiProperty({ example: 142.5 })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   amount!: number;
 
   @ApiPropertyOptional({ enum: InvoiceStatus, default: InvoiceStatus.DRAFT })
@@ -23,19 +34,20 @@ export class CreateInvoiceDto {
 
   @ApiPropertyOptional({ example: '2026-07-16' })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   issuedAt?: string;
 
   @ApiPropertyOptional({ example: '2026-07-30' })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   dueAt?: string;
 }
 
 export class UpdateInvoiceDto {
-  @ApiPropertyOptional({ example: 142.50 })
+  @ApiPropertyOptional({ example: 142.5 })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   amount?: number;
 
   @ApiPropertyOptional({ enum: InvoiceStatus })
@@ -45,7 +57,7 @@ export class UpdateInvoiceDto {
 
   @ApiPropertyOptional({ example: '2026-07-30' })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   dueAt?: string;
 }
 

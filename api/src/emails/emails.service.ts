@@ -78,7 +78,8 @@ export class EmailsService {
     };
   }
 
-  async getSmtpConfig() {
+  /** Reads the raw SMTP config (password included) — internal use only. */
+  private async readSmtpConfig() {
     const configSetting = await this.prisma.systemSetting.findUnique({
       where: { key: 'SMTP_CONFIG' },
     });
@@ -92,18 +93,34 @@ export class EmailsService {
     return {
       host: this.config.get<string>('SMTP_HOST') || 'smtp.gmail.com',
       port: Number(this.config.get<string>('SMTP_PORT') || 587),
-      user: this.config.get<string>('SMTP_USER') || 'objectsquarerajan@gmail.com',
+      user: this.config.get<string>('SMTP_USER') || '',
       pass: this.config.get<string>('SMTP_PASS') || '',
-      from: this.config.get<string>('SMTP_FROM') || this.config.get<string>('SMTP_USER') || 'objectsquarerajan@gmail.com',
+      from:
+        this.config.get<string>('SMTP_FROM') ||
+        this.config.get<string>('SMTP_USER') ||
+        '',
       secure: this.config.get<string>('SMTP_SECURE') === 'true',
     };
   }
 
+  /** The password is never sent to the client; `hasPass` signals it is set. */
+  async getSmtpConfig() {
+    const cfg = await this.readSmtpConfig();
+    return { ...cfg, pass: '', hasPass: Boolean(cfg.pass) };
+  }
+
   async saveSmtpConfig(config: any) {
+    // A blank password on save means "keep the existing one", so admins can
+    // edit other fields without re-typing (and without it being echoed back).
+    const stored = { ...config };
+    if (!config.pass) {
+      const existing = await this.readSmtpConfig();
+      stored.pass = existing.pass;
+    }
     await this.prisma.systemSetting.upsert({
       where: { key: 'SMTP_CONFIG' },
-      update: { value: JSON.stringify(config) },
-      create: { key: 'SMTP_CONFIG', value: JSON.stringify(config) },
+      update: { value: JSON.stringify(stored) },
+      create: { key: 'SMTP_CONFIG', value: JSON.stringify(stored) },
     });
     return { success: true };
   }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvoiceDto, ListInvoicesDto, UpdateInvoiceDto } from './dto';
 import type { Prisma } from '../generated/prisma/client';
@@ -82,6 +86,11 @@ export class InvoicesService {
   }
 
   async create(dto: CreateInvoiceDto) {
+    // A due date can't fall before the issue date.
+    if (dto.issuedAt && dto.dueAt && new Date(dto.dueAt) < new Date(dto.issuedAt)) {
+      throw new BadRequestException('Due date cannot be before the issue date.');
+    }
+
     // Verify student exists
     const student = await this.prisma.studentProfile.findUnique({
       where: { id: dto.studentId },

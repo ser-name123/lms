@@ -43,10 +43,21 @@ export default function SignInPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setBusy(true);
 
+    // The form uses noValidate, so guard the required fields here.
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError("Please enter both your email and password.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    setBusy(true);
     try {
-      const res = await login(email, password);
+      const res = await login(trimmedEmail, password);
       if ("otpRequired" in res && res.otpRequired) {
         setOtpRequired(true);
         setBusy(false);

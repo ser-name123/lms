@@ -1,26 +1,86 @@
+import { createReadStream, existsSync, mkdirSync } from 'fs';
+import { extname, join, resolve, sep } from 'path';
+
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   Post,
   Put,
+  Res,
+  StreamableFile,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { LmsDataService } from './lms-data.service';
-import { Public } from '../auth/decorators';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { diskStorage } from 'multer';
+import type { Response } from 'express';
 
+import { LmsDataService } from './lms-data.service';
+import { Public, Roles } from '../auth/decorators';
+import { Role } from '../generated/prisma/enums';
+
+// Uploaded knowledgebase files live under <api>/uploads/knowledgebase.
+export const UPLOAD_ROOT = join(process.cwd(), 'uploads');
+const KB_UPLOAD_DIR = join(UPLOAD_ROOT, 'knowledgebase');
+
+const kbFileStorage = diskStorage({
+  destination: (_req, _file, cb) => {
+    mkdirSync(KB_UPLOAD_DIR, { recursive: true });
+    cb(null, KB_UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    // Unique on-disk name; the original name is stored separately for display.
+    const stamp = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${stamp}${extname(file.originalname)}`);
+  },
+});
+
+// Only genuine learning-material types are accepted; executables, scripts and
+// markup (an XSS/shell vector once served) are rejected before hitting disk.
+const ALLOWED_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.ppt', '.pptx',
+  '.xls', '.xlsx', '.csv',
+  '.mp3', '.wav', '.m4a', '.aac', '.ogg',
+  '.mp4', '.mov', '.avi', '.mkv', '.webm',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  '.zip',
+]);
+
+const kbFileFilter = (
+  _req: unknown,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) => {
+  const ext = extname(file.originalname).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    cb(new BadRequestException(`File type "${ext || 'unknown'}" is not allowed`), false);
+    return;
+  }
+  cb(null, true);
+};
+
+// Reads (the catalogue GETs) and file downloads stay open so the app can render
+// content and students can fetch files; every mutating route requires a staff
+// login. Individual read routes re-open with @Public() below.
 @ApiTags('lms-data')
+@ApiBearerAuth()
 @Controller('lms-data')
-@Public()
+@Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
 export class LmsDataController {
   constructor(private readonly service: LmsDataService) {}
 
   // Courses
   @Get('courses')
+  @Public()
   @ApiOperation({ summary: 'Get all courses' })
   getCourses() {
     return this.service.getCourses();
@@ -47,6 +107,7 @@ export class LmsDataController {
 
   // Assignments
   @Get('assignments')
+  @Public()
   @ApiOperation({ summary: 'Get all assignments' })
   getAssignments() {
     return this.service.getAssignments();
@@ -73,6 +134,7 @@ export class LmsDataController {
 
   // Assessments
   @Get('assessments')
+  @Public()
   @ApiOperation({ summary: 'Get all assessments' })
   getAssessments() {
     return this.service.getAssessments();
@@ -99,9 +161,57 @@ export class LmsDataController {
 
   // Knowledgebase
   @Get('knowledgebase')
+  @Public()
   @ApiOperation({ summary: 'Get all knowledgebase items' })
   getKnowledgebase() {
     return this.service.getKnowledgebase();
+  }
+
+  @Post('knowledgebase/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: kbFileStorage,
+      fileFilter: kbFileFilter,
+      limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB ceiling
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Store a knowledgebase file, return its reference' })
+  uploadKnowledgebaseFile(@UploadedFile() file?: Express.Multer.File) {
+    return this.service.storeKnowledgebaseFile(file);
+  }
+
+  @Get('knowledgebase/:id/download')
+  @Public()
+  @ApiOperation({ summary: 'Download a resource (counts one view)' })
+  async downloadKnowledgebase(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile | void> {
+    const resource = await this.service.registerDownload(id);
+    if (!resource.fileUrl) {
+      throw new NotFoundException('This resource has no file attached');
+    }
+
+    // External links: bounce the browser to the URL.
+    if (/^https?:\/\//i.test(resource.fileUrl)) {
+      res.redirect(resource.fileUrl);
+      return;
+    }
+
+    // Contain the resolved path inside the uploads root: a stored fileUrl like
+    // "../.env" must never escape and stream an arbitrary server file.
+    const uploadsRoot = resolve(UPLOAD_ROOT);
+    const filePath = resolve(UPLOAD_ROOT, resource.fileUrl);
+    if (filePath !== uploadsRoot && !filePath.startsWith(uploadsRoot + sep)) {
+      throw new ForbiddenException('Invalid file path');
+    }
+    if (!existsSync(filePath)) {
+      throw new NotFoundException('Stored file is missing');
+    }
+    return new StreamableFile(createReadStream(filePath), {
+      disposition: `attachment; filename="${resource.fileName ?? 'resource'}"`,
+    });
   }
 
   @Post('knowledgebase')
@@ -125,6 +235,7 @@ export class LmsDataController {
 
   // Packages
   @Get('packages')
+  @Public()
   @ApiOperation({ summary: 'Get all packages' })
   getPackages() {
     return this.service.getPackages();

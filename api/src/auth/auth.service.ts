@@ -25,7 +25,10 @@ const digest = (token: string) =>
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private otpStore = new Map<string, { otp: string; expiresAt: Date }>();
+  private otpStore = new Map<
+    string,
+    { otp: string; expiresAt: Date; attempts: number }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -55,6 +58,7 @@ export class AuthService {
     this.otpStore.set(user.email, {
       otp,
       expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minute TTL
+      attempts: 0,
     });
 
     // Send email with verification code
@@ -104,10 +108,12 @@ export class AuthService {
       </div>
     `;
 
-    // Log generated verification code to console (retrievable in server/Render logs)
-    this.logger.log(
-      `[OTP] Generated verification code for ${user.email} is: ${otp}`,
-    );
+    // Never print live OTP codes outside local development — logs are shared.
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(
+        `[OTP] Generated verification code for ${user.email} is: ${otp}`,
+      );
+    }
 
     // Dispatch verification mail asynchronously in the background so SMTP delay doesn't block client response
     this.emails
@@ -147,6 +153,15 @@ export class AuthService {
     }
 
     if (record.otp !== otpCode) {
+      // Lock the code after too many wrong guesses so a 6-digit OTP can't be
+      // brute-forced within its 5-minute window.
+      record.attempts += 1;
+      if (record.attempts >= 5) {
+        this.otpStore.delete(email);
+        throw new UnauthorizedException(
+          'Too many incorrect attempts — please sign in again',
+        );
+      }
       throw new UnauthorizedException('Invalid verification code');
     }
 

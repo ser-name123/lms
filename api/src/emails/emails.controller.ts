@@ -8,10 +8,16 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmailsService } from './emails.service';
-import { ApiConsumes, ApiBody, ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiBody, ApiTags, ApiOperation } from '@nestjs/swagger';
+
+import { Roles } from '../auth/decorators';
+import { Role } from '../generated/prisma/enums';
+import { SmtpConfigDto } from './dto';
 
 @ApiTags('emails')
+@ApiBearerAuth()
 @Controller('emails')
+@Roles(Role.ADMIN)
 export class EmailsController {
   constructor(private readonly emailsService: EmailsService) {}
 
@@ -51,7 +57,7 @@ export class EmailsController {
 
   @Post('smtp-config')
   @ApiOperation({ summary: 'Save outgoing SMTP configuration' })
-  async saveSmtpConfig(@Body() dto: any) {
+  async saveSmtpConfig(@Body() dto: SmtpConfigDto) {
     return this.emailsService.saveSmtpConfig(dto);
   }
 }

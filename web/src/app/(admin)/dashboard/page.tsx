@@ -7,7 +7,7 @@ import { StatTile } from "@/components/dashboard/stat-tile";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { fetchDashboard, type DashboardOverview } from "@/lib/api";
+import { authHeader, fetchDashboard, type DashboardOverview } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const RANGES = ["7d", "30d", "90d", "12m"] as const;
@@ -102,15 +102,10 @@ export default function DashboardPage() {
         formData.append("attachment", file);
       }
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem("accessToken") : null;
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-
-      const response = await fetch("http://localhost:5000/api/emails/send", {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+      const response = await fetch(`${apiBase}/emails/send`, {
         method: "POST",
-        headers,
+        headers: authHeader(),
         body: formData,
       });
 

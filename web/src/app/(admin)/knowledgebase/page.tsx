@@ -1,5 +1,7 @@
 "use client";
 
+import { authHeader } from "@/lib/api";
+
 import { useState, useEffect } from "react";
 import { 
   Plus, 
@@ -88,6 +90,21 @@ const formatIcons: Record<string, React.ComponentType<{ className?: string }>> =
   Link: Link
 };
 
+// Detects the resource format from a file's extension, so the admin never has
+// to pick it (or the size) by hand — both come straight from the chosen file.
+const detectFormat = (fileName: string): string => {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "PDF";
+  if (["mp3", "wav", "m4a", "aac", "ogg"].includes(ext)) return "Audio";
+  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "Video";
+  if (["doc", "docx", "txt", "rtf", "odt", "ppt", "pptx"].includes(ext)) return "Doc";
+  return "Doc";
+};
+
+// Bytes → MB, rounded to 2 decimals (min 0.01 so a tiny file never reads 0).
+const bytesToMB = (bytes: number): number =>
+  Math.max(0.01, Math.round((bytes / 1024 / 1024) * 100) / 100);
+
 export default function KnowledgebasePage() {
   const [resources, setResources] = useState(INITIAL_RESOURCES);
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
@@ -160,6 +177,32 @@ export default function KnowledgebasePage() {
   const [formDownloads, setFormDownloads] = useState<number>(0);
   const [formStatus, setFormStatus] = useState("Active");
   const [formDescription, setFormDescription] = useState("");
+  const [formFile, setFormFile] = useState<File | null>(null);
+  // Holds the stored file reference (edit) or the external-link URL (Link format).
+  const [formFileUrl, setFormFileUrl] = useState("");
+  const [formFileName, setFormFileName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Choosing a file fills in its size and format automatically.
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setFormFile(file);
+    if (file) {
+      setFormSizeMB(bytesToMB(file.size));
+      setFormFormat(detectFormat(file.name));
+    }
+  };
+
+  // Downloads the resource (the server streams the file / redirects a link and
+  // counts one view); the local count is bumped optimistically to match.
+  const handleDownload = (res: typeof INITIAL_RESOURCES[0]) => {
+    if (!res.fileUrl) {
+      Swal.fire({ title: "No File", text: "This resource has no file attached yet.", icon: "info" });
+      return;
+    }
+    window.open(`${apiBase}/lms-data/knowledgebase/${res.id}/download`, "_blank");
+    setResources(prev => prev.map(r => (r.id === res.id ? { ...r, downloads: r.downloads + 1 } : r)));
+  };
 
   // Reset page when filter triggers
   useEffect(() => {
@@ -222,7 +265,7 @@ export default function KnowledgebasePage() {
       color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
     }).then((result) => {
       if (result.isConfirmed) {
-        fetch(`${apiBase}/lms-data/knowledgebase/${id}`, { method: "DELETE" })
+        fetch(`${apiBase}/lms-data/knowledgebase/${id}`, { method: "DELETE", headers: authHeader() })
           .then(() => {
             setResources(prev => prev.filter(r => r.id !== id));
             Swal.fire({
@@ -244,14 +287,30 @@ export default function KnowledgebasePage() {
     setFormCourseCode(availableCourses[0]?.code || "");
     setFormCategory(categories[0] || "");
     setFormFormat("PDF");
-    setFormSizeMB(2.5);
+    setFormSizeMB(0);
     setFormDownloads(0);
     setFormStatus("Active");
     setFormDescription("");
+    setFormFile(null);
+    setFormFileUrl("");
+    setFormFileName(null);
     setShowAddModal(true);
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  // Uploads the chosen file and returns its stored reference + real size.
+  const uploadFile = async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${apiBase}/lms-data/knowledgebase/upload`, {
+      method: "POST",
+      headers: authHeader(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error("Upload failed");
+    return res.json() as Promise<{ fileUrl: string; fileName: string; sizeMB: number }>;
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle) {
       Swal.fire({ title: "Fields Required", text: "Please enter a resource title.", icon: "error" });
@@ -261,6 +320,16 @@ export default function KnowledgebasePage() {
       Swal.fire({ title: "Category Required", text: "Please select or add a category first using 'Manage Categories'.", icon: "error" });
       return;
     }
+    // A link needs a URL; every other format needs an actual file.
+    if (formFormat === "Link") {
+      if (!formFileUrl.trim() || !/^https?:\/\//i.test(formFileUrl.trim())) {
+        Swal.fire({ title: "URL Required", text: "Please enter a valid link starting with http:// or https://", icon: "error" });
+        return;
+      }
+    } else if (!formFile) {
+      Swal.fire({ title: "File Required", text: "Please choose a file to upload for this resource.", icon: "error" });
+      return;
+    }
 
     const courseObj = availableCourses.find(c => c.code === formCourseCode) || {
       code: formCourseCode,
@@ -268,37 +337,54 @@ export default function KnowledgebasePage() {
       studentsCount: 0
     };
 
-    const newResource = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      format: formFormat,
-      sizeMB: Number(formSizeMB) || 1.0,
-      category: formCategory,
-      downloads: Number(formDownloads) || 0,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
+    try {
+      // Resolve the file reference: upload for files, the raw URL for links.
+      let fileUrl = formFormat === "Link" ? formFileUrl.trim() : "";
+      let fileName: string | null = null;
+      let sizeMB = formFormat === "Link" ? 0 : Number(formSizeMB) || 0;
 
-    fetch(`${apiBase}/lms-data/knowledgebase`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newResource),
-    })
-      .then(res => res.json())
-      .then(savedResource => {
-        setResources([savedResource, ...resources]);
-        setShowAddModal(false);
-        Swal.fire({
-          title: "Added",
-          text: "New resource successfully added to the knowledgebase!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not save resource.", icon: "error" });
+      if (formFormat !== "Link" && formFile) {
+        setUploading(true);
+        const meta = await uploadFile(formFile);
+        fileUrl = meta.fileUrl;
+        fileName = meta.fileName;
+        sizeMB = meta.sizeMB;
+      }
+
+      // downloads is a tracked metric — it starts at 0 and is set by the server.
+      const newResource = {
+        title: formTitle,
+        courseCode: courseObj.code,
+        courseTitle: courseObj.title,
+        format: formFormat,
+        sizeMB,
+        category: formCategory,
+        status: formStatus,
+        description: formDescription || "No description provided.",
+        fileUrl,
+        fileName,
+      };
+
+      const res = await fetch(`${apiBase}/lms-data/knowledgebase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader() },
+        body: JSON.stringify(newResource),
       });
+      if (!res.ok) throw new Error("Save failed");
+      const savedResource = await res.json();
+      setResources([savedResource, ...resources]);
+      setShowAddModal(false);
+      Swal.fire({
+        title: "Added",
+        text: "New resource successfully added to the knowledgebase!",
+        icon: "success",
+        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+      });
+    } catch {
+      Swal.fire({ title: "Error", text: "Could not upload or save the resource.", icon: "error" });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleOpenEditModal = (res: typeof INITIAL_RESOURCES[0]) => {
@@ -311,14 +397,21 @@ export default function KnowledgebasePage() {
     setFormDownloads(res.downloads);
     setFormStatus(res.status);
     setFormDescription(res.description);
+    setFormFile(null);
+    setFormFileUrl(res.fileUrl ?? "");
+    setFormFileName(res.fileName ?? null);
     setShowEditModal(true);
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedResource) return;
     if (!formTitle) {
       Swal.fire({ title: "Fields Required", text: "Please enter a resource title.", icon: "error" });
+      return;
+    }
+    if (formFormat === "Link" && (!formFileUrl.trim() || !/^https?:\/\//i.test(formFileUrl.trim()))) {
+      Swal.fire({ title: "URL Required", text: "Please enter a valid link starting with http:// or https://", icon: "error" });
       return;
     }
 
@@ -328,37 +421,54 @@ export default function KnowledgebasePage() {
       studentsCount: 0
     };
 
-    const updatedPayload = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      format: formFormat,
-      sizeMB: Number(formSizeMB) || 1.0,
-      category: formCategory,
-      downloads: Number(formDownloads) || 0,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
+    try {
+      // Keep the existing file unless a new one is picked; links use their URL.
+      let fileUrl = formFormat === "Link" ? formFileUrl.trim() : formFileUrl;
+      let fileName = formFileName;
+      let sizeMB = formFormat === "Link" ? 0 : Number(formSizeMB) || 0;
 
-    fetch(`${apiBase}/lms-data/knowledgebase/${selectedResource.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updatedPayload),
-    })
-      .then(res => res.json())
-      .then(updatedResource => {
-        setResources(prev => prev.map(r => r.id === updatedResource.id ? updatedResource : r));
-        setShowEditModal(false);
-        Swal.fire({
-          title: "Updated",
-          text: "Resource details updated successfully!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not update resource.", icon: "error" });
+      if (formFormat !== "Link" && formFile) {
+        setUploading(true);
+        const meta = await uploadFile(formFile);
+        fileUrl = meta.fileUrl;
+        fileName = meta.fileName;
+        sizeMB = meta.sizeMB;
+      }
+
+      // downloads is intentionally omitted — the server preserves the tracked count.
+      const updatedPayload = {
+        title: formTitle,
+        courseCode: courseObj.code,
+        courseTitle: courseObj.title,
+        format: formFormat,
+        sizeMB,
+        category: formCategory,
+        status: formStatus,
+        description: formDescription || "No description provided.",
+        fileUrl,
+        fileName,
+      };
+
+      const res = await fetch(`${apiBase}/lms-data/knowledgebase/${selectedResource.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader() },
+        body: JSON.stringify(updatedPayload),
       });
+      if (!res.ok) throw new Error("Update failed");
+      const updatedResource = await res.json();
+      setResources(prev => prev.map(r => r.id === updatedResource.id ? updatedResource : r));
+      setShowEditModal(false);
+      Swal.fire({
+        title: "Updated",
+        text: "Resource details updated successfully!",
+        icon: "success",
+        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+      });
+    } catch {
+      Swal.fire({ title: "Error", text: "Could not upload or update the resource.", icon: "error" });
+    } finally {
+      setUploading(false);
+    }
   };
 
 
@@ -624,9 +734,19 @@ export default function KnowledgebasePage() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-1.5">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDownload(res)}
+                                disabled={!res.fileUrl}
+                                className="rounded-lg text-ink-3 hover:text-emerald-500 hover:bg-surface-3 size-8 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title={res.fileUrl ? "Download / Open" : "No file attached"}
+                              >
+                                <Download className="size-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleOpenViewDetails(res)}
                                 className="rounded-lg text-ink-3 hover:text-ink hover:bg-surface-3 size-8"
                                 title="View Details"
@@ -814,29 +934,43 @@ export default function KnowledgebasePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* File — size and format come straight from the chosen file, so
+                  the admin never guesses them. External links carry no file. */}
+              {formFormat === "Link" ? (
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">File Size (MB)</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">External Link URL</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={formSizeMB}
-                    onChange={(e) => setFormSizeMB(Number(e.target.value))}
+                    type="url"
+                    placeholder="https://example.com/resource"
+                    value={formFileUrl}
+                    onChange={(e) => setFormFileUrl(e.target.value)}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Downloads / Views</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formDownloads}
-                    onChange={(e) => setFormDownloads(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Upload File</label>
+                    <input
+                      type="file"
+                      onChange={handleFileChange}
+                      className="w-full rounded-xl border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-accent-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                    {formFile && (
+                      <p className="mt-1 text-[11px] font-semibold text-ink-3 truncate">{formFile.name}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-ink-3 uppercase mb-1">File Size · auto</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={formSizeMB ? `${formSizeMB} MB` : "— pick a file —"}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface-3/60 px-3.5 text-sm text-ink-3 cursor-not-allowed focus:outline-none"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Status</label>
@@ -866,8 +1000,8 @@ export default function KnowledgebasePage() {
                 <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
-                  Upload Resource
+                <Button type="submit" variant="primary" disabled={uploading}>
+                  {uploading ? "Uploading..." : "Upload Resource"}
                 </Button>
               </footer>
             </form>
@@ -945,28 +1079,54 @@ export default function KnowledgebasePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Replacing the file re-derives size + format; leave it empty to
+                  keep the current file. Downloads is read-only — it is tracked. */}
+              {formFormat === "Link" ? (
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">File Size (MB)</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">External Link URL</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={formSizeMB}
-                    onChange={(e) => setFormSizeMB(Number(e.target.value))}
+                    type="url"
+                    placeholder="https://example.com/resource"
+                    value={formFileUrl}
+                    onChange={(e) => setFormFileUrl(e.target.value)}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Downloads / Views</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formDownloads}
-                    onChange={(e) => setFormDownloads(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Replace File (optional)</label>
+                    <input
+                      type="file"
+                      onChange={handleFileChange}
+                      className="w-full rounded-xl border border-hairline bg-surface-2 px-3 py-2 text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-accent-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                    {formFile ? (
+                      <p className="mt-1 text-[11px] font-semibold text-ink-3 truncate">{formFile.name}</p>
+                    ) : formFileName ? (
+                      <p className="mt-1 text-[11px] font-semibold text-ink-3 truncate">Current: {formFileName}</p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-ink-3 uppercase mb-1">File Size · auto</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={formSizeMB ? `${formSizeMB} MB` : "—"}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface-3/60 px-3.5 text-sm text-ink-3 cursor-not-allowed focus:outline-none"
+                    />
+                  </div>
                 </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Downloads / Views · tracked</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={`${formDownloads} downloads`}
+                  className="h-10 w-full rounded-xl border border-hairline bg-surface-3/60 px-3.5 text-sm text-ink-3 cursor-not-allowed focus:outline-none"
+                />
               </div>
 
               <div>
@@ -997,8 +1157,8 @@ export default function KnowledgebasePage() {
                 <Button type="button" variant="outline" onClick={() => setShowEditModal(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
-                  Save Changes
+                <Button type="submit" variant="primary" disabled={uploading}>
+                  {uploading ? "Uploading..." : "Save Changes"}
                 </Button>
               </footer>
             </form>
@@ -1046,7 +1206,7 @@ export default function KnowledgebasePage() {
                     }
                     fetch(`${apiBase}/categories`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", ...authHeader() },
                       body: JSON.stringify({ name: trimmed, type: "KNOWLEDGEBASE" }),
                     })
                       .then(res => res.json())
@@ -1124,7 +1284,7 @@ export default function KnowledgebasePage() {
                                 const categoryId = categoryIds[cat.toLowerCase()];
                                 if (categoryId) {
                                   fetch(`${apiBase}/categories/${categoryId}`, {
-                                    method: "DELETE",
+                                    method: "DELETE", headers: authHeader(),
                                   })
                                     .then(() => {
                                       setCategories(categories.filter(c => c !== cat));

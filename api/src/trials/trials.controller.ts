@@ -13,7 +13,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
-import { CreateTrialDto, ScheduleTrialDto, EvaluateTrialDto } from './dto';
+import {
+  CreateTrialDto,
+  ScheduleTrialDto,
+  EvaluateTrialDto,
+  UpdateTrialDto,
+} from './dto';
 import { TrialsService } from './trials.service';
 
 @ApiTags('trials')
@@ -39,7 +44,7 @@ export class TrialsController {
   @ApiOperation({ summary: 'Update trial class inquiry details' })
   update(
     @Param('id') id: string,
-    @Body() dto: any,
+    @Body() dto: UpdateTrialDto,
   ) {
     return this.service.update(id, dto);
   }
