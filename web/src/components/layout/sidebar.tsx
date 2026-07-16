@@ -1,13 +1,155 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PanelLeftClose, PanelLeftOpen, GraduationCap, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, GraduationCap, X, ChevronDown, ChevronRight } from "lucide-react";
 
-import { navGroups } from "./nav-config";
+import { navGroups, type NavItem } from "./nav-config";
 import { useUI } from "@/store/ui";
 import { useSettingsStore } from "@/store/settings";
 import { cn } from "@/lib/utils";
+
+function SidebarItem({
+  item,
+  pathname,
+  sidebarCollapsed,
+  setMobileNav,
+}: {
+  item: NavItem;
+  pathname: string;
+  sidebarCollapsed: boolean;
+  setMobileNav: (open: boolean) => void;
+}) {
+  const hasActiveChild = item.children?.some(
+    (child) => pathname === child.href || pathname.startsWith(`${child.href}/`)
+  );
+  
+  const [isOpen, setIsOpen] = useState(hasActiveChild);
+
+  // Synchronize submenu open state with active route and sidebar collapsed state
+  useEffect(() => {
+    if (sidebarCollapsed) {
+      setIsOpen(false);
+    } else {
+      setIsOpen(hasActiveChild);
+    }
+  }, [pathname, hasActiveChild, sidebarCollapsed]);
+
+  const Icon = item.icon;
+
+  if (item.children) {
+    const active = hasActiveChild;
+    return (
+      <li>
+        <button
+          onClick={() => {
+            if (!sidebarCollapsed) {
+              setIsOpen(!isOpen);
+            }
+          }}
+          title={sidebarCollapsed ? item.label : undefined}
+          className={cn(
+            "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 text-left",
+            active
+              ? "bg-sidebar-active/20 text-white shadow-sm border border-white/5"
+              : "text-sidebar-text hover:bg-sidebar-active/30 hover:text-white hover:translate-x-0.5",
+            sidebarCollapsed && "justify-center px-0 hover:translate-x-0"
+          )}
+        >
+          {active && (
+            <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white/40" />
+          )}
+          <Icon
+            className={cn(
+              "size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110",
+              active ? "text-white" : "text-sidebar-text/80 group-hover:text-white"
+            )}
+          />
+          {!sidebarCollapsed && (
+            <>
+              <span className="truncate">{item.label}</span>
+              <span className="ml-auto text-sidebar-text/60 group-hover:text-white">
+                {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+              </span>
+            </>
+          )}
+        </button>
+
+        {/* Collapsible Children */}
+        {isOpen && !sidebarCollapsed && (
+          <ul className="mt-1 ml-4 pl-3.5 border-l border-sidebar-border/60 space-y-1 animate-fade-in">
+            {item.children.map((child) => {
+              const childActive = pathname === child.href || pathname.startsWith(`${child.href}/`);
+              const ChildIcon = child.icon;
+
+              return (
+                <li key={child.href}>
+                  <Link
+                    href={child.href}
+                    onClick={() => setMobileNav(false)}
+                    className={cn(
+                      "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-200",
+                      childActive
+                        ? "bg-sidebar-active text-white font-semibold"
+                        : "text-sidebar-text/85 hover:bg-sidebar-active/20 hover:text-white"
+                    )}
+                  >
+                    <ChildIcon className={cn("size-3.5 shrink-0 transition-transform duration-200 group-hover:scale-110", childActive ? "text-white" : "text-sidebar-text/60 group-hover:text-white")} />
+                    <span className="truncate">{child.label}</span>
+                    {child.badge && (
+                      <span className="tnum ml-auto rounded-md bg-sidebar-active/50 px-1 py-0.5 text-[9px] font-bold text-white border border-sidebar-border">
+                        {child.badge}
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  const active = item.href ? (pathname === item.href || pathname.startsWith(`${item.href}/`)) : false;
+  return (
+    <li>
+      <Link
+        href={item.href || "#"}
+        onClick={() => setMobileNav(false)}
+        title={sidebarCollapsed ? item.label : undefined}
+        className={cn(
+          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+          active
+            ? "bg-sidebar-active text-white shadow-sm border border-white/5"
+            : "text-sidebar-text hover:bg-sidebar-active/30 hover:text-white hover:translate-x-0.5",
+          sidebarCollapsed && "justify-center px-0 hover:translate-x-0"
+        )}
+      >
+        {active && (
+          <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />
+        )}
+        <Icon
+          className={cn(
+            "size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110",
+            active ? "text-white" : "text-sidebar-text/80 group-hover:text-white"
+          )}
+        />
+        {!sidebarCollapsed && (
+          <>
+            <span className="truncate">{item.label}</span>
+            {item.badge && (
+              <span className="tnum ml-auto rounded-md bg-sidebar-active/50 px-1.5 py-0.5 text-[10px] font-bold text-white border border-sidebar-border">
+                {item.badge}
+              </span>
+            )}
+          </>
+        )}
+      </Link>
+    </li>
+  );
+}
 
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav, theme } = useUI();
@@ -74,42 +216,15 @@ export function Sidebar() {
                 </p>
               )}
               <ul className="space-y-1">
-                {group.items.map((item) => {
-                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                  const Icon = item.icon;
-
-                  return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        onClick={() => setMobileNav(false)}
-                        title={sidebarCollapsed ? item.label : undefined}
-                        className={cn(
-                          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                          active
-                            ? "bg-sidebar-active text-white shadow-sm border border-white/5"
-                            : "text-sidebar-text hover:bg-sidebar-active/30 hover:text-white hover:translate-x-0.5",
-                          sidebarCollapsed && "justify-center px-0 hover:translate-x-0",
-                        )}
-                      >
-                        {active && (
-                          <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />
-                        )}
-                        <Icon className={cn("size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110", active ? "text-white" : "text-sidebar-text/80 group-hover:text-white")} />
-                        {!sidebarCollapsed && (
-                          <>
-                            <span className="truncate">{item.label}</span>
-                            {item.badge && (
-                              <span className="tnum ml-auto rounded-md bg-sidebar-active/50 px-1.5 py-0.5 text-[10px] font-bold text-white border border-sidebar-border">
-                                {item.badge}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {group.items.map((item) => (
+                  <SidebarItem
+                    key={item.href || item.label}
+                    item={item}
+                    pathname={pathname}
+                    sidebarCollapsed={sidebarCollapsed}
+                    setMobileNav={setMobileNav}
+                  />
+                ))}
               </ul>
             </div>
           ))}

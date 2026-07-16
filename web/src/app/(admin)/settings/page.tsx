@@ -12,7 +12,8 @@ import {
   Loader2,
   Mail,
   Wifi,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Type
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
@@ -21,11 +22,93 @@ import { useSettingsStore } from "@/store/settings";
 import { useAuth } from "@/store/auth";
 import { ImageCropperModal } from "@/components/image-cropper";
 
-type Tab = "brand" | "theme" | "scripts" | "smtp" | "loader";
+type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "loader";
+
+const POPULAR_FONTS = [
+  // Clean / Modern Sans
+  "Outfit",
+  "Inter",
+  "Poppins",
+  "Roboto",
+  "Open Sans",
+  "Montserrat",
+  "Lato",
+  "Nunito",
+  "Rubik",
+  "Raleway",
+  "Quicksand",
+  "DM Sans",
+  "Work Sans",
+  
+  // Elegant / Stylish Serifs
+  "Playfair Display",
+  "Cinzel",
+  "Cormorant Garamond",
+  "Lora",
+  "Merriweather",
+  "Abril Fatface",
+  
+  // Stylish / Artistic / Futuristic
+  "Syne",
+  "Space Grotesk",
+  "Josefin Sans",
+  "Comfortaa",
+  "Righteous",
+  
+  // Stylish Scripts & Cursive
+  "Dancing Script",
+  "Pacifico",
+  "Satisfy",
+  "Lobster",
+  "Kaushan Script",
+  "Pinyon Script",
+  "Sacramento",
+  "Alex Brush",
+  "Great Vibes"
+];
+
+const remToPx = (val: string | null | undefined): string => {
+  if (!val) return "";
+  const trimmed = val.trim();
+  const match = trimmed.match(/^([\d.]+)\s*rem$/);
+  if (match) {
+    const remVal = parseFloat(match[1]);
+    return Math.round(remVal * 16) + "px";
+  }
+  return trimmed;
+};
 
 export default function SettingsPage() {
   const { updateLocalSettings } = useSettingsStore();
   const [activeTab, setActiveTab] = useState<Tab>("brand");
+
+  // Typography States
+  const [primaryFontFamily, setPrimaryFontFamily] = useState("Outfit");
+  const [secondaryFontFamily, setSecondaryFontFamily] = useState("Inter");
+
+  const [h1FontSize, setH1FontSize] = useState("32px");
+  const [h1FontWeight, setH1FontWeight] = useState("700");
+  const [h1FontFamily, setH1FontFamily] = useState("primary");
+
+  const [h2FontSize, setH2FontSize] = useState("24px");
+  const [h2FontWeight, setH2FontWeight] = useState("700");
+  const [h2FontFamily, setH2FontFamily] = useState("primary");
+
+  const [h3FontSize, setH3FontSize] = useState("20px");
+  const [h3FontWeight, setH3FontWeight] = useState("600");
+  const [h3FontFamily, setH3FontFamily] = useState("primary");
+
+  const [h4FontSize, setH4FontSize] = useState("18px");
+  const [h4FontWeight, setH4FontWeight] = useState("600");
+  const [h4FontFamily, setH4FontFamily] = useState("primary");
+
+  const [h5FontSize, setH5FontSize] = useState("16px");
+  const [h5FontWeight, setH5FontWeight] = useState("600");
+  const [h5FontFamily, setH5FontFamily] = useState("primary");
+
+  const [pFontSize, setPFontSize] = useState("14px");
+  const [pFontWeight, setPFontWeight] = useState("400");
+  const [pFontFamily, setPFontFamily] = useState("secondary");
 
   // Brand states
   const [websiteName, setWebsiteName] = useState("Edumin LMS");
@@ -143,6 +226,34 @@ export default function SettingsPage() {
         setSidebarActiveTextDark(settings.sidebarActiveTextDark);
         setTopbarBgDark(settings.topbarBgDark);
         setTopbarBorderDark(settings.topbarBorderDark);
+
+        // Typography
+        setPrimaryFontFamily(settings.primaryFontFamily || "Outfit");
+        setSecondaryFontFamily(settings.secondaryFontFamily || "Inter");
+
+        setH1FontSize(remToPx(settings.h1FontSize) || "32px");
+        setH1FontWeight(settings.h1FontWeight || "700");
+        setH1FontFamily(settings.h1FontFamily || "primary");
+
+        setH2FontSize(remToPx(settings.h2FontSize) || "24px");
+        setH2FontWeight(settings.h2FontWeight || "700");
+        setH2FontFamily(settings.h2FontFamily || "primary");
+
+        setH3FontSize(remToPx(settings.h3FontSize) || "20px");
+        setH3FontWeight(settings.h3FontWeight || "600");
+        setH3FontFamily(settings.h3FontFamily || "primary");
+
+        setH4FontSize(remToPx(settings.h4FontSize) || "18px");
+        setH4FontWeight(settings.h4FontWeight || "600");
+        setH4FontFamily(settings.h4FontFamily || "primary");
+
+        setH5FontSize(remToPx(settings.h5FontSize) || "16px");
+        setH5FontWeight(settings.h5FontWeight || "600");
+        setH5FontFamily(settings.h5FontFamily || "primary");
+
+        setPFontSize(remToPx(settings.pFontSize) || "14px");
+        setPFontWeight(settings.pFontWeight || "400");
+        setPFontFamily(settings.pFontFamily || "secondary");
       } catch (err) {
         console.error("Failed to load settings:", err);
       } finally {
@@ -326,6 +437,28 @@ export default function SettingsPage() {
       sidebarActiveTextDark,
       topbarBgDark,
       topbarBorderDark,
+
+      // Typography Mappings
+      primaryFontFamily,
+      secondaryFontFamily,
+      h1FontSize,
+      h1FontWeight,
+      h1FontFamily,
+      h2FontSize,
+      h2FontWeight,
+      h2FontFamily,
+      h3FontSize,
+      h3FontWeight,
+      h3FontFamily,
+      h4FontSize,
+      h4FontWeight,
+      h4FontFamily,
+      h5FontSize,
+      h5FontWeight,
+      h5FontFamily,
+      pFontSize,
+      pFontWeight,
+      pFontFamily,
     };
 
     try {
@@ -406,7 +539,7 @@ export default function SettingsPage() {
     <>
       <Topbar title="System Settings" subtitle="Configure and customize your website brand, colors, logo, and integration scripts" />
 
-      <div className="animate-fade-up p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+      <div className="animate-fade-up p-4 sm:p-6 space-y-6">
         
         {/* Status Toast Alert */}
         {status && (
@@ -446,6 +579,17 @@ export default function SettingsPage() {
               >
                 <Palette className="size-4.5" />
                 Color Schemes
+              </button>
+              <button
+                onClick={() => { setActiveTab("typography"); setStatus(null); }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
+                  activeTab === "typography" 
+                    ? "bg-accent text-white" 
+                    : "text-ink-2 hover:bg-surface-2"
+                }`}
+              >
+                <Type className="size-4.5" />
+                Typography Settings
               </button>
               <button
                 onClick={() => { setActiveTab("smtp"); setStatus(null); }}
@@ -947,6 +1091,198 @@ export default function SettingsPage() {
                       >
                         {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
                         Save Theme Settings
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {activeTab === "typography" && (
+                  <form onSubmit={handleSubmit} className="space-y-6 animate-fade-in">
+                    <div className="border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm space-y-5">
+                      <div className="border-b border-hairline pb-4 flex items-center justify-between">
+                        <div>
+                          <h2 className="font-bold text-lg text-ink">Global Brand Typography</h2>
+                          <p className="text-xs text-ink-3 mt-0.5">Configure your primary and secondary Google Fonts for the website</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        {/* Primary Font Family */}
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Primary Font (Default/Body)</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={POPULAR_FONTS.includes(primaryFontFamily) ? primaryFontFamily : "custom"}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val !== "custom") {
+                                  setPrimaryFontFamily(val);
+                                }
+                              }}
+                              className="h-11.5 w-1/2 rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent"
+                            >
+                              {POPULAR_FONTS.map(f => (
+                                <option key={f} value={f}>{f}</option>
+                              ))}
+                              <option value="custom">Custom Font Name...</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={primaryFontFamily}
+                              onChange={(e) => setPrimaryFontFamily(e.target.value)}
+                              placeholder="Type Google Font Name"
+                              className="h-11.5 w-1/2 rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <span className="text-[10px] text-ink-3 mt-1.5 block">Used for general text, body copy, and UI controls.</span>
+                        </div>
+
+                        {/* Secondary Font Family */}
+                        <div>
+                          <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Secondary Font (Accent/Headings)</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={POPULAR_FONTS.includes(secondaryFontFamily) ? secondaryFontFamily : "custom"}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val !== "custom") {
+                                  setSecondaryFontFamily(val);
+                                }
+                              }}
+                              className="h-11.5 w-1/2 rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent"
+                            >
+                              {POPULAR_FONTS.map(f => (
+                                <option key={f} value={f}>{f}</option>
+                              ))}
+                              <option value="custom">Custom Font Name...</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={secondaryFontFamily}
+                              onChange={(e) => setSecondaryFontFamily(e.target.value)}
+                              placeholder="Type Google Font Name"
+                              className="h-11.5 w-1/2 rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <span className="text-[10px] text-ink-3 mt-1.5 block">Alternative typography font family for details, headings or labels.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tag Override Controls */}
+                    <div className="border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm space-y-5">
+                      <div className="border-b border-hairline pb-4">
+                        <h2 className="font-bold text-lg text-ink">Heading & Paragraph Tuning</h2>
+                        <p className="text-xs text-ink-3 mt-0.5">Customize font family assignments, exact font sizes, and font weights for HTML tags</p>
+                      </div>
+
+                      <div className="space-y-6">
+                        {[
+                          { tag: "h1", label: "Heading H1", size: h1FontSize, setSize: setH1FontSize, weight: h1FontWeight, setWeight: setH1FontWeight, family: h1FontFamily, setFamily: setH1FontFamily },
+                          { tag: "h2", label: "Heading H2", size: h2FontSize, setSize: setH2FontSize, weight: h2FontWeight, setWeight: setH2FontWeight, family: h2FontFamily, setFamily: setH2FontFamily },
+                          { tag: "h3", label: "Heading H3", size: h3FontSize, setSize: setH3FontSize, weight: h3FontWeight, setWeight: setH3FontWeight, family: h3FontFamily, setFamily: setH3FontFamily },
+                          { tag: "h4", label: "Heading H4", size: h4FontSize, setSize: setH4FontSize, weight: h4FontWeight, setWeight: setH4FontWeight, family: h4FontFamily, setFamily: setH4FontFamily },
+                          { tag: "h5", label: "Heading H5", size: h5FontSize, setSize: setH5FontSize, weight: h5FontWeight, setWeight: setH5FontWeight, family: h5FontFamily, setFamily: setH5FontFamily },
+                          { tag: "p", label: "Paragraph P", size: pFontSize, setSize: setPFontSize, weight: pFontWeight, setWeight: setPFontWeight, family: pFontFamily, setFamily: setPFontFamily },
+                        ].map(({ tag, label, size, setSize, weight, setWeight, family, setFamily }) => (
+                          <div key={tag} className="p-4 border border-hairline rounded-2xl bg-surface-2/15 hover:bg-surface-2/30 transition-all duration-200 grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                            {/* Label & Preview */}
+                            <div>
+                              <span className="font-bold text-ink text-sm block">{label}</span>
+                              <span className="text-[10px] text-ink-3 font-mono mt-0.5 block">&lt;{tag}&gt; element styling</span>
+                              <div className="mt-2 border border-hairline/60 bg-surface px-2.5 py-1 rounded-lg text-center overflow-hidden max-h-12 flex items-center justify-center">
+                                <span 
+                                  style={{
+                                    fontFamily: family === 'primary' ? `var(--font-primary)` : family === 'secondary' ? `var(--font-secondary)` : `'${family}'`,
+                                    fontSize: size.match(/^\d+$/) ? `${size}px` : size,
+                                    fontWeight: weight
+                                  }}
+                                  className="truncate"
+                                >
+                                  Demo Text
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Font Family selector */}
+                            <div>
+                              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Font Family</label>
+                              <div className="space-y-1.5">
+                                <select
+                                  value={['primary', 'secondary'].includes(family) || POPULAR_FONTS.includes(family) ? family : 'custom'}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val !== 'custom') {
+                                      setFamily(val);
+                                    }
+                                  }}
+                                  className="h-9.5 w-full rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
+                                >
+                                  <option value="primary">Primary Brand Font</option>
+                                  <option value="secondary">Secondary Brand Font</option>
+                                  {POPULAR_FONTS.map(f => (
+                                    <option key={f} value={f}>{f} (Google Font)</option>
+                                  ))}
+                                  <option value="custom">Custom Font...</option>
+                                </select>
+                                {(!['primary', 'secondary'].includes(family) && !POPULAR_FONTS.includes(family)) || family === 'custom' ? (
+                                  <input
+                                    type="text"
+                                    value={family === 'custom' ? '' : family}
+                                    onChange={(e) => setFamily(e.target.value)}
+                                    placeholder="Type Font Name"
+                                    className="h-9 w-full rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none"
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+
+                            {/* Font Size input */}
+                            <div>
+                              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Font Size (px)</label>
+                              <input
+                                type="text"
+                                required
+                                value={size}
+                                onChange={(e) => setSize(e.target.value)}
+                                placeholder="e.g. 14 or 14px"
+                                className="h-9.5 w-full rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
+                              />
+                              <span className="text-[9px] text-ink-3 mt-1 block">Enter value in pixels (e.g. 14 or 14px).</span>
+                            </div>
+
+                            {/* Font Weight selector */}
+                            <div>
+                              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Font Weight</label>
+                              <select
+                                value={weight}
+                                onChange={(e) => setWeight(e.target.value)}
+                                className="h-9.5 w-full rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
+                              >
+                                <option value="100">100 - Thin</option>
+                                <option value="200">200 - Extra Light</option>
+                                <option value="300">300 - Light</option>
+                                <option value="400">400 - Regular</option>
+                                <option value="500">500 - Medium</option>
+                                <option value="600">600 - Semi Bold</option>
+                                <option value="700">700 - Bold</option>
+                                <option value="800">800 - Extra Bold</option>
+                                <option value="900">900 - Black</option>
+                              </select>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="submit"
+                        disabled={busy}
+                        className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-8 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300 cursor-pointer"
+                      >
+                        {busy ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
+                        Save Typography Settings
                       </Button>
                     </div>
                   </form>

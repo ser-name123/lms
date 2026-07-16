@@ -1,4 +1,11 @@
-import { Injectable, UnauthorizedException, Logger, ForbiddenException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  Logger,
+  ForbiddenException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -12,7 +19,8 @@ import { EmailsService } from '../emails/emails.service';
 /* Refresh tokens are high-entropy already, so a fast SHA-256 digest is the
    right store — bcrypt here would only add latency. Passwords still use
    bcrypt, where slowness is the whole point. */
-const digest = (token: string) => createHash('sha256').update(token).digest('hex');
+const digest = (token: string) =>
+  createHash('sha256').update(token).digest('hex');
 
 @Injectable()
 export class AuthService {
@@ -26,7 +34,10 @@ export class AuthService {
     private readonly emails: EmailsService,
   ) {}
 
-  async login(email: string, password: string): Promise<TokensDto | { otpRequired: boolean; email: string }> {
+  async login(
+    email: string,
+    password: string,
+  ): Promise<TokensDto | { otpRequired: boolean; email: string }> {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
     /* One message for "no such user" and "wrong password" alike, so the
@@ -94,26 +105,40 @@ export class AuthService {
     `;
 
     // Log generated verification code to console (retrievable in server/Render logs)
-    this.logger.log(`[OTP] Generated verification code for ${user.email} is: ${otp}`);
+    this.logger.log(
+      `[OTP] Generated verification code for ${user.email} is: ${otp}`,
+    );
 
     // Dispatch verification mail asynchronously in the background so SMTP delay doesn't block client response
-    this.emails.sendMail(
-      user.email,
-      'Edumin Login Verification Code',
-      `Your verification code is: ${otp}\nThis code is valid for 5 minutes.`,
-      undefined,
-      htmlTemplate,
-    ).catch(err => {
-      this.logger.error(`Failed to send verification email to ${user.email}: ${err.message}`, err.stack);
-    });
+    this.emails
+      .sendMail(
+        user.email,
+        'Edumin Login Verification Code',
+        `Your verification code is: ${otp}\nThis code is valid for 5 minutes.`,
+        undefined,
+        htmlTemplate,
+      )
+      .catch((err) => {
+        this.logger.error(
+          `Failed to send verification email to ${user.email}: ${err.message}`,
+          err.stack,
+        );
+      });
 
     return { otpRequired: true, email: user.email };
   }
 
-  async verifyOtp(email: string, otpCode: string, userAgent?: string, ipAddress?: string): Promise<TokensDto> {
+  async verifyOtp(
+    email: string,
+    otpCode: string,
+    userAgent?: string,
+    ipAddress?: string,
+  ): Promise<TokensDto> {
     const record = this.otpStore.get(email);
     if (!record) {
-      throw new UnauthorizedException('No verification code requested or session expired');
+      throw new UnauthorizedException(
+        'No verification code requested or session expired',
+      );
     }
 
     if (record.expiresAt < new Date()) {
@@ -140,12 +165,19 @@ export class AuthService {
     return this.issueTokens(user.id, userAgent, ipAddress);
   }
 
-  async refresh(refreshToken: string, userAgent?: string, ipAddress?: string): Promise<TokensDto> {
+  async refresh(
+    refreshToken: string,
+    userAgent?: string,
+    ipAddress?: string,
+  ): Promise<TokensDto> {
     let userId: string;
     try {
-      const payload = await this.jwt.verifyAsync<{ sub: string }>(refreshToken, {
-        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      });
+      const payload = await this.jwt.verifyAsync<{ sub: string }>(
+        refreshToken,
+        {
+          secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        },
+      );
       userId = payload.sub;
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
@@ -218,7 +250,11 @@ export class AuthService {
     };
   }
 
-  private async issueTokens(userId: string, userAgent?: string, ipAddress?: string): Promise<TokensDto> {
+  private async issueTokens(
+    userId: string,
+    userAgent?: string,
+    ipAddress?: string,
+  ): Promise<TokensDto> {
     /* TTLs arrive from config as plain strings; jsonwebtoken types expect its
        own `StringValue` template literal, so the options are asserted once. */
     const accessOptions = {
@@ -231,7 +267,10 @@ export class AuthService {
       expiresIn: this.config.get<string>('JWT_REFRESH_TTL', '7d'),
     } as JwtSignOptions;
 
-    const accessToken = await this.jwt.signAsync({ sub: userId }, accessOptions);
+    const accessToken = await this.jwt.signAsync(
+      { sub: userId },
+      accessOptions,
+    );
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, jti: randomUUID() },
       refreshOptions,
@@ -252,7 +291,11 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  async getSessions(userId: string, currentUserAgent?: string, currentIpAddress?: string) {
+  async getSessions(
+    userId: string,
+    currentUserAgent?: string,
+    currentIpAddress?: string,
+  ) {
     const sessions = await this.prisma.refreshToken.findMany({
       where: {
         userId,
@@ -272,7 +315,8 @@ export class AuthService {
 
     return sessions.map((s) => ({
       ...s,
-      isCurrent: s.userAgent === currentUserAgent && s.ipAddress === currentIpAddress,
+      isCurrent:
+        s.userAgent === currentUserAgent && s.ipAddress === currentIpAddress,
     }));
   }
 
@@ -290,9 +334,13 @@ export class AuthService {
   }
 
   async listAdmins(currentUserId: string) {
-    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: currentUserId },
+    });
     if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
-      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+      throw new ForbiddenException(
+        'Only the master administrator can manage admin accounts.',
+      );
     }
 
     return this.prisma.user.findMany({
@@ -312,14 +360,22 @@ export class AuthService {
   }
 
   async createAdmin(currentUserId: string, dto: CreateAdminDto) {
-    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: currentUserId },
+    });
     if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
-      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+      throw new ForbiddenException(
+        'Only the master administrator can manage admin accounts.',
+      );
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
     if (existing) {
-      throw new ConflictException('An account with this email address already exists.');
+      throw new ConflictException(
+        'An account with this email address already exists.',
+      );
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -346,22 +402,32 @@ export class AuthService {
   }
 
   async deleteAdmin(currentUserId: string, targetId: string) {
-    const currentUser = await this.prisma.user.findUnique({ where: { id: currentUserId } });
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: currentUserId },
+    });
     if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
-      throw new ForbiddenException('Only the master administrator can manage admin accounts.');
+      throw new ForbiddenException(
+        'Only the master administrator can manage admin accounts.',
+      );
     }
 
-    const targetUser = await this.prisma.user.findUnique({ where: { id: targetId } });
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: targetId },
+    });
     if (!targetUser) {
       throw new BadRequestException('User not found.');
     }
 
     if (targetUser.email === 'objectsquarerajan@gmail.com') {
-      throw new ForbiddenException('The master administrator account cannot be deleted.');
+      throw new ForbiddenException(
+        'The master administrator account cannot be deleted.',
+      );
     }
 
     if (targetUser.id === currentUserId) {
-      throw new ForbiddenException('You cannot delete your own active administrator account.');
+      throw new ForbiddenException(
+        'You cannot delete your own active administrator account.',
+      );
     }
 
     await this.prisma.user.delete({ where: { id: targetId } });

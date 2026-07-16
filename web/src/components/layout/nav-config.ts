@@ -8,14 +8,23 @@ import {
   Settings,
   Users,
   Wallet,
+  FileText,
+  Library,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = {
   label: string;
-  href: string;
+  href?: string;
   icon: LucideIcon;
   badge?: string;
+  children?: {
+    label: string;
+    href: string;
+    icon: LucideIcon;
+    badge?: string;
+  }[];
 };
 
 export type NavGroup = {
@@ -34,9 +43,25 @@ export const navGroups: NavGroup[] = [
       { label: "Trial Classes", href: "/evaluation", icon: ClipboardList },
       { label: "Students", href: "/students", icon: Users },
       { label: "Teachers", href: "/teachers", icon: GraduationCap },
-      { label: "Courses", href: "/courses", icon: BookOpen },
-      { label: "Classes", href: "/classes", icon: CalendarDays },
-      { label: "Assignments", href: "/assignments", icon: ClipboardList },
+      {
+        label: "Learning management",
+        icon: GraduationCap,
+        children: [
+          { label: "Courses", href: "/courses", icon: BookOpen },
+          { label: "Assignments", href: "/assignments", icon: ClipboardList },
+          { label: "Assessments", href: "/assessments", icon: FileText },
+          { label: "Knowledgebase", href: "/knowledgebase", icon: Library },
+          { label: "Packages", href: "/packages", icon: Package },
+        ],
+      },
+      {
+        label: "Schedules",
+        icon: CalendarDays,
+        children: [
+          { label: "Classes", href: "/classes", icon: CalendarDays },
+          { label: "Meetings", href: "/meetings", icon: Users },
+        ],
+      },
     ],
   },
   {

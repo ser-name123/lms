@@ -41,7 +41,10 @@ export class EmailsService {
         }
       }
     } catch (err) {
-      this.logger.error('Failed to parse custom SMTP config from database, using env fallback', err);
+      this.logger.error(
+        'Failed to parse custom SMTP config from database, using env fallback',
+        err,
+      );
     }
 
     // Fallback to env variables
@@ -79,12 +82,21 @@ export class EmailsService {
     const configSetting = await this.prisma.systemSetting.findUnique({
       where: { key: 'SMTP_CONFIG' },
     });
-    if (!configSetting) return null;
-    try {
-      return JSON.parse(configSetting.value);
-    } catch {
-      return null;
+    if (configSetting) {
+      try {
+        return JSON.parse(configSetting.value);
+      } catch {
+        // Fall back to env variables below
+      }
     }
+    return {
+      host: this.config.get<string>('SMTP_HOST') || 'smtp.gmail.com',
+      port: Number(this.config.get<string>('SMTP_PORT') || 587),
+      user: this.config.get<string>('SMTP_USER') || 'objectsquarerajan@gmail.com',
+      pass: this.config.get<string>('SMTP_PASS') || '',
+      from: this.config.get<string>('SMTP_FROM') || this.config.get<string>('SMTP_USER') || 'objectsquarerajan@gmail.com',
+      secure: this.config.get<string>('SMTP_SECURE') === 'true',
+    };
   }
 
   async saveSmtpConfig(config: any) {
@@ -96,7 +108,13 @@ export class EmailsService {
     return { success: true };
   }
 
-  async sendMail(to: string, subject: string, text: string, file?: Express.Multer.File, html?: string) {
+  async sendMail(
+    to: string,
+    subject: string,
+    text: string,
+    file?: Express.Multer.File,
+    html?: string,
+  ) {
     this.logger.log(`Sending email to ${to} with subject "${subject}"`);
     const { transporter, from } = await this.getTransporter();
 

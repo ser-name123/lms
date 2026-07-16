@@ -1,10 +1,18 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
-import type { CreateStudentDto, ListStudentsDto, UpdateStudentDto } from './dto';
+import type {
+  CreateStudentDto,
+  ListStudentsDto,
+  UpdateStudentDto,
+} from './dto';
 
 const PROFILE_SELECT = {
   id: true,
@@ -36,7 +44,10 @@ const PROFILE_SELECT = {
       progress: true,
       course: { select: { id: true, title: true } },
       teacher: {
-        select: { id: true, user: { select: { firstName: true, lastName: true } } },
+        select: {
+          id: true,
+          user: { select: { firstName: true, lastName: true } },
+        },
       },
       package: {
         select: { id: true, name: true, price: true, classesPerMonth: true },
@@ -50,23 +61,25 @@ export class StudentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(dto: ListStudentsDto) {
-    const { 
-      page, 
-      limit, 
-      search, 
-      status, 
-      courseId, 
-      teacherId, 
-      country, 
-      joiningDateStart, 
-      joiningDateEnd, 
-      nextPaymentDateStart, 
-      nextPaymentDateEnd 
+    const {
+      page,
+      limit,
+      search,
+      status,
+      courseId,
+      teacherId,
+      country,
+      joiningDateStart,
+      joiningDateEnd,
+      nextPaymentDateStart,
+      nextPaymentDateEnd,
     } = dto;
 
     const where: Prisma.StudentProfileWhereInput = {
       ...(status ? { user: { status } } : {}),
-      ...(country ? { user: { country: { contains: country, mode: 'insensitive' } } } : {}),
+      ...(country
+        ? { user: { country: { contains: country, mode: 'insensitive' } } }
+        : {}),
       ...(courseId ? { enrollments: { some: { courseId } } } : {}),
       ...(teacherId ? { enrollments: { some: { teacherId } } } : {}),
       ...(joiningDateStart || joiningDateEnd
@@ -80,8 +93,12 @@ export class StudentsService {
       ...(nextPaymentDateStart || nextPaymentDateEnd
         ? {
             nextPaymentDate: {
-              ...(nextPaymentDateStart ? { gte: new Date(nextPaymentDateStart) } : {}),
-              ...(nextPaymentDateEnd ? { lte: new Date(nextPaymentDateEnd) } : {}),
+              ...(nextPaymentDateStart
+                ? { gte: new Date(nextPaymentDateStart) }
+                : {}),
+              ...(nextPaymentDateEnd
+                ? { lte: new Date(nextPaymentDateEnd) }
+                : {}),
             },
           }
         : {}),
@@ -90,7 +107,9 @@ export class StudentsService {
             OR: [
               { studentCode: { contains: search, mode: 'insensitive' } },
               { user: { email: { contains: search, mode: 'insensitive' } } },
-              { user: { firstName: { contains: search, mode: 'insensitive' } } },
+              {
+                user: { firstName: { contains: search, mode: 'insensitive' } },
+              },
               { user: { lastName: { contains: search, mode: 'insensitive' } } },
             ],
           }
@@ -111,13 +130,18 @@ export class StudentsService {
 
     return {
       items,
-      meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+      meta: {
+        page,
+        limit,
+        total,
+        pages: Math.max(1, Math.ceil(total / limit)),
+      },
     };
   }
 
   async getCoursesList() {
     return this.prisma.course.findMany({
-      select: { id: true, title: true }
+      select: { id: true, title: true },
     });
   }
 
@@ -125,8 +149,8 @@ export class StudentsService {
     return this.prisma.teacherProfile.findMany({
       select: {
         id: true,
-        user: { select: { firstName: true, lastName: true } }
-      }
+        user: { select: { firstName: true, lastName: true, email: true } },
+      },
     });
   }
 
@@ -141,8 +165,11 @@ export class StudentsService {
   }
 
   async create(dto: CreateStudentDto) {
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existing) throw new ConflictException('That email is already registered');
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existing)
+      throw new ConflictException('That email is already registered');
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
@@ -155,8 +182,12 @@ export class StudentsService {
         profession: dto.profession,
         fees: dto.fees,
         joiningDate: dto.joiningDate ? new Date(dto.joiningDate) : null,
-        lastPaymentDate: dto.lastPaymentDate ? new Date(dto.lastPaymentDate) : null,
-        nextPaymentDate: dto.nextPaymentDate ? new Date(dto.nextPaymentDate) : null,
+        lastPaymentDate: dto.lastPaymentDate
+          ? new Date(dto.lastPaymentDate)
+          : null,
+        nextPaymentDate: dto.nextPaymentDate
+          ? new Date(dto.nextPaymentDate)
+          : null,
         user: {
           create: {
             email: dto.email,
@@ -194,9 +225,24 @@ export class StudentsService {
         guardianName: dto.guardianName,
         profession: dto.profession,
         fees: dto.fees,
-        joiningDate: dto.joiningDate !== undefined ? (dto.joiningDate ? new Date(dto.joiningDate) : null) : undefined,
-        lastPaymentDate: dto.lastPaymentDate !== undefined ? (dto.lastPaymentDate ? new Date(dto.lastPaymentDate) : null) : undefined,
-        nextPaymentDate: dto.nextPaymentDate !== undefined ? (dto.nextPaymentDate ? new Date(dto.nextPaymentDate) : null) : undefined,
+        joiningDate:
+          dto.joiningDate !== undefined
+            ? dto.joiningDate
+              ? new Date(dto.joiningDate)
+              : null
+            : undefined,
+        lastPaymentDate:
+          dto.lastPaymentDate !== undefined
+            ? dto.lastPaymentDate
+              ? new Date(dto.lastPaymentDate)
+              : null
+            : undefined,
+        nextPaymentDate:
+          dto.nextPaymentDate !== undefined
+            ? dto.nextPaymentDate
+              ? new Date(dto.nextPaymentDate)
+              : null
+            : undefined,
         user: {
           update: userUpdate,
         },
@@ -237,16 +283,27 @@ export class StudentsService {
   }
 
   async getStats() {
-    const [total, active, inactive, pending, trial, paused, male, female] = await Promise.all([
-      this.prisma.studentProfile.count(),
-      this.prisma.studentProfile.count({ where: { user: { status: 'ACTIVE' } } }),
-      this.prisma.studentProfile.count({ where: { user: { status: 'INACTIVE' } } }),
-      this.prisma.studentProfile.count({ where: { user: { status: 'PENDING' } } }),
-      this.prisma.studentProfile.count({ where: { user: { status: 'TRIAL' } } }),
-      this.prisma.studentProfile.count({ where: { user: { status: 'PAUSED' } } }),
-      this.prisma.studentProfile.count({ where: { gender: 'Male' } }),
-      this.prisma.studentProfile.count({ where: { gender: 'Female' } }),
-    ]);
+    const [total, active, inactive, pending, trial, paused, male, female] =
+      await Promise.all([
+        this.prisma.studentProfile.count(),
+        this.prisma.studentProfile.count({
+          where: { user: { status: 'ACTIVE' } },
+        }),
+        this.prisma.studentProfile.count({
+          where: { user: { status: 'INACTIVE' } },
+        }),
+        this.prisma.studentProfile.count({
+          where: { user: { status: 'PENDING' } },
+        }),
+        this.prisma.studentProfile.count({
+          where: { user: { status: 'TRIAL' } },
+        }),
+        this.prisma.studentProfile.count({
+          where: { user: { status: 'PAUSED' } },
+        }),
+        this.prisma.studentProfile.count({ where: { gender: 'Male' } }),
+        this.prisma.studentProfile.count({ where: { gender: 'Female' } }),
+      ]);
 
     const countryGroups = await this.prisma.user.groupBy({
       by: ['country'],

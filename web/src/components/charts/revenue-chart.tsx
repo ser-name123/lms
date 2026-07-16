@@ -11,13 +11,15 @@ import {
   YAxis,
 } from "recharts";
 
-import { revenueSeries } from "@/lib/mock-data";
 import { compact, currency } from "@/lib/utils";
 import { ChartTooltip, Legend, axisTick, gridStroke, type ChartTooltipProps } from "./chart-kit";
 
+export type RevenuePoint = { month: string; revenue: number; target: number };
+
 /* Revenue and target are both dollars, so they share one y-axis.
    Two scales on two axes would be the classic dual-axis lie. */
-export function RevenueChart() {
+export function RevenueChart({ data = [] }: { data?: RevenuePoint[] }) {
+  const revenueSeries = data;
   return (
     <div>
       <div className="mb-3 flex justify-end">

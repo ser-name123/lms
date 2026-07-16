@@ -10,10 +10,12 @@ import {
   YAxis,
 } from "recharts";
 
-import { enrollmentSeries } from "@/lib/mock-data";
 import { ChartTooltip, Legend, axisTick, gridStroke, type ChartTooltipProps } from "./chart-kit";
 
-export function EnrollmentChart() {
+export type EnrollmentPoint = { month: string; new: number; churned: number };
+
+export function EnrollmentChart({ data = [] }: { data?: EnrollmentPoint[] }) {
+  const enrollmentSeries = data;
   return (
     <div>
       <div className="mb-3 flex justify-end">

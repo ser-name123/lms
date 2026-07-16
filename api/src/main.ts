@@ -13,7 +13,12 @@ function allowedOrigins(): string[] | true {
 
   const origins = raw
     .split(',')
-    .map((o) => o.trim().replace(/^["']|["']$/g, '').replace(/\/+$/, ''))
+    .map((o) =>
+      o
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/\/+$/, ''),
+    )
     .filter(Boolean);
 
   return origins.length > 0 ? origins : true;
@@ -24,7 +29,9 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
   const origins = allowedOrigins();
-  console.log(`CORS origins: ${origins === true ? '(any)' : origins.join(' | ')}`);
+  console.log(
+    `CORS origins: ${origins === true ? '(any)' : origins.join(' | ')}`,
+  );
   app.enableCors({
     origin: origins,
     credentials: true,
@@ -49,7 +56,9 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 5000;
   await app.listen(port);
-  console.log(`API on http://localhost:${port}/api · docs on http://localhost:${port}/docs`);
+  console.log(
+    `API on http://localhost:${port}/api · docs on http://localhost:${port}/docs`,
+  );
 }
 
 void bootstrap();

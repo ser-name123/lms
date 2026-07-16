@@ -7,8 +7,19 @@ import { JwtAuthGuard, RolesGuard } from './auth/guards';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { StudentsModule } from './students/students.module';
+import { TeachersModule } from './teachers/teachers.module';
 import { EmailsModule } from './emails/emails.module';
 import { SettingsModule } from './settings/settings.module';
+import { EmployeesModule } from './employees/employees.module';
+import { CandidatesModule } from './candidates/candidates.module';
+import { LeavesModule } from './leaves/leaves.module';
+import { InvoicesModule } from './invoices/invoices.module';
+import { TrialsModule } from './trials/trials.module';
+import { CategoriesModule } from './categories/categories.module';
+import { LmsDataModule } from './lms-data/lms-data.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+
+
 
 @Module({
   imports: [
@@ -16,8 +27,17 @@ import { SettingsModule } from './settings/settings.module';
     PrismaModule,
     AuthModule,
     StudentsModule,
+    TeachersModule,
     EmailsModule,
     SettingsModule,
+    EmployeesModule,
+    CandidatesModule,
+    LeavesModule,
+    InvoicesModule,
+    TrialsModule,
+    CategoriesModule,
+    LmsDataModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
   providers: [

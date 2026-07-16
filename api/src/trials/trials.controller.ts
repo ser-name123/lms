@@ -1,0 +1,71 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Put,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+
+import { Roles } from '../auth/decorators';
+import { Role } from '../generated/prisma/enums';
+import { CreateTrialDto, ScheduleTrialDto, EvaluateTrialDto } from './dto';
+import { TrialsService } from './trials.service';
+
+@ApiTags('trials')
+@ApiBearerAuth()
+@Controller('trials')
+@Roles(Role.ADMIN)
+export class TrialsController {
+  constructor(private readonly service: TrialsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Get all trial class inquiries' })
+  list() {
+    return this.service.list();
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create new trial class inquiry' })
+  create(@Body() dto: CreateTrialDto) {
+    return this.service.create(dto);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update trial class inquiry details' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete trial class inquiry' })
+  delete(@Param('id') id: string) {
+    return this.service.delete(id);
+  }
+
+  @Put(':id/schedule')
+  @ApiOperation({ summary: 'Schedule an active trial' })
+  schedule(
+    @Param('id') id: string,
+    @Body() dto: ScheduleTrialDto,
+  ) {
+    return this.service.schedule(id, dto);
+  }
+
+  @Put(':id/evaluate')
+  @ApiOperation({ summary: 'Evaluate and grade completed trial' })
+  evaluate(
+    @Param('id') id: string,
+    @Body() dto: EvaluateTrialDto,
+  ) {
+    return this.service.evaluate(id, dto);
+  }
+}

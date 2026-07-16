@@ -57,7 +57,9 @@ export class StudentsController {
 
   @Post()
   @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
-  @ApiOperation({ summary: 'Create a student (also creates their user account)' })
+  @ApiOperation({
+    summary: 'Create a student (also creates their user account)',
+  })
   create(@Body() dto: CreateStudentDto) {
     return this.students.create(dto);
   }
@@ -65,7 +67,10 @@ export class StudentsController {
   @Patch(':id')
   @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Update a student' })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateStudentDto) {
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateStudentDto,
+  ) {
     return this.students.update(id, dto);
   }
 

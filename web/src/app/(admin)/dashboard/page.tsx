@@ -1,30 +1,16 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { ArrowUpRight, CircleAlert, GraduationCap, Receipt, Video, Calendar, Heart, Clock, User, Pencil, Trash, Send, Paperclip, Bold, Italic, Link2, List, ListOrdered, Quote, Table2, FileVideo, Undo2, Redo2, Image as ImageIcon } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { ArrowUpRight, CircleAlert, GraduationCap, Receipt, Video, Calendar, Heart, Pencil, Trash, Send, Paperclip, Bold, Italic, Link2, List, ListOrdered, Quote, Table2, FileVideo, Undo2, Redo2, Image as ImageIcon } from "lucide-react";
 
-import { CourseMixChart } from "@/components/charts/course-mix-chart";
-import { EnrollmentChart } from "@/components/charts/enrollment-chart";
-import { RevenueChart } from "@/components/charts/revenue-chart";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Topbar } from "@/components/layout/topbar";
-import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { activity, kpis, recentEnrollments, upcomingClasses, educationCourses, examToppers, newStudentList } from "@/lib/mock-data";
-import { cn, initials } from "@/lib/utils";
+import { fetchDashboard, type DashboardOverview } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const RANGES = ["7d", "30d", "90d", "12m"] as const;
-
-const statusTone: Record<string, Tone> = {
-  Active: "good",
-  Trial: "accent",
-  Pending: "warning",
-  Paused: "neutral",
-  Live: "critical",
-  Upcoming: "accent",
-  Done: "neutral",
-};
 
 const activityIcon = {
   payment: Receipt,
@@ -33,13 +19,63 @@ const activityIcon = {
   alert: CircleAlert,
 };
 
+/** "3 Jul 2026" from an ISO date. */
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Compact relative time — "6m ago", "2h ago", "3d ago". */
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diff = Math.max(0, Date.now() - then);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function DashboardPage() {
+  const [data, setData] = useState<DashboardOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [toEmail, setToEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchDashboard()
+      .then((res) => {
+        if (active) setData(res);
+      })
+      .catch((err) => {
+        if (active) setError(err?.message ?? "Failed to load dashboard");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const kpis = data?.kpis ?? [];
+  const newStudentList = data?.newStudentList ?? [];
+  const activity = data?.activity ?? [];
+  const educationCourses = data?.educationCourses ?? [];
 
   const handleSendEmail = async () => {
     if (!toEmail) {
@@ -103,6 +139,12 @@ export default function DashboardPage() {
       <Topbar title="Dashboard" subtitle="Tuesday, 14 July 2026" />
 
       <div className="animate-fade-up space-y-5 p-4 sm:p-6">
+        {error && (
+          <div className="rounded-lg border border-critical/20 bg-critical/10 px-4 py-3 text-sm font-medium text-critical">
+            {error}
+          </div>
+        )}
+
         {/* Filters sit in one row above the charts. */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex rounded-lg border border-hairline bg-surface p-0.5">
@@ -129,9 +171,14 @@ export default function DashboardPage() {
 
         {/* KPI row */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {kpis.map((kpi) => (
-            <StatTile key={kpi.id} kpi={kpi} />
-          ))}
+          {loading && kpis.length === 0
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-28 animate-pulse rounded-xl border border-hairline bg-surface-2/40"
+                />
+              ))
+            : kpis.map((kpi) => <StatTile key={kpi.id} kpi={kpi} />)}
         </div>
 
         {/* New Student List */}
@@ -157,7 +204,7 @@ export default function DashboardPage() {
                     <td className="px-5 py-4 font-semibold text-ink-2">{student.no}</td>
                     <td className="px-5 py-4 font-bold text-ink">{student.name}</td>
                     <td className="px-5 py-4 text-ink-2 font-medium">{student.professor}</td>
-                    <td className="px-5 py-4 text-ink-3 font-semibold">{student.date}</td>
+                    <td className="px-5 py-4 text-ink-3 font-semibold">{formatDate(student.date)}</td>
                     <td className="px-5 py-4">
                       <span
                         className={cn(
@@ -184,6 +231,13 @@ export default function DashboardPage() {
                     </td>
                   </tr>
                 ))}
+                {!loading && newStudentList.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-10 text-center text-sm font-medium text-ink-3">
+                      No students yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -299,11 +353,14 @@ export default function DashboardPage() {
                           <span className="font-bold text-ink">{item.who}</span> {item.action}{" "}
                           <span className="font-bold text-ink">{item.target}</span>
                         </p>
-                        <p className="mt-1 text-xs font-semibold text-ink-3">{item.at}</p>
+                        <p className="mt-1 text-xs font-semibold text-ink-3">{relativeTime(item.at)}</p>
                       </div>
                     </li>
                   );
                 })}
+                {!loading && activity.length === 0 && (
+                  <li className="py-6 text-center text-sm font-medium text-ink-3">No recent activity.</li>
+                )}
               </ul>
             </CardBody>
           </Card>
@@ -325,7 +382,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between text-xs text-ink-3 font-semibold">
                     <span className="flex items-center gap-1">
                       <Calendar className="size-3.5" />
-                      {course.date}
+                      {formatDate(course.date)}
                     </span>
                     <span className="flex items-center gap-1 text-rose-500">
                       <Heart className="size-3.5 fill-rose-500" />

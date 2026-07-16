@@ -1,7 +1,7 @@
 import { BookOpen, GraduationCap, Users, Wallet, User as UserIcon, LucideIcon } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
-import type { Kpi } from "@/lib/mock-data";
+import type { Kpi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const kpiTheme: Record<

@@ -36,14 +36,66 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 function applyDynamicStyles(settings: SystemSettings) {
   if (typeof window === "undefined") return;
 
-  // 1. Inject Favicon Link
-  let faviconLink = document.querySelector("link[rel='icon']") as HTMLLinkElement;
-  if (!faviconLink) {
-    faviconLink = document.createElement("link");
-    faviconLink.rel = "icon";
-    document.head.appendChild(faviconLink);
+  const formatPx = (val: string | undefined, fallback: string) => {
+    if (!val) return fallback;
+    const trimmed = val.trim();
+    if (/^\d+$/.test(trimmed)) return trimmed + "px";
+    return trimmed;
+  };
+
+  // 0. Inject Google Fonts Dynamically
+  const fontsToLoad = new Set<string>();
+  if (settings.primaryFontFamily) fontsToLoad.add(settings.primaryFontFamily);
+  if (settings.secondaryFontFamily) fontsToLoad.add(settings.secondaryFontFamily);
+  
+  const getGoogleFontName = (val: string) => {
+    if (!val || val === 'primary' || val === 'secondary') return null;
+    return val;
+  };
+  
+  [
+    settings.h1FontFamily,
+    settings.h2FontFamily,
+    settings.h3FontFamily,
+    settings.h4FontFamily,
+    settings.h5FontFamily,
+    settings.pFontFamily
+  ].forEach(f => {
+    const name = getGoogleFontName(f || '');
+    if (name) fontsToLoad.add(name);
+  });
+
+  let fontsLinkTag = document.getElementById("dynamic-google-fonts") as HTMLLinkElement;
+  if (fontsToLoad.size > 0) {
+    if (!fontsLinkTag) {
+      fontsLinkTag = document.createElement("link");
+      fontsLinkTag.id = "dynamic-google-fonts";
+      fontsLinkTag.rel = "stylesheet";
+      document.head.appendChild(fontsLinkTag);
+    }
+    const fontQuery = Array.from(fontsToLoad)
+      .map(font => `family=${font.replace(/\s+/g, "+")}:wght@100;200;300;400;500;600;700;800;900`)
+      .join("&");
+    fontsLinkTag.href = `https://fonts.googleapis.com/css2?${fontQuery}&display=swap`;
+  } else {
+    if (fontsLinkTag) {
+      fontsLinkTag.remove();
+    }
   }
-  faviconLink.href = settings.favicon || "/favicon.ico";
+
+  // 1. Inject Favicon Link
+  const faviconUrl = settings.favicon || "/favicon.ico";
+  const favicons = document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
+  if (favicons.length > 0) {
+    favicons.forEach((fav) => {
+      (fav as HTMLLinkElement).href = faviconUrl;
+    });
+  } else {
+    const link = document.createElement("link");
+    link.rel = "icon";
+    link.href = faviconUrl;
+    document.head.appendChild(link);
+  }
 
   // 2. Inject Dynamic CSS Variables for Brand Theme
   let customStyleTag = document.getElementById("dynamic-theme-vars") as HTMLStyleElement;
@@ -93,6 +145,9 @@ function applyDynamicStyles(settings: SystemSettings) {
       --ink-2: ${settings.textSecondaryLight} !important;
       --ink-3: ${settings.textMutedLight} !important;
       --border: ${settings.topbarBorderLight} !important;
+
+      --font-primary: '${settings.primaryFontFamily || "Outfit"}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+      --font-secondary: '${settings.secondaryFontFamily || "Inter"}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
     }
     
     .dark {
@@ -107,6 +162,46 @@ function applyDynamicStyles(settings: SystemSettings) {
       --ink-2: ${settings.textSecondaryDark} !important;
       --ink-3: ${settings.textMutedDark} !important;
       --border: ${settings.topbarBorderDark} !important;
+    }
+    
+    body {
+      font-family: var(--font-primary) !important;
+    }
+
+    h1 {
+      font-family: ${settings.h1FontFamily === 'secondary' ? 'var(--font-secondary)' : settings.h1FontFamily === 'primary' || !settings.h1FontFamily ? 'var(--font-primary)' : `'${settings.h1FontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.h1FontSize, '32px')};
+      font-weight: ${settings.h1FontWeight || '700'};
+    }
+
+    h2 {
+      font-family: ${settings.h2FontFamily === 'secondary' ? 'var(--font-secondary)' : settings.h2FontFamily === 'primary' || !settings.h2FontFamily ? 'var(--font-primary)' : `'${settings.h2FontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.h2FontSize, '24px')};
+      font-weight: ${settings.h2FontWeight || '700'};
+    }
+
+    h3 {
+      font-family: ${settings.h3FontFamily === 'secondary' ? 'var(--font-secondary)' : settings.h3FontFamily === 'primary' || !settings.h3FontFamily ? 'var(--font-primary)' : `'${settings.h3FontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.h3FontSize, '20px')};
+      font-weight: ${settings.h3FontWeight || '600'};
+    }
+
+    h4 {
+      font-family: ${settings.h4FontFamily === 'secondary' ? 'var(--font-secondary)' : settings.h4FontFamily === 'primary' || !settings.h4FontFamily ? 'var(--font-primary)' : `'${settings.h4FontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.h4FontSize, '18px')};
+      font-weight: ${settings.h4FontWeight || '600'};
+    }
+
+    h5 {
+      font-family: ${settings.h5FontFamily === 'secondary' ? 'var(--font-secondary)' : settings.h5FontFamily === 'primary' || !settings.h5FontFamily ? 'var(--font-primary)' : `'${settings.h5FontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.h5FontSize, '16px')};
+      font-weight: ${settings.h5FontWeight || '600'};
+    }
+
+    p {
+      font-family: ${settings.pFontFamily === 'primary' ? 'var(--font-primary)' : settings.pFontFamily === 'secondary' || !settings.pFontFamily ? 'var(--font-secondary)' : `'${settings.pFontFamily}', system-ui, sans-serif`} !important;
+      font-size: ${formatPx(settings.pFontSize, '14px')};
+      font-weight: ${settings.pFontWeight || '400'};
     }
     
     /* Global Sidebar Style Overrides */

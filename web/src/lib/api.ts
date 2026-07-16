@@ -171,6 +171,28 @@ export type SystemSettings = {
   sidebarActiveTextDark: string;
   topbarBgDark: string;
   topbarBorderDark: string;
+
+  // Typography settings
+  primaryFontFamily?: string;
+  secondaryFontFamily?: string;
+  h1FontSize?: string;
+  h1FontWeight?: string;
+  h1FontFamily?: string;
+  h2FontSize?: string;
+  h2FontWeight?: string;
+  h2FontFamily?: string;
+  h3FontSize?: string;
+  h3FontWeight?: string;
+  h3FontFamily?: string;
+  h4FontSize?: string;
+  h4FontWeight?: string;
+  h4FontFamily?: string;
+  h5FontSize?: string;
+  h5FontWeight?: string;
+  h5FontFamily?: string;
+  pFontSize?: string;
+  pFontWeight?: string;
+  pFontFamily?: string;
 };
 
 export const fetchSystemSettings = () => api<SystemSettings>("/settings");
@@ -244,7 +266,7 @@ export const fetchStudents = (params: {
 };
 
 export const fetchStudentsCourses = () => api<{ id: string; title: string }[]>("/students/courses");
-export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string } }[]>("/students/teachers");
+export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string; email: string } }[]>("/students/teachers");
 
 export const createStudent = (dto: any) => api<StudentProfile>("/students", {
   method: "POST",
@@ -302,3 +324,479 @@ export const revokeSession = async (refreshToken: string) => {
     /* offline, or the API is down — sign out locally regardless */
   }
 };
+
+// ─── Teacher calls & types ───────────────────────────────────────────────────
+
+export type TeacherProfile = {
+  id: string;
+  teacherCode: string;
+  specialisation: string | null;
+  hourlyRate: number | null;
+  bio: string | null;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    country: string | null;
+    timezone: string | null;
+    status: string;
+    avatarUrl: string | null;
+    createdAt: string;
+    lastLoginAt: string | null;
+  };
+  _count?: {
+    enrollments: number;
+    classes: number;
+  };
+};
+
+export type TeacherStats = {
+  total: number;
+  active: number;
+  inactive: number;
+  onLeave: number;
+  countries: { country: string; count: number }[];
+  specialisations: { specialisation: string; count: number }[];
+};
+
+export const fetchTeachers = (params: { 
+  page: number; 
+  limit: number; 
+  search?: string; 
+  status?: string;
+  specialisation?: string;
+  sortBy?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") queryObj.status = params.status;
+  if (params.specialisation && params.specialisation !== "All") queryObj.specialisation = params.specialisation;
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: TeacherProfile[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/teachers?${q.toString()}`);
+};
+
+export const createTeacher = (dto: any) => api<TeacherProfile>("/teachers", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateTeacher = (id: string, dto: any) => api<TeacherProfile>(`/teachers/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteTeacher = (id: string) => api<{ success: boolean }>(`/teachers/${id}`, {
+  method: "DELETE",
+});
+
+export const fetchTeacherStats = () => api<TeacherStats>("/teachers/stats");
+
+export const fetchTeacherSessions = (teacherId: string) =>
+  api<{ id: string; userAgent: string | null; ipAddress: string | null; createdAt: string }[]>(`/teachers/${teacherId}/sessions`);
+
+export const revokeTeacherSession = (teacherId: string, sessionId: string) =>
+  api<void>(`/teachers/${teacherId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+
+// ─── Employee calls & types ───────────────────────────────────────────────────
+
+export type EmployeeProfile = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  status: string;
+  country: string | null;
+  timezone: string | null;
+  avatarUrl: string | null;
+  phone: string | null;
+  gender: string | null;
+  joiningDate: string | null;
+  salary: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EmployeeStats = {
+  total: number;
+  active: number;
+  inactive: number;
+  pending: number;
+  totalSalary: number;
+  adminsCount: number;
+  supervisorsCount: number;
+  coachesCount: number;
+  countries: { country: string; count: number }[];
+};
+
+export const fetchEmployees = (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  role?: string;
+  status?: string;
+  sortBy?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+
+  if (params.search) queryObj.search = params.search;
+  if (params.role && params.role !== "All") queryObj.role = params.role;
+  if (params.status && params.status !== "All") queryObj.status = params.status;
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: EmployeeProfile[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/employees?${q.toString()}`);
+};
+
+export const createEmployee = (dto: any) => api<EmployeeProfile>("/employees", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateEmployee = (id: string, dto: any) => api<EmployeeProfile>(`/employees/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteEmployee = (id: string) => api<{ success: boolean }>(`/employees/${id}`, {
+  method: "DELETE",
+});
+
+export const fetchEmployeeStats = () => api<EmployeeStats>("/employees/stats");
+
+export const fetchEmployeeSessions = (id: string) =>
+  api<{ id: string; userAgent: string | null; ipAddress: string | null; createdAt: string }[]>(`/employees/${id}/sessions`);
+
+export const revokeEmployeeSession = (id: string, sessionId: string) =>
+  api<void>(`/employees/${id}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+
+// ─── Candidates calls & types ───────────────────────────────────────────────────
+
+export type CandidateStatus = "NEW" | "SHORTLISTED" | "REJECTED" | "WAITING" | "APPROVED";
+
+export type Candidate = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  position: string;
+  resumeUrl: string | null;
+  status: CandidateStatus;
+  notes: string | null;
+  appliedAt: string;
+  updatedAt: string;
+};
+
+export type CandidateStats = {
+  total: number;
+  new: number;
+  shortlisted: number;
+  rejected: number;
+  waiting: number;
+  approved: number;
+};
+
+export const fetchCandidates = (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: string;
+  sortBy?: string;
+}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page),
+    limit: String(params.limit),
+  };
+
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") {
+    // Standardise category names to CandidateStatus enum strings
+    let cleanStatus = params.status.toUpperCase().trim();
+    if (cleanStatus.startsWith("NEW")) cleanStatus = "NEW";
+    queryObj.status = cleanStatus;
+  }
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: Candidate[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/candidates?${q.toString()}`);
+};
+
+export const createCandidate = (dto: any) => api<Candidate>("/candidates", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateCandidate = (id: string, dto: any) => api<Candidate>(`/candidates/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteCandidate = (id: string) => api<{ success: boolean }>(`/candidates/${id}`, {
+  method: "DELETE",
+});
+
+export const fetchCandidateStats = () => api<CandidateStats>("/candidates/stats");
+
+export const seedCandidates = () => api<{ count: number }>("/candidates/seed", {
+  method: "POST",
+});
+
+// Leave Request APIs
+export type LeaveType = "SICK" | "CASUAL" | "ANNUAL" | "UNPAID" | "OTHER";
+export type LeaveRequestStatus = "PENDING" | "APPROVED" | "DECLINED";
+
+export interface LeaveRequest {
+  id: string;
+  userId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: LeaveRequestStatus;
+  adminNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: string;
+  };
+}
+
+export interface LeaveStats {
+  total: number;
+  approved: number;
+  declined: number;
+  pending: number;
+}
+
+export interface ListLeavesParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  sortBy?: string;
+}
+
+export const fetchLeaves = (params: ListLeavesParams) => {
+  const queryObj: Record<string, string> = {};
+  if (params.page) queryObj.page = String(params.page);
+  if (params.limit) queryObj.limit = String(params.limit);
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") {
+    queryObj.status = params.status.toUpperCase();
+  }
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: LeaveRequest[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/leaves?${q.toString()}`);
+};
+
+export const createLeave = (dto: any) => api<LeaveRequest>("/leaves", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateLeave = (id: string, dto: any) => api<LeaveRequest>(`/leaves/${id}`, {
+  method: "PATCH",
+  body: JSON.stringify(dto),
+});
+
+export const deleteLeave = (id: string) => api<{ success: boolean }>(`/leaves/${id}`, {
+  method: "DELETE",
+});
+
+export const fetchLeaveStats = () => api<LeaveStats>("/leaves/stats");
+
+export const seedLeaves = () => api<{ seededCount: number }>("/leaves/seed", {
+  method: "POST",
+});
+
+// ─── Invoice calls & types ────────────────────────────────────────────────────
+
+export type InvoiceItem = {
+  id: string;
+  number: string;
+  studentId: string;
+  amount: number;
+  status: string; // DRAFT, SENT, PAID, OVERDUE, VOID
+  issuedAt: string;
+  dueAt: string | null;
+  student: {
+    id: string;
+    user: {
+      firstName: string;
+      lastName: string;
+      email: string;
+    };
+  };
+};
+
+export type ListInvoicesParams = {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  sortBy?: string;
+};
+
+export const fetchInvoices = (params: ListInvoicesParams = {}) => {
+  const queryObj: Record<string, string> = {
+    page: String(params.page ?? 1),
+    limit: String(params.limit ?? 20),
+  };
+
+  if (params.search) queryObj.search = params.search;
+  if (params.status && params.status !== "All") {
+    // Map Paid -> PAID, Pending -> SENT, Overdue -> OVERDUE, Refunded -> VOID
+    const mappedStatus = 
+      params.status === "Paid" ? "PAID" :
+      params.status === "Pending" ? "SENT" :
+      params.status === "Overdue" ? "OVERDUE" :
+      params.status === "Refunded" ? "VOID" : params.status;
+    queryObj.status = mappedStatus;
+  }
+  if (params.sortBy) queryObj.sortBy = params.sortBy;
+
+  const q = new URLSearchParams(queryObj);
+  return api<{ items: InvoiceItem[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(`/invoices?${q.toString()}`);
+};
+
+export const createInvoice = (dto: any) => api<InvoiceItem>("/invoices", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const updateInvoice = (id: string, dto: any) => api<InvoiceItem>(`/invoices/${id}`, {
+  method: "PUT",
+  body: JSON.stringify(dto),
+});
+
+export const deleteInvoice = (id: string) => api<void>(`/invoices/${id}`, {
+  method: "DELETE",
+});
+
+// ─── Trial Calls & Types ──────────────────────────────────────────────────────
+
+export type TrialClassItem = {
+  id: string;
+  name: string;
+  email: string;
+  mobile: string;
+  country: string;
+  course: string;
+  prefTeacherGender: string;
+  status: "PENDING" | "SCHEDULED" | "COMPLETED";
+  age: number;
+  goals: string;
+  scheduledTime?: string;
+  assignedTeacher?: string;
+  meetLink?: string;
+  pronunciationGrade?: string;
+  fluencyGrade?: string;
+  focusGrade?: string;
+  recommendedLevel?: string;
+  evaluationNotes?: string;
+};
+
+export const fetchTrials = () => api<TrialClassItem[]>("/trials");
+
+export const createTrial = (dto: any) => api<TrialClassItem>("/trials", {
+  method: "POST",
+  body: JSON.stringify(dto),
+});
+
+export const scheduleTrial = (id: string, dto: any) => api<TrialClassItem>(`/trials/${id}/schedule`, {
+  method: "PUT",
+  body: JSON.stringify(dto),
+});
+
+export const evaluateTrial = (id: string, dto: any) => api<TrialClassItem>(`/trials/${id}/evaluate`, {
+  method: "PUT",
+  body: JSON.stringify(dto),
+});
+
+export const updateTrial = (id: string, dto: any) => api<TrialClassItem>(`/trials/${id}`, {
+  method: "PUT",
+  body: JSON.stringify(dto),
+});
+
+export const deleteTrial = (id: string) => api<void>(`/trials/${id}`, {
+  method: "DELETE",
+});
+
+// ─── Dashboard calls & types ──────────────────────────────────────────────────
+
+export type Trend = { label: string; value: number };
+
+export type Kpi = {
+  id: string;
+  label: string;
+  value: string;
+  raw: number;
+  delta: number; // percent vs previous period
+  hint: string;
+  spark: Trend[];
+};
+
+export type NewStudentEntry = {
+  no: string;
+  name: string;
+  professor: string;
+  date: string; // ISO — formatted client-side
+  status: "Checkin" | "Pending" | "Canceled";
+  subject: string;
+  fees: string;
+};
+
+export type ActivityItem = {
+  id: string;
+  who: string;
+  action: string;
+  target: string;
+  at: string; // ISO — rendered as relative time client-side
+  kind: "payment" | "enroll" | "class" | "alert";
+};
+
+export type EducationCourse = {
+  id: string;
+  title: string;
+  cover: string;
+  date: string;
+  likes: number;
+  duration: string;
+  professor: string;
+  students: string;
+};
+
+export type DashboardOverview = {
+  kpis: Kpi[];
+  newStudentList: NewStudentEntry[];
+  activity: ActivityItem[];
+  educationCourses: EducationCourse[];
+  courseMix: { name: string; value: number }[];
+  enrollmentSeries: { month: string; new: number; churned: number }[];
+  revenueSeries: { month: string; revenue: number; target: number }[];
+};
+
+export const fetchDashboard = () => api<DashboardOverview>("/dashboard/overview");
+
+
+

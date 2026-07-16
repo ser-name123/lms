@@ -115,6 +115,93 @@ export class SystemSettingsDto {
 
   @IsString()
   topbarBorderDark: string;
+
+  // Typography Settings
+  @IsOptional()
+  @IsString()
+  primaryFontFamily?: string;
+
+  @IsOptional()
+  @IsString()
+  secondaryFontFamily?: string;
+
+  // H1
+  @IsOptional()
+  @IsString()
+  h1FontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  h1FontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  h1FontFamily?: string;
+
+  // H2
+  @IsOptional()
+  @IsString()
+  h2FontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  h2FontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  h2FontFamily?: string;
+
+  // H3
+  @IsOptional()
+  @IsString()
+  h3FontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  h3FontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  h3FontFamily?: string;
+
+  // H4
+  @IsOptional()
+  @IsString()
+  h4FontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  h4FontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  h4FontFamily?: string;
+
+  // H5
+  @IsOptional()
+  @IsString()
+  h5FontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  h5FontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  h5FontFamily?: string;
+
+  // P
+  @IsOptional()
+  @IsString()
+  pFontSize?: string;
+
+  @IsOptional()
+  @IsString()
+  pFontWeight?: string;
+
+  @IsOptional()
+  @IsString()
+  pFontFamily?: string;
 }
 
 @Injectable()
@@ -128,15 +215,15 @@ export class SettingsService {
       where: {
         key: {
           in: [
-            'WEBSITE_LOGO', 
+            'WEBSITE_LOGO',
             'WEBSITE_LOGO_DARK',
             'ADMIN_CONSOLE_TITLE',
-            'WEBSITE_FAVICON', 
-            'WEBSITE_THEME', 
-            'GOOGLE_TAGS', 
+            'WEBSITE_FAVICON',
+            'WEBSITE_THEME',
+            'GOOGLE_TAGS',
             'WEBSITE_NAME',
             'WEBSITE_LOADER_ENABLED',
-            'WEBSITE_LOADER_URL'
+            'WEBSITE_LOADER_URL',
           ],
         },
       },
@@ -176,6 +263,28 @@ export class SettingsService {
 
     let defaultTheme = 'light';
 
+    // Typography Defaults
+    let primaryFontFamily = 'Outfit';
+    let secondaryFontFamily = 'Inter';
+    let h1FontSize = '32px';
+    let h1FontWeight = '700';
+    let h1FontFamily = 'primary';
+    let h2FontSize = '24px';
+    let h2FontWeight = '700';
+    let h2FontFamily = 'primary';
+    let h3FontSize = '20px';
+    let h3FontWeight = '600';
+    let h3FontFamily = 'primary';
+    let h4FontSize = '18px';
+    let h4FontWeight = '600';
+    let h4FontFamily = 'primary';
+    let h5FontSize = '16px';
+    let h5FontWeight = '600';
+    let h5FontFamily = 'primary';
+    let pFontSize = '14px';
+    let pFontWeight = '400';
+    let pFontFamily = 'secondary';
+
     const themeStr = settingsMap.get('WEBSITE_THEME');
     if (themeStr) {
       try {
@@ -189,8 +298,10 @@ export class SettingsService {
         textMutedLight = theme.textMutedLight || textMutedLight;
         sidebarBgLight = theme.sidebarBgLight || sidebarBgLight;
         sidebarTextLight = theme.sidebarTextLight || sidebarTextLight;
-        sidebarActiveBgLight = theme.sidebarActiveBgLight || sidebarActiveBgLight;
-        sidebarActiveTextLight = theme.sidebarActiveTextLight || sidebarActiveTextLight;
+        sidebarActiveBgLight =
+          theme.sidebarActiveBgLight || sidebarActiveBgLight;
+        sidebarActiveTextLight =
+          theme.sidebarActiveTextLight || sidebarActiveTextLight;
         topbarBgLight = theme.topbarBgLight || topbarBgLight;
         topbarBorderLight = theme.topbarBorderLight || topbarBorderLight;
 
@@ -204,11 +315,34 @@ export class SettingsService {
         sidebarBgDark = theme.sidebarBgDark || sidebarBgDark;
         sidebarTextDark = theme.sidebarTextDark || sidebarTextDark;
         sidebarActiveBgDark = theme.sidebarActiveBgDark || sidebarActiveBgDark;
-        sidebarActiveTextDark = theme.sidebarActiveTextDark || sidebarActiveTextDark;
+        sidebarActiveTextDark =
+          theme.sidebarActiveTextDark || sidebarActiveTextDark;
         topbarBgDark = theme.topbarBgDark || topbarBgDark;
         topbarBorderDark = theme.topbarBorderDark || topbarBorderDark;
 
         defaultTheme = theme.defaultTheme || defaultTheme;
+
+        // Load typography parameters
+        primaryFontFamily = theme.primaryFontFamily || primaryFontFamily;
+        secondaryFontFamily = theme.secondaryFontFamily || secondaryFontFamily;
+        h1FontSize = theme.h1FontSize || h1FontSize;
+        h1FontWeight = theme.h1FontWeight || h1FontWeight;
+        h1FontFamily = theme.h1FontFamily || h1FontFamily;
+        h2FontSize = theme.h2FontSize || h2FontSize;
+        h2FontWeight = theme.h2FontWeight || h2FontWeight;
+        h2FontFamily = theme.h2FontFamily || h2FontFamily;
+        h3FontSize = theme.h3FontSize || h3FontSize;
+        h3FontWeight = theme.h3FontWeight || h3FontWeight;
+        h3FontFamily = theme.h3FontFamily || h3FontFamily;
+        h4FontSize = theme.h4FontSize || h4FontSize;
+        h4FontWeight = theme.h4FontWeight || h4FontWeight;
+        h4FontFamily = theme.h4FontFamily || h4FontFamily;
+        h5FontSize = theme.h5FontSize || h5FontSize;
+        h5FontWeight = theme.h5FontWeight || h5FontWeight;
+        h5FontFamily = theme.h5FontFamily || h5FontFamily;
+        pFontSize = theme.pFontSize || pFontSize;
+        pFontWeight = theme.pFontWeight || pFontWeight;
+        pFontFamily = theme.pFontFamily || pFontFamily;
       } catch (err) {
         this.logger.error('Failed to parse website theme options:', err);
       }
@@ -217,7 +351,8 @@ export class SettingsService {
     return {
       logo: settingsMap.get('WEBSITE_LOGO') || null,
       logoDark: settingsMap.get('WEBSITE_LOGO_DARK') || null,
-      adminConsoleTitle: settingsMap.get('ADMIN_CONSOLE_TITLE') || 'Admin console',
+      adminConsoleTitle:
+        settingsMap.get('ADMIN_CONSOLE_TITLE') || 'Admin console',
       favicon: settingsMap.get('WEBSITE_FAVICON') || null,
       websiteName: settingsMap.get('WEBSITE_NAME') || 'Edumin LMS',
       defaultTheme,
@@ -252,6 +387,28 @@ export class SettingsService {
       sidebarActiveTextDark,
       topbarBgDark,
       topbarBorderDark,
+
+      // Typography
+      primaryFontFamily,
+      secondaryFontFamily,
+      h1FontSize,
+      h1FontWeight,
+      h1FontFamily,
+      h2FontSize,
+      h2FontWeight,
+      h2FontFamily,
+      h3FontSize,
+      h3FontWeight,
+      h3FontFamily,
+      h4FontSize,
+      h4FontWeight,
+      h4FontFamily,
+      h5FontSize,
+      h5FontWeight,
+      h5FontFamily,
+      pFontSize,
+      pFontWeight,
+      pFontFamily,
     };
   }
 
@@ -284,14 +441,39 @@ export class SettingsService {
       sidebarActiveTextDark: dto.sidebarActiveTextDark,
       topbarBgDark: dto.topbarBgDark,
       topbarBorderDark: dto.topbarBorderDark,
-      
+
       defaultTheme: dto.defaultTheme,
+
+      // Save typography config
+      primaryFontFamily: dto.primaryFontFamily,
+      secondaryFontFamily: dto.secondaryFontFamily,
+      h1FontSize: dto.h1FontSize,
+      h1FontWeight: dto.h1FontWeight,
+      h1FontFamily: dto.h1FontFamily,
+      h2FontSize: dto.h2FontSize,
+      h2FontWeight: dto.h2FontWeight,
+      h2FontFamily: dto.h2FontFamily,
+      h3FontSize: dto.h3FontSize,
+      h3FontWeight: dto.h3FontWeight,
+      h3FontFamily: dto.h3FontFamily,
+      h4FontSize: dto.h4FontSize,
+      h4FontWeight: dto.h4FontWeight,
+      h4FontFamily: dto.h4FontFamily,
+      h5FontSize: dto.h5FontSize,
+      h5FontWeight: dto.h5FontWeight,
+      h5FontFamily: dto.h5FontFamily,
+      pFontSize: dto.pFontSize,
+      pFontWeight: dto.pFontWeight,
+      pFontFamily: dto.pFontFamily,
     };
 
     const updates = [
       { key: 'WEBSITE_LOGO', value: dto.logo || '' },
       { key: 'WEBSITE_LOGO_DARK', value: dto.logoDark || '' },
-      { key: 'ADMIN_CONSOLE_TITLE', value: dto.adminConsoleTitle || 'Admin console' },
+      {
+        key: 'ADMIN_CONSOLE_TITLE',
+        value: dto.adminConsoleTitle || 'Admin console',
+      },
       { key: 'WEBSITE_FAVICON', value: dto.favicon || '' },
       { key: 'WEBSITE_THEME', value: JSON.stringify(themeObj) },
       { key: 'GOOGLE_TAGS', value: dto.googleTags || '' },

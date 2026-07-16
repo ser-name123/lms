@@ -1,4 +1,8 @@
-import { SetMetadata, createParamDecorator, type ExecutionContext } from '@nestjs/common';
+import {
+  SetMetadata,
+  createParamDecorator,
+  type ExecutionContext,
+} from '@nestjs/common';
 
 import type { Role } from '../generated/prisma/enums';
 

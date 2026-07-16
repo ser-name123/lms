@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Users, 
   CalendarDays, 
@@ -14,14 +14,21 @@ import {
   Phone, 
   XCircle, 
   Eye,
-  Award
+  Award,
+  Plus,
+  X,
+  Edit2,
+  Trash2
 } from "lucide-react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis } from "recharts";
+import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { fetchTrials, createTrial, scheduleTrial, evaluateTrial, updateTrial, deleteTrial } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 interface RequestItem {
   id: string;
@@ -48,16 +55,7 @@ interface RequestItem {
   evaluationNotes?: string;
 }
 
-const INITIAL_REQUESTS: RequestItem[] = [
-  { id: "ALFST-044", name: "Siva Kumar", email: "siva.kumar@example.com", date: "Jul 11, 2026", mobile: "+91 78787 87166", country: "India", course: "Quran", prefTeacherGender: "Male", status: "PENDING", age: 12, timezone: "GMT+5:30", goals: "Wants to learn basic Quran reading from scratch with correct Tajweed rules." },
-  { id: "ALFST-040", name: "Sara Al-Mansoori", email: "sara.mansoori@example.ae", date: "Jun 23, 2026", mobile: "+971 50 123 4567", country: "United Arab Emirates", course: "Quran", prefTeacherGender: "Female", status: "COMPLETED", age: 8, timezone: "GMT+4:00", goals: "Needs a patient female teacher for online Tajweed lessons. Child is shy.", scheduledTime: "2026-06-25 15:30", assignedTeacher: "Ustadha Maryam", meetLink: "https://meet.google.com/abc-defg-hij", recommendedLevel: "Quran — Level 1", grades: { pronunciation: "A", fluency: "B", focus: "A" }, evaluationNotes: "Excellent focus. Needs slight correction on heavy letters." },
-  { id: "ALFST-038", name: "Dinesh Kumar", email: "dinesh.k@example.com", date: "Jun 22, 2026", mobile: "+91 98778 58585", country: "India", course: "Quran", prefTeacherGender: "Male", status: "COMPLETED", age: 15, timezone: "GMT+5:30", goals: "Already knows basic reading. Wants to improve fluency.", scheduledTime: "2026-06-24 18:00", assignedTeacher: "Ustadh Bilal", meetLink: "https://meet.google.com/xyz-pdqr-wxy", recommendedLevel: "Quran — Level 3", grades: { pronunciation: "B", fluency: "A", focus: "B" }, evaluationNotes: "Fluency is good, but needs to work on stretching rules (Madd)." },
-  { id: "ALFST-032", name: "Raj Kumar", email: "raj.k@example.com", date: "Jun 22, 2026", mobile: "+91 91768 76776", country: "India", course: "Arabic", prefTeacherGender: "Male", status: "PENDING", age: 19, timezone: "GMT+5:30", goals: "University student wanting to learn conversational Arabic." },
-  { id: "ALFST-030", name: "Aisha Rahman", email: "aisha.r@example.co.uk", date: "Jun 21, 2026", mobile: "+44 7911 123456", country: "United Kingdom", course: "Islamic Studies", prefTeacherGender: "Female", status: "SCHEDULED", age: 10, timezone: "GMT+1:00", goals: "Wants to learn Islamic etiquette, history, and short Surahs.", scheduledTime: "2026-07-18 16:00", assignedTeacher: "Ustadha Zainab", meetLink: "https://meet.google.com/wxy-zabc-def" },
-  { id: "ALFST-028", name: "Yusuf Al-Bahraini", email: "yusuf.b@example.bh", date: "Jun 20, 2026", mobile: "+973 1712 3456", country: "Bahrain", course: "Quran", prefTeacherGender: "Any", status: "PENDING", age: 6, timezone: "GMT+3:00", goals: "Very young beginner. Wants interactive lessons." },
-  { id: "ALFST-025", name: "Zaid Al-Harbi", email: "zaid.h@example.com", date: "Jun 19, 2026", mobile: "+966 50 987 6543", country: "Saudi Arabia", course: "Arabic", prefTeacherGender: "Male", status: "SCHEDULED", age: 24, timezone: "GMT+3:00", goals: "Adult learner trying to master classical Arabic reading for study.", scheduledTime: "2026-07-16 11:30", assignedTeacher: "Ustadh Yusuf", meetLink: "https://meet.google.com/qwe-rtyu-iop" },
-  { id: "ALFST-022", name: "John Doe", email: "john.doe@example.com", date: "Jun 15, 2026", mobile: "+1 555 123 4567", country: "United States", course: "Quran", prefTeacherGender: "Male", status: "PENDING", age: 32, timezone: "GMT-5:00", goals: "Revert student wanting to learn correct pronunciation of Surah Al-Fatihah." }
-];
+const INITIAL_REQUESTS: RequestItem[] = [];
 
 const TEACHERS = ["Ustadh Yusuf", "Ustadha Maryam", "Ustadh Bilal", "Ustadha Zainab"];
 const LEVELS = ["Beginner Alphabet", "Quran — Level 1", "Quran — Level 2", "Quran — Level 3", "Arabic Conversational — Level 1", "Islamic Studies Junior"];
@@ -65,7 +63,8 @@ const LEVELS = ["Beginner Alphabet", "Quran — Level 1", "Quran — Level 2", "
 const PIE_COLORS = ["#133C55", "#386FA4", "#ffb822"];
 
 export default function EvaluationDashboard() {
-  const [requests, setRequests] = useState<RequestItem[]>(INITIAL_REQUESTS);
+  const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"pending" | "scheduled" | "completed">("pending");
   const [searchTerm, setSearchTerm] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
@@ -76,32 +75,190 @@ export default function EvaluationDashboard() {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [evaluationModalOpen, setEvaluationModalOpen] = useState(false);
 
-  // Form states
-  const [scheduleForm, setScheduleForm] = useState({ teacher: TEACHERS[0], dateTime: "", note: "" });
+  // Add Trial Class Form states
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formMobile, setFormMobile] = useState("");
+  const [formCountry, setFormCountry] = useState("United States");
+  const [formCourse, setFormCourse] = useState("Quran");
+  const [formGender, setFormGender] = useState<"Male" | "Female" | "Any">("Any");
+  const [formAge, setFormAge] = useState(10);
+  const [formGoals, setFormGoals] = useState("");
+  const [scheduleOnCreate, setScheduleOnCreate] = useState(false);
+  const [formAddTeacher, setFormAddTeacher] = useState(TEACHERS[0]);
+  const [formAddDateTime, setFormAddDateTime] = useState("");
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingTrialId, setEditingTrialId] = useState("");
+  const [formMeetLink, setFormMeetLink] = useState("");
+  const [formAddMeetLink, setFormAddMeetLink] = useState("");
+  const [formEditStatus, setFormEditStatus] = useState<"PENDING" | "SCHEDULED" | "COMPLETED">("PENDING");
+  const [formEditTeacher, setFormEditTeacher] = useState(TEACHERS[0]);
+  const [formEditDateTime, setFormEditDateTime] = useState("");
+  const [modalError, setModalError] = useState("");
+
+  const getMinDateTimeString = () => {
+    const now = new Date();
+    const tzOffset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - tzOffset).toISOString().slice(0, 16);
+  };
+
+  const loadTrialsFromDb = () => {
+    setLoading(true);
+    fetchTrials()
+      .then(data => {
+        const mapped = data.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          email: t.email,
+          date: new Date(t.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          mobile: t.mobile,
+          country: t.country,
+          course: t.course,
+          prefTeacherGender: t.prefTeacherGender as any,
+          status: t.status,
+          age: t.age,
+          goals: t.goals,
+          scheduledTime: t.scheduledTime,
+          assignedTeacher: t.assignedTeacher,
+          meetLink: t.meetLink,
+          grades: t.pronunciationGrade ? {
+            pronunciation: t.pronunciationGrade,
+            fluency: t.fluencyGrade,
+            focus: t.focusGrade
+          } : undefined,
+          recommendedLevel: t.recommendedLevel,
+          evaluationNotes: t.evaluationNotes
+        }));
+        setRequests(mapped);
+      })
+      .catch(err => console.warn("Failed to load trial classes from db", err))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTrialsFromDb();
+  }, []);
+
+  const handleAddRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError("");
+
+    if (!formName.trim()) {
+      setModalError("Student Name is required and cannot be empty.");
+      return;
+    }
+    if (!formEmail.trim()) {
+      setModalError("Email Address is required and cannot be empty.");
+      return;
+    }
+
+    if (scheduleOnCreate) {
+      if (!formAddDateTime) {
+        setModalError("Date & Time is required when scheduling a trial.");
+        return;
+      }
+      const selected = new Date(formAddDateTime).getTime();
+      const current = new Date().getTime();
+      if (selected <= current) {
+        setModalError("Trial Date & Time must be set to a future date.");
+        return;
+      }
+    }
+
+    const meetLink = scheduleOnCreate 
+      ? (formAddMeetLink || null)
+      : undefined;
+
+    const payload = {
+      name: formName,
+      email: formEmail,
+      mobile: formMobile || "+1 555-0199",
+      country: formCountry,
+      course: formCourse,
+      prefTeacherGender: formGender,
+      age: Number(formAge),
+      goals: formGoals || "Trial class lesson request.",
+      status: scheduleOnCreate ? "SCHEDULED" : "PENDING",
+      scheduledTime: scheduleOnCreate ? formAddDateTime : undefined,
+      assignedTeacher: scheduleOnCreate ? formAddTeacher : undefined,
+      meetLink
+    };
+
+    setLoading(true);
+    createTrial(payload)
+      .then(() => {
+        setAddModalOpen(false);
+        setFormName("");
+        setFormEmail("");
+        setFormMobile("");
+        setFormGoals("");
+        setFormAddMeetLink("");
+        setScheduleOnCreate(false);
+        setFormAddDateTime("");
+        setModalError("");
+        loadTrialsFromDb();
+        Swal.fire({
+          title: "Request Logged",
+          text: `Successfully registered trial class request for ${formName}.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(err => {
+        console.error(err);
+        setModalError(err.message || "Failed to save request. Server returned a database error.");
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const [scheduleForm, setScheduleForm] = useState({ teacher: TEACHERS[0], dateTime: "", note: "", meetLink: "" });
   const [evaluationForm, setEvaluationForm] = useState({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: LEVELS[1], notes: "" });
 
   // Handle schedule submit
   const handleScheduleRequest = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudent || !scheduleForm.dateTime) return;
+    setModalError("");
+    if (!selectedStudent) return;
 
-    setRequests(prev => prev.map(req => {
-      if (req.id === selectedStudent.id) {
-        return {
-          ...req,
-          status: "SCHEDULED",
-          scheduledTime: scheduleForm.dateTime,
-          assignedTeacher: scheduleForm.teacher,
-          meetLink: `https://meet.google.com/${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 5)}`
-        };
-      }
-      return req;
-    }));
+    if (!scheduleForm.dateTime) {
+      setModalError("Scheduled Date & Time is required.");
+      return;
+    }
+    const selected = new Date(scheduleForm.dateTime).getTime();
+    const current = new Date().getTime();
+    if (selected <= current) {
+      setModalError("Trial Date & Time must be set to a future date.");
+      return;
+    }
 
-    setScheduleModalOpen(false);
-    setSelectedStudent(null);
-    setScheduleForm({ teacher: TEACHERS[0], dateTime: "", note: "" });
-    setActiveTab("scheduled");
+    const payload = {
+      dateTime: scheduleForm.dateTime,
+      teacher: scheduleForm.teacher,
+      meetLink: scheduleForm.meetLink || undefined
+    };
+
+    setLoading(true);
+    scheduleTrial(selectedStudent.id, payload)
+      .then(() => {
+        setScheduleModalOpen(false);
+        setSelectedStudent(null);
+        setScheduleForm({ teacher: TEACHERS[0], dateTime: "", note: "", meetLink: "" });
+        setActiveTab("scheduled");
+        setModalError("");
+        loadTrialsFromDb();
+        Swal.fire({
+          title: "Scheduled",
+          text: "Trial session has been scheduled successfully.",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(err => {
+        console.error(err);
+        setModalError(err.message || "Failed to submit schedule. Server returned a database error.");
+      })
+      .finally(() => setLoading(false));
   };
 
   // Handle evaluation submit
@@ -109,27 +266,184 @@ export default function EvaluationDashboard() {
     e.preventDefault();
     if (!selectedStudent) return;
 
-    setRequests(prev => prev.map(req => {
-      if (req.id === selectedStudent.id) {
-        return {
-          ...req,
-          status: "COMPLETED",
-          grades: {
-            pronunciation: evaluationForm.pronunciation,
-            fluency: evaluationForm.fluency,
-            focus: evaluationForm.focus
-          },
-          recommendedLevel: evaluationForm.recommendedLevel,
-          evaluationNotes: evaluationForm.notes
-        };
-      }
-      return req;
-    }));
+    const payload = {
+      pronunciation: evaluationForm.pronunciation,
+      fluency: evaluationForm.fluency,
+      focus: evaluationForm.focus,
+      recommendedLevel: evaluationForm.recommendedLevel,
+      notes: evaluationForm.notes
+    };
 
-    setEvaluationModalOpen(false);
-    setSelectedStudent(null);
-    setEvaluationForm({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: LEVELS[1], notes: "" });
-    setActiveTab("completed");
+    setLoading(true);
+    evaluateTrial(selectedStudent.id, payload)
+      .then(() => {
+        setEvaluationModalOpen(false);
+        setSelectedStudent(null);
+        setEvaluationForm({ pronunciation: "A", fluency: "A", focus: "A", recommendedLevel: LEVELS[1], notes: "" });
+        setActiveTab("completed");
+        loadTrialsFromDb();
+        Swal.fire({
+          title: "Evaluation Saved",
+          text: "Completed grading evaluation successfully.",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(err => {
+        console.error(err);
+        Swal.fire({ title: "Error", text: "Failed to submit evaluation.", icon: "error" });
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const handleOpenEditModal = (req: RequestItem) => {
+    setEditingTrialId(req.id);
+    setFormName(req.name);
+    setFormEmail(req.email);
+    setFormMobile(req.mobile);
+    setFormCountry(req.country);
+    setFormCourse(req.course);
+    setFormGender(req.prefTeacherGender as any);
+    setFormAge(req.age || 10);
+    setFormGoals(req.goals || "");
+    setFormMeetLink(req.meetLink || "");
+    setFormEditStatus(req.status);
+    setFormEditTeacher(req.assignedTeacher || TEACHERS[0]);
+    setFormEditDateTime(req.scheduledTime || "");
+    setEditModalOpen(true);
+  };
+
+  const handleEditRequestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalError("");
+
+    if (!formName.trim()) {
+      setModalError("Student Name is required and cannot be empty.");
+      return;
+    }
+    if (!formEmail.trim()) {
+      setModalError("Email Address is required and cannot be empty.");
+      return;
+    }
+
+    if (formEditStatus !== "PENDING") {
+      if (!formEditDateTime) {
+        setModalError("Scheduled Date & Time is required.");
+        return;
+      }
+      const selected = new Date(formEditDateTime).getTime();
+      const current = new Date().getTime();
+      if (selected <= current) {
+        setModalError("Trial Date & Time must be set to a future date.");
+        return;
+      }
+    }
+
+    const updatedMeetLink = formEditStatus !== "PENDING" 
+      ? (formMeetLink || null)
+      : null;
+
+    const payload = {
+      name: formName,
+      email: formEmail,
+      mobile: formMobile,
+      country: formCountry,
+      course: formCourse,
+      prefTeacherGender: formGender,
+      age: Number(formAge),
+      goals: formGoals,
+      status: formEditStatus,
+      assignedTeacher: formEditStatus !== "PENDING" ? formEditTeacher : null,
+      scheduledTime: formEditStatus !== "PENDING" ? formEditDateTime : null,
+      meetLink: updatedMeetLink
+    };
+
+    setLoading(true);
+    updateTrial(editingTrialId, payload)
+      .then(() => {
+        setEditModalOpen(false);
+        setFormName("");
+        setFormEmail("");
+        setFormMobile("");
+        setFormGoals("");
+        setFormMeetLink("");
+        setFormEditDateTime("");
+        setModalError("");
+        loadTrialsFromDb();
+        Swal.fire({
+          title: "Saved Changes",
+          text: "Trial details successfully updated in database.",
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+      })
+      .catch(err => {
+        console.error(err);
+        setModalError(err.message || "Failed to update trial details. Server returned a database error.");
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const handleDeleteTrial = (id: string, name: string) => {
+    Swal.fire({
+      title: "Delete Request?",
+      text: `Are you sure you want to delete the trial request for ${name}?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Delete",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#f85a6b",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    }).then((result) => {
+      if (result.isConfirmed) {
+        setLoading(true);
+        deleteTrial(id)
+          .then(() => {
+            Swal.fire({
+              title: "Deleted!",
+              text: "Trial request removed from database.",
+              icon: "success",
+              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+            });
+            loadTrialsFromDb();
+          })
+          .catch(err => {
+            console.error(err);
+            Swal.fire({ title: "Delete Error", text: "Failed to delete record.", icon: "error" });
+          })
+          .finally(() => setLoading(false));
+      }
+    });
+  };
+
+  const handleQuickEditMeetLink = (id: string, currentLink: string) => {
+    Swal.fire({
+      title: "Update Meeting URL",
+      input: "text",
+      inputValue: currentLink,
+      inputPlaceholder: "Enter Zoom or Google Meet URL",
+      showCancelButton: true,
+      confirmButtonText: "Save Link",
+      cancelButtonText: "Cancel",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
+    }).then((result) => {
+      if (result.isConfirmed) {
+        const payload = { meetLink: result.value || undefined };
+        setLoading(true);
+        updateTrial(id, payload)
+          .then(() => {
+            loadTrialsFromDb();
+            Swal.fire({ title: "Updated!", text: "Meeting URL saved successfully.", icon: "success", background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff" });
+          })
+          .catch(err => {
+            console.error(err);
+            Swal.fire({ title: "Error", text: "Failed to update link.", icon: "error" });
+          })
+          .finally(() => setLoading(false));
+      }
+    });
   };
 
   // Dynamic Chart calculations based on current state
@@ -384,6 +698,16 @@ export default function EvaluationDashboard() {
                 <option value="">All Courses</option>
                 {uniqueCourses.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+
+              {/* Add Request Button */}
+              <Button
+                variant="primary"
+                onClick={() => setAddModalOpen(true)}
+                className="h-9.5 rounded-xl flex items-center gap-1.5 px-3.5 font-bold text-xs bg-accent text-accent-ink hover:bg-accent/90"
+              >
+                <Plus className="size-4" />
+                <span>Add Trial Request</span>
+              </Button>
             </div>
 
           </div>
@@ -448,15 +772,36 @@ export default function EvaluationDashboard() {
                           <td className="px-5 py-4 text-xs font-bold text-ink-2">{req.assignedTeacher}</td>
                           <td className="px-5 py-4 text-xs font-bold text-accent">{req.scheduledTime}</td>
                           <td className="px-5 py-4">
-                            <a 
-                              href={req.meetLink} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="text-xs text-[#886cff] font-bold hover:underline inline-flex items-center gap-1 bg-[#886cff]/10 px-2 py-1 rounded-lg"
-                            >
-                              <Video className="size-3.5" />
-                              Join Class
-                            </a>
+                            <div className="flex items-center gap-2">
+                              {req.meetLink ? (
+                                <>
+                                  <a 
+                                    href={req.meetLink} 
+                                    target="_blank" 
+                                    rel="noreferrer" 
+                                    className="text-xs text-[#886cff] font-bold hover:underline inline-flex items-center gap-1 bg-[#886cff]/10 px-2 py-1.5 rounded-lg"
+                                  >
+                                    <Video className="size-3.5" />
+                                    Join Class
+                                  </a>
+                                  <button
+                                    onClick={() => handleQuickEditMeetLink(req.id, req.meetLink || "")}
+                                    title="Edit Meeting URL"
+                                    className="p-1.5 rounded-lg border border-hairline hover:text-accent hover:border-accent/30 transition-all bg-surface cursor-pointer"
+                                  >
+                                    <Edit2 className="size-3.5" />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleQuickEditMeetLink(req.id, "")}
+                                  className="text-[10px] font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Plus className="size-3" />
+                                  Add URL
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </>
                       )}
@@ -464,9 +809,12 @@ export default function EvaluationDashboard() {
                       {activeTab === "completed" && (
                         <>
                           <td className="px-5 py-4 text-xs font-bold text-ink-2">{req.assignedTeacher}</td>
-                          <td className="px-5 py-4 text-xs font-black">
-                            <span className="text-green-500 font-bold bg-green-500/10 px-1.5 py-0.5 rounded mr-1">P: {req.grades?.pronunciation}</span>
-                            <span className="text-blue-500 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded">F: {req.grades?.fluency}</span>
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold">
+                              <span className="text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded" title="Pronunciation">P: {req.grades?.pronunciation || "N/A"}</span>
+                              <span className="text-blue-600 bg-blue-500/10 px-1.5 py-0.5 rounded" title="Fluency">F: {req.grades?.fluency || "N/A"}</span>
+                              <span className="text-purple-600 bg-purple-500/10 px-1.5 py-0.5 rounded" title="Focus">C: {req.grades?.focus || "N/A"}</span>
+                            </div>
                           </td>
                           <td className="px-5 py-4">
                             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-ink font-bold text-[10px]">{req.recommendedLevel}</Badge>
@@ -494,6 +842,22 @@ export default function EvaluationDashboard() {
                             className="p-1.5 rounded-lg border border-hairline bg-surface text-ink-3 hover:text-accent hover:border-accent/30 hover:bg-accent-soft/20 transition-all cursor-pointer"
                           >
                             <Eye className="size-4" />
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenEditModal(req)}
+                            title="Edit Inquiry Details"
+                            className="p-1.5 rounded-lg border border-hairline bg-surface text-ink-3 hover:text-blue-500 hover:border-blue-500/30 hover:bg-blue-50/10 transition-all cursor-pointer"
+                          >
+                            <Edit2 className="size-4" />
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteTrial(req.id, req.name)}
+                            title="Delete Inquiry"
+                            className="p-1.5 rounded-lg border border-hairline bg-surface text-ink-3 hover:text-red-500 hover:border-red-500/30 hover:bg-red-50/10 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="size-4" />
                           </button>
 
                           {req.status === "PENDING" && (
@@ -557,6 +921,13 @@ export default function EvaluationDashboard() {
               </button>
             </div>
 
+            {modalError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2.5 rounded-2xl text-2xs font-bold leading-normal flex items-start gap-2 animate-fade-in">
+                <XCircle className="size-4 shrink-0 mt-0.5" />
+                <div>{modalError}</div>
+              </div>
+            )}
+
             <div className="text-xs bg-accent-soft text-accent p-3.5 rounded-2xl border border-accent/10 space-y-1">
               <p className="font-bold">Student: {selectedStudent.name}</p>
               <p className="font-semibold text-2xs text-ink-3">Course: {selectedStudent.course} • Preference: {selectedStudent.prefTeacherGender} Teacher</p>
@@ -579,8 +950,20 @@ export default function EvaluationDashboard() {
                 <input
                   type="datetime-local"
                   required
+                  min={getMinDateTimeString()}
                   value={scheduleForm.dateTime}
                   onChange={(e) => setScheduleForm(prev => ({ ...prev, dateTime: e.target.value }))}
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-2xs font-bold uppercase tracking-wider text-ink-3">Custom Meeting URL (Optional)</label>
+                <input
+                  type="text"
+                  value={scheduleForm.meetLink}
+                  onChange={(e) => setScheduleForm(prev => ({ ...prev, meetLink: e.target.value }))}
+                  placeholder="e.g. https://meet.google.com/abc-defg-hij (Optional)"
                   className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent"
                 />
               </div>
@@ -639,37 +1022,48 @@ export default function EvaluationDashboard() {
             </div>
 
             <form onSubmit={handleEvaluateRequest} className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="mb-1.5 block text-3xs font-bold uppercase tracking-wider text-ink-3">Pronunciation</label>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="grid grid-cols-3 gap-4 items-center border border-hairline bg-surface-2/30 p-3 rounded-2xl">
+                  <div className="col-span-2 space-y-0.5">
+                    <p className="text-[11px] font-bold text-ink uppercase tracking-wider">Pronunciation</p>
+                    <p className="text-[9px] text-ink-3">Evaluation of speech clarity & rules</p>
+                  </div>
                   <select
                     value={evaluationForm.pronunciation}
                     onChange={(e) => setEvaluationForm(prev => ({ ...prev, pronunciation: e.target.value }))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none"
+                    className="h-9 w-full rounded-xl border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent"
                   >
                     <option value="A">A (Excellent)</option>
                     <option value="B">B (Good)</option>
                     <option value="C">C (Needs Work)</option>
                   </select>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-3xs font-bold uppercase tracking-wider text-ink-3">Reading Fluency</label>
+
+                <div className="grid grid-cols-3 gap-4 items-center border border-hairline bg-surface-2/30 p-3 rounded-2xl">
+                  <div className="col-span-2 space-y-0.5">
+                    <p className="text-[11px] font-bold text-ink uppercase tracking-wider">Reading Fluency</p>
+                    <p className="text-[9px] text-ink-3">Evaluation of pacing & readability</p>
+                  </div>
                   <select
                     value={evaluationForm.fluency}
                     onChange={(e) => setEvaluationForm(prev => ({ ...prev, fluency: e.target.value }))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none"
+                    className="h-9 w-full rounded-xl border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent"
                   >
                     <option value="A">A (Fluent)</option>
                     <option value="B">B (Moderate)</option>
                     <option value="C">C (Slow)</option>
                   </select>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-3xs font-bold uppercase tracking-wider text-ink-3">Student Focus</label>
+
+                <div className="grid grid-cols-3 gap-4 items-center border border-hairline bg-surface-2/30 p-3 rounded-2xl">
+                  <div className="col-span-2 space-y-0.5">
+                    <p className="text-[11px] font-bold text-ink uppercase tracking-wider">Student Focus</p>
+                    <p className="text-[9px] text-ink-3">Evaluation of attention span & focus</p>
+                  </div>
                   <select
                     value={evaluationForm.focus}
                     onChange={(e) => setEvaluationForm(prev => ({ ...prev, focus: e.target.value }))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none"
+                    className="h-9 w-full rounded-xl border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent"
                   >
                     <option value="A">A (Highly Attentive)</option>
                     <option value="B">B (Attentive)</option>
@@ -850,6 +1244,382 @@ export default function EvaluationDashboard() {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {editModalOpen && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-surface border border-hairline w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-scale-up p-6 space-y-4">
+            <header className="flex items-center justify-between border-b border-hairline pb-3">
+              <h3 className="font-bold text-base text-ink">Edit Trial Request Details</h3>
+              <button 
+                onClick={() => setEditModalOpen(false)}
+                className="size-8 rounded-full bg-surface-2 hover:bg-surface-3 transition-colors grid place-items-center text-ink-2 cursor-pointer"
+              >
+                <X className="size-4.5" />
+              </button>
+            </header>
+
+            {modalError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2.5 rounded-2xl text-2xs font-bold leading-normal flex items-start gap-2 animate-fade-in">
+                <XCircle className="size-4 shrink-0 mt-0.5" />
+                <div>{modalError}</div>
+              </div>
+            )}
+
+            <form onSubmit={handleEditRequestSubmit} className="space-y-3.5 text-xs text-ink-2">
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Student Full Name</label>
+                <input 
+                  type="text"
+                  required
+                  placeholder="e.g. Zayn Malik"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Email Address</label>
+                  <input 
+                    type="email"
+                    required
+                    placeholder="name@example.com"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Mobile Number</label>
+                  <input 
+                    type="text"
+                    placeholder="+1 555-0199"
+                    value={formMobile}
+                    onChange={(e) => setFormMobile(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Country</label>
+                  <input 
+                    type="text"
+                    required
+                    placeholder="e.g. United Kingdom"
+                    value={formCountry}
+                    onChange={(e) => setFormCountry(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Course Interest</label>
+                  <select
+                    value={formCourse}
+                    onChange={(e) => setFormCourse(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                  >
+                    <option value="Quran">Quran</option>
+                    <option value="Arabic">Arabic</option>
+                    <option value="Islamic Studies">Islamic Studies</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Preferred Teacher Gender</label>
+                  <select
+                    value={formGender}
+                    onChange={(e) => setFormGender(e.target.value as any)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                  >
+                    <option value="Any">Any Gender</option>
+                    <option value="Male">Male Coach Only</option>
+                    <option value="Female">Female Coach Only</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Student Age</label>
+                  <input 
+                    type="number"
+                    min="4"
+                    max="90"
+                    required
+                    value={formAge}
+                    onChange={(e) => setFormAge(Number(e.target.value))}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Goals & Notes</label>
+                <textarea 
+                  placeholder="Goals, target rules, timings, etc..."
+                  value={formGoals}
+                  onChange={(e) => setFormGoals(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:border-accent resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 border-t border-hairline pt-3 mt-1">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Trial Status</label>
+                  <select
+                    value={formEditStatus}
+                    onChange={(e) => setFormEditStatus(e.target.value as any)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                  >
+                    <option value="PENDING">Pending Approval</option>
+                    <option value="SCHEDULED">Scheduled</option>
+                    <option value="COMPLETED">Completed Evaluation</option>
+                  </select>
+                </div>
+              </div>
+
+              {formEditStatus !== "PENDING" && (
+                <div className="grid grid-cols-2 gap-4 animate-fade-in bg-surface-2/30 p-3.5 rounded-2xl border border-hairline col-span-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Assign Academic Teacher</label>
+                    <select
+                      value={formEditTeacher}
+                      onChange={(e) => setFormEditTeacher(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                    >
+                      {TEACHERS.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Trial Date & Time</label>
+                    <input 
+                      type="datetime-local"
+                      required
+                      min={getMinDateTimeString()}
+                      value={formEditDateTime}
+                      onChange={(e) => setFormEditDateTime(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div className="col-span-2 mt-2">
+                    <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Class Meeting URL (Optional)</label>
+                    <input 
+                      type="text"
+                      placeholder="e.g. https://meet.google.com/abc-defg-hij (Optional)"
+                      value={formMeetLink}
+                      onChange={(e) => setFormMeetLink(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <footer className="flex justify-end gap-2 border-t border-hairline pt-3 bg-surface">
+                <Button type="button" onClick={() => setEditModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  className="h-10 px-5 font-bold text-xs bg-accent text-accent-ink hover:bg-accent/90 rounded-xl"
+                >
+                  Save Changes
+                </Button>
+              </footer>
+            </form>
+          </div>
+        </div>
+      )}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-surface border border-hairline w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-scale-up p-6 space-y-4">
+            <header className="flex items-center justify-between border-b border-hairline pb-3">
+              <h3 className="font-bold text-base text-ink">Add Trial Class Request</h3>
+              <button 
+                onClick={() => setAddModalOpen(false)}
+                className="size-8 rounded-full bg-surface-2 hover:bg-surface-3 transition-colors grid place-items-center text-ink-2 cursor-pointer"
+              >
+                <X className="size-4.5" />
+              </button>
+            </header>
+
+            {modalError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-2.5 rounded-2xl text-2xs font-bold leading-normal flex items-start gap-2 animate-fade-in">
+                <XCircle className="size-4 shrink-0 mt-0.5" />
+                <div>{modalError}</div>
+              </div>
+            )}
+
+            <form onSubmit={handleAddRequest} className="space-y-3.5 text-xs text-ink-2">
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Student Full Name</label>
+                <input 
+                  type="text"
+                  required
+                  placeholder="e.g. Zayn Malik"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Email Address</label>
+                  <input 
+                    type="email"
+                    required
+                    placeholder="name@example.com"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Mobile Number</label>
+                  <input 
+                    type="text"
+                    placeholder="+1 555-0199"
+                    value={formMobile}
+                    onChange={(e) => setFormMobile(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Country</label>
+                  <input 
+                    type="text"
+                    required
+                    placeholder="e.g. United Kingdom"
+                    value={formCountry}
+                    onChange={(e) => setFormCountry(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Course Interest</label>
+                  <select
+                    value={formCourse}
+                    onChange={(e) => setFormCourse(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                  >
+                    <option value="Quran">Quran</option>
+                    <option value="Arabic">Arabic</option>
+                    <option value="Islamic Studies">Islamic Studies</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Preferred Teacher Gender</label>
+                  <select
+                    value={formGender}
+                    onChange={(e) => setFormGender(e.target.value as any)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                  >
+                    <option value="Any">Any Gender</option>
+                    <option value="Male">Male Coach Only</option>
+                    <option value="Female">Female Coach Only</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Student Age</label>
+                  <input 
+                    type="number"
+                    min="4"
+                    max="90"
+                    required
+                    value={formAge}
+                    onChange={(e) => setFormAge(Number(e.target.value))}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Goals & Notes</label>
+                <textarea 
+                  placeholder="Goals, target rules, timings, etc..."
+                  value={formGoals}
+                  onChange={(e) => setFormGoals(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:border-accent resize-none"
+                />
+              </div>
+
+              {/* Inline Scheduling options */}
+              <div className="border-t border-hairline pt-3.5 mt-2 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-ink">
+                  <input 
+                    type="checkbox"
+                    checked={scheduleOnCreate}
+                    onChange={(e) => setScheduleOnCreate(e.target.checked)}
+                    className="rounded border-hairline text-accent focus:ring-accent size-4 cursor-pointer"
+                  />
+                  <span>Schedule this trial class now?</span>
+                </label>
+
+                {scheduleOnCreate && (
+                  <div className="grid grid-cols-2 gap-4 animate-fade-in bg-surface-2/30 p-3.5 rounded-2xl border border-hairline">
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Assign Academic Teacher</label>
+                      <select
+                        value={formAddTeacher}
+                        onChange={(e) => setFormAddTeacher(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent"
+                      >
+                        {TEACHERS.map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Trial Date & Time</label>
+                      <input 
+                        type="datetime-local"
+                        min={getMinDateTimeString()}
+                        value={formAddDateTime}
+                        onChange={(e) => setFormAddDateTime(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                    <div className="col-span-2 mt-2">
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Custom Meeting URL (Optional)</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. https://meet.google.com/abc-defg-hij (Optional)"
+                        value={formAddMeetLink}
+                        onChange={(e) => setFormAddMeetLink(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <footer className="flex justify-end gap-2 border-t border-hairline pt-3 bg-surface">
+                <Button type="button" onClick={() => setAddModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  className="h-10 px-5 font-bold text-xs bg-accent text-accent-ink hover:bg-accent/90 rounded-xl"
+                >
+                  Create Request
+                </Button>
+              </footer>
+            </form>
           </div>
         </div>
       )}

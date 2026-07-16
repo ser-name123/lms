@@ -89,12 +89,17 @@ model User {
   timezone     String?
   avatarUrl    String?
   lastLoginAt  DateTime?
+  phone        String?
+  gender       String?
+  joiningDate  DateTime?
+  salary       Decimal?   @db.Decimal(10, 2)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   studentProfile StudentProfile?
   teacherProfile TeacherProfile?
   refreshTokens  RefreshToken[]
+  leaveRequests  LeaveRequest[]
 
   @@index([role, status])
 }
@@ -286,6 +291,7 @@ model Invoice {
   issuedAt  DateTime       @default(now())
   dueAt     DateTime?
   paidAt    DateTime?
+  notes     String?
 
   payments Payment[]
 
@@ -310,3 +316,165 @@ model SystemSetting {
   key   String @id
   value String
 }
+
+enum CandidateStatus {
+  NEW
+  SHORTLISTED
+  REJECTED
+  WAITING
+  APPROVED
+}
+
+model Candidate {
+  id             String          @id @default(uuid())
+  firstName      String
+  lastName       String
+  email          String          @unique
+  phone          String?
+  position       String          // e.g. "Quran Teacher", "Arabic Teacher"
+  resumeUrl      String?
+  status         CandidateStatus @default(NEW)
+  notes          String?
+  appliedAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([status])
+}
+
+enum LeaveType {
+  SICK
+  CASUAL
+  ANNUAL
+  UNPAID
+  OTHER
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+model LeaveRequest {
+  id           String             @id @default(uuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType    LeaveType          @default(CASUAL)
+  startDate    DateTime
+  endDate      DateTime
+  reason       String
+  status       LeaveRequestStatus @default(PENDING)
+  adminNotes   String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── Trial Classes ────────────────────────────────────────────────────────────
+
+enum TrialStatus {
+  PENDING
+  SCHEDULED
+  COMPLETED
+}
+
+model TrialClass {
+  id                 String      @id @default(uuid())
+  name               String
+  email              String
+  mobile             String
+  country            String
+  course             String
+  prefTeacherGender  String      // "Male", "Female", "Any"
+  status             TrialStatus @default(PENDING)
+  age                Int
+  goals              String?
+  scheduledTime      String?     // Date or text string
+  assignedTeacher    String?
+  meetLink           String?
+  pronunciationGrade String?
+  fluencyGrade       String?
+  focusGrade         String?
+  recommendedLevel   String?
+  evaluationNotes    String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   // "COURSE", "ASSIGNMENT", "ASSESSMENT", "KNOWLEDGEBASE"
+  createdAt DateTime @default(now())
+
+  @@unique([name, type])
+}
+
+model LmsCourse {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  title         String
+  category      String
+  level         String
+  studentsCount Int      @default(0)
+  teachersCount Int      @default(0)
+  status        String   @default("Active")
+  createdAt     String
+  description   String
+}
+
+model LmsAssignment {
+  id               String   @id @default(uuid())
+  title            String
+  courseCode       String
+  courseTitle      String
+  category         String
+  studentsCount    Int      @default(0)
+  submissionsCount Int      @default(0)
+  evaluatedCount   Int      @default(0)
+  dueDate          String
+  status           String   @default("Active")
+  description      String
+}
+
+model LmsAssessment {
+  id             String   @id @default(uuid())
+  title          String
+  courseCode     String
+  courseTitle    String
+  questionsCount Int
+  duration       Int
+  category       String
+  avgScore       Float    @default(0)
+  status         String   @default("Active")
+  description    String
+}
+
+model LmsKnowledgebase {
+  id          String   @id @default(uuid())
+  title       String
+  courseCode  String
+  courseTitle String
+  format      String
+  sizeMB      Float
+  category    String
+  downloads   Int      @default(0)
+  status      String   @default("Active")
+  description String
+}
+
+model LmsPackage {
+  id          String   @id @default(uuid())
+  title       String
+  price       Float
+  billing     String
+  level       String
+  courses     String[]
+  features    String[]
+  status      String   @default("Active")
+  description String
+}
+
+

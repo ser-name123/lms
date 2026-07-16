@@ -14,6 +14,7 @@ import {
   X,
   Shield
 } from "lucide-react";
+import Swal from "sweetalert2";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,12 @@ export default function ProfilePage() {
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
 
+  // Academy Billing Details States
+  const [academyName, setAcademyName] = useState("Al Furqan Academy");
+  const [academyAddress, setAcademyAddress] = useState("102 Quran Study Blvd, Ste 400\nChicago, IL 60612, US");
+  const [academyPhone, setAcademyPhone] = useState("+1 (312) 555-0199");
+  const [academyEmail, setAcademyEmail] = useState("billing@alfurqan.com");
+
   // Custom Image Cropper States
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
 
@@ -87,6 +94,34 @@ export default function ProfilePage() {
     } finally {
       setLoadingAdmins(false);
     }
+  };
+
+  // Load Academy Billing settings from localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedName = localStorage.getItem("academy_billing_name");
+      const savedAddress = localStorage.getItem("academy_billing_address");
+      const savedPhone = localStorage.getItem("academy_billing_phone");
+      const savedEmail = localStorage.getItem("academy_billing_email");
+      if (savedName) setAcademyName(savedName);
+      if (savedAddress) setAcademyAddress(savedAddress);
+      if (savedPhone) setAcademyPhone(savedPhone);
+      if (savedEmail) setAcademyEmail(savedEmail);
+    }
+  }, []);
+
+  const handleSaveAcademySettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    localStorage.setItem("academy_billing_name", academyName);
+    localStorage.setItem("academy_billing_address", academyAddress);
+    localStorage.setItem("academy_billing_phone", academyPhone);
+    localStorage.setItem("academy_billing_email", academyEmail);
+    Swal.fire({
+      title: "Settings Saved",
+      text: "Academy billing details updated successfully!",
+      icon: "success",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+    });
   };
 
   useEffect(() => {
@@ -321,7 +356,7 @@ export default function ProfilePage() {
     <>
       <Topbar title="Admin Profile" subtitle="Manage your profile information, password, and system integrations" />
       
-      <div className="animate-fade-up p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+      <div className="animate-fade-up p-4 sm:p-6 space-y-6">
         
         {/* Status Toast Alert */}
         {status && (
@@ -425,7 +460,8 @@ export default function ProfilePage() {
           <div className="md:col-span-3 space-y-6">
             
             {activeTab === "profile" && (
-              <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden animate-fade-in">
+              <>
+                <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden animate-fade-in">
                 <div className="border-b border-hairline px-6 py-5">
                   <h2 className="font-bold text-lg text-ink">Personal Information</h2>
                   <p className="text-xs text-ink-3 mt-0.5">Edit your administrative display profiles and email coordinates</p>
@@ -476,7 +512,69 @@ export default function ProfilePage() {
                   </div>
                 </form>
               </div>
-            )}
+
+              {/* Academy Billing and Contact settings */}
+              <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden animate-fade-in mt-6">
+                <div className="border-b border-hairline px-6 py-5">
+                  <h2 className="font-bold text-lg text-ink">Academy Billing & Contact Settings</h2>
+                  <p className="text-xs text-ink-3 mt-0.5">Manage the academy metadata, phone numbers, and addresses shown on student PDF invoices</p>
+                </div>
+                <form onSubmit={handleSaveAcademySettings} className="p-6 space-y-5">
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Academy / Organization Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={academyName}
+                      onChange={(e) => setAcademyName(e.target.value)}
+                      className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Contact Phone Number</label>
+                      <input
+                        type="text"
+                        required
+                        value={academyPhone}
+                        onChange={(e) => setAcademyPhone(e.target.value)}
+                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Billing Email Address</label>
+                      <input
+                        type="email"
+                        required
+                        value={academyEmail}
+                        onChange={(e) => setAcademyEmail(e.target.value)}
+                        className="h-11.5 w-full rounded-xl border border-hairline bg-surface px-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent focus:shadow-[0_0_0_4px_rgba(19,60,85,0.12)] transition-all duration-200"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-ink-3">Billing Address (Shows on Invoice PDF)</label>
+                    <textarea
+                      required
+                      value={academyAddress}
+                      onChange={(e) => setAcademyAddress(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-hairline bg-surface p-4 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent resize-none transition-all duration-200"
+                    />
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      className="h-11 justify-center rounded-xl bg-gradient-to-r from-accent to-[#386FA4] font-bold text-white px-6 hover:shadow-[0_8px_20px_rgba(19,60,85,0.25)] transition-all duration-300"
+                    >
+                      Save Academy Billing Settings
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </>
+          )}
 
             {activeTab === "security" && (
               <div className="space-y-6">

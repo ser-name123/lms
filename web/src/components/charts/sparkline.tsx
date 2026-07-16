@@ -2,7 +2,7 @@
 
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 
-import type { Trend } from "@/lib/mock-data";
+import type { Trend } from "@/lib/api";
 
 /* Decoration-free micro-trend for stat tiles: no axes, no tooltip — the tile's
    value and delta carry the meaning, the shape only carries direction. */

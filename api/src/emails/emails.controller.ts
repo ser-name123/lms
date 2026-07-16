@@ -1,4 +1,11 @@
-import { Controller, Post, Get, UseInterceptors, UploadedFile, Body } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  UseInterceptors,
+  UploadedFile,
+  Body,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmailsService } from './emails.service';
 import { ApiConsumes, ApiBody, ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -17,7 +24,10 @@ export class EmailsController {
       properties: {
         to: { type: 'string', example: 'student@example.com' },
         subject: { type: 'string', example: 'Class update' },
-        message: { type: 'string', example: 'Hello, your next class is scheduled.' },
+        message: {
+          type: 'string',
+          example: 'Hello, your next class is scheduled.',
+        },
         attachment: { type: 'string', format: 'binary' },
       },
       required: ['to', 'subject', 'message'],
@@ -36,14 +46,7 @@ export class EmailsController {
   @Get('smtp-config')
   @ApiOperation({ summary: 'Get outgoing SMTP configuration' })
   async getSmtpConfig() {
-    const config = await this.emailsService.getSmtpConfig();
-    return config || {
-      host: 'smtp.gmail.com',
-      port: 587,
-      user: 'objectsquarerajan@gmail.com',
-      from: 'objectsquarerajan@gmail.com',
-      secure: false,
-    };
+    return this.emailsService.getSmtpConfig();
   }
 
   @Post('smtp-config')

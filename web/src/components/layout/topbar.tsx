@@ -10,7 +10,7 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
   const { theme, toggleTheme, setMobileNav } = useUI();
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-hairline bg-surface/80 px-4 backdrop-blur-md sm:px-6">
+    <header className="sticky top-0 z-30 flex min-h-[4.5rem] py-3 items-center gap-3 border-b border-hairline bg-surface/80 px-4 backdrop-blur-md sm:px-6">
       <button
         onClick={() => setMobileNav(true)}
         className="grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 lg:hidden"
@@ -19,9 +19,9 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
         <Menu className="size-5" />
       </button>
 
-      <div className="min-w-0">
-        <h1 className="truncate text-base font-semibold tracking-tight text-ink">{title}</h1>
-        {subtitle && <p className="truncate text-xs text-ink-3">{subtitle}</p>}
+      <div className="min-w-0 flex flex-col justify-center">
+        <span className="block truncate text-base font-extrabold tracking-tight text-ink leading-tight">{title}</span>
+        {subtitle && <span className="block truncate text-[11px] text-ink-3 font-semibold mt-1 leading-normal">{subtitle}</span>}
       </div>
 
       {/* Search */}

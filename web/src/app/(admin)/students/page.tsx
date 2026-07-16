@@ -52,7 +52,8 @@ import {
 import { cn, initials } from "@/lib/utils";
 
 const FILTERS = ["All", "Active", "Trial", "Pending", "Paused"] as const;
-const PER_PAGE = 8;
+// Default items per page limit config
+const DEFAULT_PER_PAGE = 20;
 
 const statusTone: Record<string, Tone> = {
   Active: "good",
@@ -71,6 +72,7 @@ export default function StudentsPage() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_PER_PAGE);
   
   // Dynamic API states
   const [students, setStudents] = useState<StudentProfile[]>([]);
@@ -190,7 +192,7 @@ export default function StudentsPage() {
     try {
       const data = await fetchStudents({
         page,
-        limit: PER_PAGE,
+        limit,
         search: query,
         status: filter === "All" ? undefined : filter.toUpperCase(),
         courseId: selectedCourse || undefined,
@@ -215,6 +217,7 @@ export default function StudentsPage() {
     loadStudents();
   }, [
     page, 
+    limit,
     query, 
     filter, 
     selectedCourse, 
@@ -379,6 +382,62 @@ export default function StudentsPage() {
       });
     } finally {
       setManageBusy(false);
+    }
+  };
+
+  // Block / Unblock Student Profile Account
+  const handleToggleBlockStudent = async (student: StudentProfile) => {
+    const isBlocked = student.user.status === "INACTIVE";
+    const newStatus = isBlocked ? "ACTIVE" : "INACTIVE";
+    const actionLabel = isBlocked ? "unblock" : "block";
+
+    const result = await Swal.fire({
+      title: `${isBlocked ? "Unblock" : "Block"} Student?`,
+      text: `Are you sure you want to ${actionLabel} ${student.user.firstName} ${student.user.lastName}? ${isBlocked ? "They will be allowed to log back in." : "They will be force logged out and prevented from signing in."}`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: `Yes, ${actionLabel}`,
+      cancelButtonText: "Cancel",
+      customClass: {
+        popup: "rounded-3xl border border-hairline bg-surface text-ink",
+        title: "text-lg font-bold text-ink",
+        htmlContainer: "text-sm text-ink-3",
+        confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer",
+        cancelButton: "bg-surface-3 text-ink-2 px-5 py-2.5 rounded-xl font-bold hover:bg-surface-4 transition-all ml-3 cursor-pointer"
+      },
+      buttonsStyling: false
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await updateStudent(student.id, { status: newStatus });
+        Swal.fire({
+          title: isBlocked ? "Unblocked!" : "Blocked!",
+          text: `Student account has been ${isBlocked ? "unblocked" : "blocked"} successfully.`,
+          icon: "success",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            htmlContainer: "text-sm text-ink-3",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+        loadStudents();
+      } catch (err) {
+        Swal.fire({
+          title: "Failed!",
+          text: err instanceof ApiError ? err.message : `Could not ${actionLabel} student.`,
+          icon: "error",
+          customClass: {
+            popup: "rounded-3xl border border-hairline bg-surface text-ink",
+            title: "text-lg font-bold text-ink",
+            htmlContainer: "text-sm text-ink-3",
+            confirmButton: "bg-accent text-white px-5 py-2.5 rounded-xl font-bold hover:shadow-lg transition-all cursor-pointer"
+          },
+          buttonsStyling: false
+        });
+      }
     }
   };
 
@@ -847,7 +906,7 @@ export default function StudentsPage() {
         )}
 
         <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto min-h-[300px]">
             {loading ? (
               <div className="flex justify-center items-center py-16 text-sm font-bold text-ink-3">
                 <Loader2 className="size-5 animate-spin mr-2" />
@@ -985,6 +1044,16 @@ export default function StudentsPage() {
                                     <Laptop className="size-3.5 text-accent" />
                                     Login History
                                   </button>
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      handleToggleBlockStudent(row);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <Lock className="size-3.5 text-accent" />
+                                    {row.user.status === "INACTIVE" ? "Unblock Student" : "Block Student"}
+                                  </button>
                                   <div className="border-t border-hairline my-1" />
                                   <button
                                     onClick={() => {
@@ -1021,11 +1090,30 @@ export default function StudentsPage() {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between border-t border-hairline px-5 py-3">
-            <p className="text-xs text-ink-3 font-medium">
-              Showing <span className="tnum font-bold text-ink-2">{students.length}</span> of{" "}
-              <span className="tnum font-bold text-ink-2">{total}</span> students
-            </p>
+          <div className="flex items-center justify-between border-t border-hairline px-5 py-3 flex-wrap gap-4 select-none">
+            <div className="flex items-center gap-4 flex-wrap">
+              <p className="text-xs text-ink-3 font-medium">
+                Showing <span className="tnum font-bold text-ink-2">{students.length}</span> of{" "}
+                <span className="tnum font-bold text-ink-2">{total}</span> students
+              </p>
+              
+              <div className="flex items-center gap-1.5 text-xs text-ink-3 font-semibold">
+                <span>Show:</span>
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="h-7 rounded-lg border border-hairline bg-surface px-1.5 text-xs font-bold text-ink-2 focus:outline-none cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"

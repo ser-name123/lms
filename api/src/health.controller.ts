@@ -14,6 +14,10 @@ export class HealthController {
   @ApiOperation({ summary: 'Liveness plus a database round trip' })
   async check() {
     await this.prisma.$queryRaw`SELECT 1`;
-    return { status: 'ok', database: 'up', timestamp: new Date().toISOString() };
+    return {
+      status: 'ok',
+      database: 'up',
+      timestamp: new Date().toISOString(),
+    };
   }
 }
