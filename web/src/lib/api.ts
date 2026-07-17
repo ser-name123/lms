@@ -1152,3 +1152,96 @@ export const uploadTeacherAvatar = async (file: File): Promise<{ url: string; fi
 
 
 
+
+// ─── Student registration (public self-signup + admin approval) ─────────────
+
+export type RegistrationStatus = "PENDING" | "APPROVED" | "REJECTED" | "NEEDS_INFO";
+
+export interface StudentRegistration {
+  id: string;
+  registrantType: string;
+  firstName: string;
+  middleName: string | null;
+  lastName: string;
+  gender: string | null;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  country: string | null;
+  state: string | null;
+  city: string | null;
+  address: string | null;
+  studentEmail: string;
+  studentMobile: string | null;
+  parentEmail: string | null;
+  parentMobile: string | null;
+  emergencyContact: string | null;
+  whatsappNumber: string | null;
+  currentSchool: string | null;
+  board: string | null;
+  className: string | null;
+  grade: string | null;
+  subjects: string | null;
+  language: string | null;
+  courseCode: string | null;
+  courseTitle: string | null;
+  batch: string | null;
+  preferredTiming: string | null;
+  learningMode: string | null;
+  fatherName: string | null;
+  motherName: string | null;
+  occupation: string | null;
+  guardianRelation: string | null;
+  guardianAddress: string | null;
+  guardianEmail: string | null;
+  guardianPhone: string | null;
+  username: string | null;
+  status: RegistrationStatus;
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  studentProfileId: string | null;
+  admissionNumber: string | null;
+  rollNumber: string | null;
+  approvedStudentCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegistrationStats {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  needsInfo: number;
+}
+
+// Public — no auth token required (the endpoint is @Public on the API).
+export const createRegistration = (dto: Record<string, unknown>) =>
+  api<{ id: string; status: RegistrationStatus; message: string }>("/registrations", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+export const fetchRegistrations = (params: {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: string;
+}) => {
+  const q: Record<string, string> = { page: String(params.page), limit: String(params.limit) };
+  if (params.search) q.search = params.search;
+  if (params.status && params.status !== "All") q.status = params.status;
+  return api<{ items: StudentRegistration[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(
+    `/registrations?${new URLSearchParams(q).toString()}`,
+  );
+};
+
+export const fetchRegistrationStats = () => api<RegistrationStats>("/registrations/stats");
+
+export const reviewRegistration = (
+  id: string,
+  dto: { status: "APPROVED" | "REJECTED" | "NEEDS_INFO"; notes?: string },
+) =>
+  api<StudentRegistration>(`/registrations/${id}/review`, {
+    method: "PATCH",
+    body: JSON.stringify(dto),
+  });

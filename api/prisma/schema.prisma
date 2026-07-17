@@ -613,4 +613,86 @@ model ChatMessage {
   teacher    TeacherProfile? @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 }
 
+// ─── Public student self-registration ────────────────────────────────────────
+
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_INFO
+}
+
+// A prospective student's self-submitted application. Sits in PENDING until an
+// admin reviews it; on approval a real User + StudentProfile is created and the
+// generated identifiers below are filled in.
+model StudentRegistration {
+  id             String             @id @default(uuid())
+  registrantType String             @default("STUDENT") // "STUDENT" or "PARENT"
+
+  // Basic details
+  firstName      String
+  middleName     String?
+  lastName       String
+  gender         String?
+  dateOfBirth    DateTime?
+  nationality    String?
+  country        String?
+  state          String?
+  city           String?
+  address        String?
+
+  // Contact details
+  studentEmail   String
+  studentMobile  String?
+  parentEmail    String?
+  parentMobile   String?
+  emergencyContact String?
+  whatsappNumber String?
+
+  // Education details
+  currentSchool  String?
+  board          String?
+  className      String?
+  grade          String?
+  subjects       String?
+  language       String?
+
+  // Course selection + learning mode
+  courseCode     String?  // references LmsCourse.code
+  courseTitle    String?
+  batch          String?  // Morning / Evening / Weekend
+  preferredTiming String?
+  learningMode   String?  // ONLINE / OFFLINE / HYBRID
+
+  // Guardian details
+  fatherName      String?
+  motherName      String?
+  occupation      String?
+  guardianRelation String?
+  guardianAddress String?
+  guardianEmail   String?
+  guardianPhone   String?
+
+  // Account credentials chosen by the applicant
+  username       String?
+  passwordHash   String
+
+  // Review workflow
+  status         RegistrationStatus @default(PENDING)
+  reviewNotes    String?
+  reviewedAt     DateTime?
+  reviewedById   String?
+
+  // Filled in on approval
+  studentProfileId String?
+  admissionNumber  String?
+  rollNumber       String?
+  approvedStudentCode String?
+
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([status])
+}
+
 

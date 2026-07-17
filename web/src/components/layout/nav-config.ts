@@ -12,6 +12,7 @@ import {
   Library,
   Package,
   MessageCircle,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -45,6 +46,7 @@ export const navGroups: NavGroup[] = [
     label: "Academics",
     items: [
       { label: "Trial Classes", href: "/evaluation", icon: ClipboardList },
+      { label: "Admissions", href: "/registrations", icon: UserPlus },
       { label: "Students", href: "/students", icon: Users },
       { label: "Teachers", href: "/teachers", icon: GraduationCap },
       {

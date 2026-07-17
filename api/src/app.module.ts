@@ -24,6 +24,7 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { StudentPortalModule } from './student-portal/student-portal.module';
 import { ChatModule } from './chat/chat.module';
 import { TeacherPortalModule } from './teacher-portal/teacher-portal.module';
+import { RegistrationsModule } from './registrations/registrations.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { TeacherPortalModule } from './teacher-portal/teacher-portal.module';
     StudentPortalModule,
     ChatModule,
     TeacherPortalModule,
+    RegistrationsModule,
   ],
   controllers: [HealthController],
   providers: [
