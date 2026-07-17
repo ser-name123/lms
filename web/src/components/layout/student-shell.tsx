@@ -19,6 +19,7 @@ import {
   MessageCircle,
   ClipboardCheck,
   FileCheck2,
+  TrendingUp,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -33,8 +34,10 @@ const studentNavItems = [
   { label: "Live Meetings", href: "/student/meetings", icon: Video },
   { label: "Homework & Grades", href: "/student/assignments", icon: ClipboardList },
   { label: "Assessments", href: "/student/assessments", icon: FileCheck2 },
+  { label: "My Progress", href: "/student/progress", icon: TrendingUp },
   { label: "Knowledge Base", href: "/student/knowledgebase", icon: Library },
   { label: "Billing & Invoices", href: "/student/invoices", icon: Receipt },
+  { label: "Fees & Payments", href: "/student/fees", icon: Receipt },
   { label: "Support Chat", href: "/student/chat", icon: MessageCircle },
   { label: "My Profile", href: "/student/profile", icon: User },
 ];

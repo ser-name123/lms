@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Loader2, User, GraduationCap, Users2, CalendarDays, TrendingUp,
   FileText, MessageSquare, ClipboardList, History, ShieldCheck, StickyNote,
-  BookOpen, Snowflake, Play, Send, Plus, Save, Heart, ArrowLeftRight, Award, Upload, Check, X,
+  BookOpen, Snowflake, Play, Send, Plus, Save, Heart, ArrowLeftRight, Award, Upload, Check, X, Star,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -27,8 +27,17 @@ import {
   fetchCoaches, assignStudentCoach, fetchStudentParentView,
   fetchStudentTransfers, requestStudentTransfer, approveTransfer, rejectTransfer,
   issueStudentCertificate, uploadStudentDocument,
-  type StudentManagement, type StudentActivityRow, type StudentTransferRow,
+  fetchProgressStudentDetail,
+  fetchCoachReviews, createCoachReview, fetchCoachGoals, createCoachGoal, updateCoachGoal,
+  fetchCoachMeetings, createCoachMeeting, updateCoachMeeting, resolveCoachRisk, escalateCoachRisk,
+  type StudentManagement, type StudentActivityRow, type StudentTransferRow, type ProgressStatus,
 } from "@/lib/api";
+import { useAuth } from "@/store/auth";
+
+const PROGRESS_STATUS_LABEL: Record<ProgressStatus, string> = {
+  EXCELLENT: "Excellent", GOOD: "Good", AVERAGE: "Average",
+  NEEDS_ATTENTION: "Needs Attention", CRITICAL: "Critical", NO_DATA: "No Data",
+};
 
 const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
 const inp = "h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent";
@@ -79,6 +88,7 @@ const TABS = [
   { key: "assignments", label: "Assignments", icon: ClipboardList },
   { key: "assessments", label: "Assessments", icon: ClipboardList },
   { key: "performance", label: "Performance", icon: TrendingUp },
+  { key: "progress", label: "Progress", icon: TrendingUp },
   { key: "documents", label: "Documents", icon: FileText },
   { key: "notes", label: "Notes", icon: StickyNote },
   { key: "communication", label: "Communication", icon: MessageSquare },
@@ -172,6 +182,7 @@ export default function StudentHubPage() {
         {tab === "assignments" && <AssignmentsTab studentId={id} />}
         {tab === "assessments" && <AssessmentsTab studentId={id} />}
         {tab === "performance" && <PerformanceTab studentId={id} />}
+        {tab === "progress" && <ProgressTab studentId={id} />}
         {tab === "documents" && <DocumentsTab studentId={id} />}
         {tab === "notes" && <NotesTab studentId={id} />}
         {tab === "communication" && <CommunicationTab studentId={id} />}
@@ -826,6 +837,357 @@ function TransfersTab({ studentId }: { studentId: string }) {
           </div>
         )}
       </SectionCard>
+    </div>
+  );
+}
+
+// ── Progress (read-only academic progress detail) ─────────────────────────────
+function ProgressTab({ studentId }: { studentId: string }) {
+  const { user } = useAuth();
+  const [d, setD] = useState<Awaited<ReturnType<typeof fetchProgressStudentDetail>> | null>(null);
+  useEffect(() => { fetchProgressStudentDetail(studentId).then(setD).catch(() => undefined); }, [studentId]);
+  if (!d) return <Loading />;
+
+  const sc = d.scores ?? {};
+  const subjects: any[] = d.subjects ?? [];
+  const byType: any[] = d.assessments?.byType ?? [];
+  const skills: any[] = d.skills ?? [];
+  const badges: any[] = d.badges ?? [];
+  const goals: any[] = (d.goals ?? []).filter((g: any) => g.status !== "COMPLETED" && g.status !== "CANCELLED");
+  const risks: any[] = (d.riskFlags ?? []).filter((r: any) => r.status === "OPEN" || r.resolvedAt == null);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Overall" value={`${sc.overall ?? 0}%`} />
+        <Kpi label="Status" value={PROGRESS_STATUS_LABEL[sc.status as ProgressStatus] ?? sc.status ?? "—"} />
+        <Kpi label="Attendance" value={sc.attendancePct != null ? `${sc.attendancePct}%` : "—"} />
+        <Kpi label="Assignments" value={sc.assignmentPct != null ? `${sc.assignmentPct}%` : "—"} />
+        <Kpi label="Assessments" value={sc.assessmentPct != null ? `${sc.assessmentPct}%` : "—"} />
+        <Kpi label="Feedback" value={sc.feedbackScore != null ? `${sc.feedbackScore}%` : "—"} />
+      </div>
+
+      {risks.length > 0 && (
+        <SectionCard title="Open Risk Flags">
+          <div className="space-y-2">
+            {risks.map((r, i) => (
+              <div key={r.id ?? i} className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+                <Badge tone="warning">{r.level || "AT RISK"}</Badge>
+                <div className="min-w-0">
+                  <p className="text-ink">{r.note || r.reason || "Flagged at risk"}</p>
+                  <p className="mt-0.5 text-[11px] text-ink-3">{r.actorName ? `${r.actorName} · ` : ""}{fmtT(r.createdAt)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionCard title="Subject-wise Progress">
+          {subjects.length === 0 ? <Empty /> : (
+            <div className="space-y-3">{subjects.map((s) => <PBar key={s.subject} label={s.subject} value={s.progress} />)}</div>
+          )}
+        </SectionCard>
+        <SectionCard title="Assessment Performance (by type)">
+          {byType.length === 0 ? <Empty /> : (
+            <div className="space-y-3">{byType.map((t) => <PBar key={t.type} label={`${t.type} (${t.count})`} value={t.avg} />)}</div>
+          )}
+        </SectionCard>
+        <SectionCard title="Skills">
+          {skills.length === 0 ? <Empty /> : (
+            <div className="space-y-3">{skills.map((s) => <PBar key={s.skillId} label={s.name} value={s.percentage} />)}</div>
+          )}
+        </SectionCard>
+        <SectionCard title="Active Goals">
+          {goals.length === 0 ? <Empty text="No active goals" /> : (
+            <div className="space-y-3">
+              {goals.map((g) => (
+                <div key={g.id} className="rounded-xl border border-hairline bg-surface-2 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-ink">{g.title}</p>
+                    <span className="text-[11px] font-semibold text-ink-3">{g.deadline ? `Due ${fmt(g.deadline)}` : ""}</span>
+                  </div>
+                  <div className="mt-2"><PBar label={`${g.current ?? 0} / ${g.target ?? 0}`} value={g.target ? Math.min(100, Math.round(((g.current ?? 0) / g.target) * 100)) : 0} /></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      </div>
+
+      <SectionCard title="Badges">
+        {badges.length === 0 ? <Empty text="No badges yet" /> : (
+          <div className="flex flex-wrap gap-2">
+            {badges.map((b) => (
+              <span key={b.code} className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface-2 px-2.5 py-1 text-xs font-bold text-ink-2">
+                <Award className="size-3.5 text-accent" /> {b.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {["ADMIN", "ACADEMIC_COACH"].includes(user?.role ?? "") && <CoachPanel studentId={studentId} />}
+    </div>
+  );
+}
+
+// ── Academic Coach actions panel (ADMIN / ACADEMIC_COACH only) ────────────────
+const REC_OPTIONS: { value: string; label: string }[] = [
+  { value: "CONTINUE_BATCH", label: "Continue Current Batch" },
+  { value: "MOVE_ADVANCED", label: "Move to Advanced Batch" },
+  { value: "EXTRA_PRACTICE", label: "Provide Extra Practice" },
+  { value: "PARENT_MEETING", label: "Schedule Parent Meeting" },
+];
+const REC_LABEL: Record<string, string> = Object.fromEntries(REC_OPTIONS.map((o) => [o.value, o.label]));
+const RATING_FIELDS: { key: string; label: string }[] = [
+  { key: "academic", label: "Academic" },
+  { key: "attendance", label: "Attendance" },
+  { key: "behavior", label: "Behavior" },
+  { key: "participation", label: "Participation" },
+  { key: "learningSpeed", label: "Learning Speed" },
+  { key: "homework", label: "Homework" },
+  { key: "communication", label: "Communication" },
+];
+
+function StarRating({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline bg-surface-2 px-2.5 py-1.5">
+      <span className="text-[11px] font-bold uppercase tracking-wide text-ink-3">{label}</span>
+      <div className="flex items-center gap-0.5">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" onClick={() => onChange(n)} aria-label={`${label}: ${n} star${n > 1 ? "s" : ""}`} className="p-0.5 leading-none">
+            <Star className={`size-4 ${n <= value ? "fill-amber-400 text-amber-400" : "text-ink-3"}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CoachPanel({ studentId }: { studentId: string }) {
+  return (
+    <div className="space-y-4 rounded-2xl border border-accent/25 bg-accent/[0.03] p-4">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="size-4 text-accent" />
+        <h3 className="text-sm font-black text-ink">Coach Actions</h3>
+        <Badge tone="accent">Coach / Admin</Badge>
+      </div>
+      <MonthlyReviewSection studentId={studentId} />
+      <LearningGoalsSection studentId={studentId} />
+      <ParentMeetingsSection studentId={studentId} />
+      <RiskFlagsSection studentId={studentId} />
+    </div>
+  );
+}
+
+function MonthlyReviewSection({ studentId }: { studentId: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [recommendation, setRecommendation] = useState("CONTINUE_BATCH");
+  const [remarks, setRemarks] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => fetchCoachReviews(studentId).then(setRows).catch(() => undefined);
+  useEffect(() => { load(); }, [studentId]);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await createCoachReview({ studentId, ...ratings, recommendation, remarks: remarks.trim() || undefined });
+      setRatings({}); setRemarks(""); setRecommendation("CONTINUE_BATCH");
+      load(); toast("Review saved");
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  return (
+    <SectionCard title="Monthly Review" action={<button onClick={save} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-bold text-white disabled:opacity-50">{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save Review</button>}>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {RATING_FIELDS.map((f) => (
+          <StarRating key={f.key} label={f.label} value={ratings[f.key] ?? 0} onChange={(v) => setRatings((r) => ({ ...r, [f.key]: v }))} />
+        ))}
+      </div>
+      <label className="mt-4 block">
+        <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-ink-3">Recommendation</span>
+        <select value={recommendation} onChange={(e) => setRecommendation(e.target.value)} className={inp}>
+          {REC_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
+      <label className="mt-3 block">
+        <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-ink-3">Remarks</span>
+        <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Overall remarks for this month…" className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
+      </label>
+      <div className="mt-4 space-y-2">
+        {rows.length === 0 ? <Empty text="No reviews yet" /> : rows.map((r) => (
+          <div key={r.id} className="rounded-xl border border-hairline bg-surface-2 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-bold text-ink">{r.monthLabel || fmt(r.periodStart) || fmt(r.createdAt)}</p>
+              {r.recommendation && <Badge tone="accent">{REC_LABEL[r.recommendation] ?? r.recommendation}</Badge>}
+            </div>
+            <p className="mt-1 text-xs text-ink-3">{RATING_FIELDS.filter((f) => r[f.key] != null).map((f) => `${f.label} ${r[f.key]}★`).join(" · ") || "No ratings"}</p>
+            {r.remarks && <p className="mt-1 text-sm text-ink">{r.remarks}</p>}
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+function LearningGoalsSection({ studentId }: { studentId: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [form, setForm] = useState({ title: "", targetPct: "100", deadline: "" });
+  const load = () => fetchCoachGoals(studentId).then(setRows).catch(() => undefined);
+  useEffect(() => { load(); }, [studentId]);
+  const add = async () => {
+    if (!form.title.trim()) return toast("Title required", "error");
+    try {
+      await createCoachGoal({ studentId, title: form.title.trim(), targetPct: form.targetPct ? Number(form.targetPct) : undefined, deadline: form.deadline || undefined });
+      setForm({ title: "", targetPct: "100", deadline: "" }); load(); toast("Goal added");
+    } catch (e) { fail(e); }
+  };
+  const setCurrent = async (id: string, currentPct: number) => {
+    try { await updateCoachGoal(id, { currentPct }); load(); } catch (e) { fail(e); }
+  };
+  const setStatus = async (id: string, status: string) => {
+    try { await updateCoachGoal(id, { status }); load(); toast("Goal updated"); } catch (e) { fail(e); }
+  };
+  return (
+    <SectionCard title="Learning Goals" action={<button onClick={add} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-bold text-white"><Plus className="size-3.5" /> Add Goal</button>}>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <FieldIn label="Title" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
+        <FieldIn label="Target %" type="number" value={form.targetPct} onChange={(v) => setForm({ ...form, targetPct: v })} />
+        <FieldIn label="Deadline" type="date" value={form.deadline} onChange={(v) => setForm({ ...form, deadline: v })} />
+      </div>
+      <div className="mt-4 space-y-2">
+        {rows.length === 0 ? <Empty text="No goals yet" /> : rows.map((g) => {
+          const cur = g.currentPct ?? 0; const tgt = g.targetPct ?? 100;
+          const pct = tgt ? Math.min(100, Math.round((cur / tgt) * 100)) : 0;
+          return (
+            <div key={g.id} className="rounded-xl border border-hairline bg-surface-2 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-bold text-ink">{g.title}</p>
+                {g.deadline && <span className="text-[11px] font-semibold text-ink-3">Due {fmt(g.deadline)}</span>}
+              </div>
+              <div className="mt-2"><PBar label={`${cur} / ${tgt}`} value={pct} /></div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-3">Current %
+                  <input type="number" min={0} max={100} defaultValue={cur} onBlur={(e) => { const v = Number(e.target.value); if (!Number.isNaN(v) && v !== cur) setCurrent(g.id, v); }} className="h-8 w-20 rounded-lg border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent" />
+                </label>
+                <select value={g.status || "ACTIVE"} onChange={(e) => setStatus(g.id, e.target.value)} className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink focus:outline-none focus:border-accent">
+                  {["ACTIVE", "COMPLETED", "CANCELLED"].map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button onClick={() => setStatus(g.id, "COMPLETED")} className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-xs font-bold text-emerald-600 hover:bg-surface"><Check className="size-3.5" /> Mark Achieved</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
+function ParentMeetingsSection({ studentId }: { studentId: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [form, setForm] = useState({ scheduledAt: "", agenda: "" });
+  const load = () => fetchCoachMeetings(studentId).then(setRows).catch(() => undefined);
+  useEffect(() => { load(); }, [studentId]);
+  const schedule = async () => {
+    if (!form.scheduledAt) return toast("Pick a date & time", "error");
+    try {
+      await createCoachMeeting({ studentId, scheduledAt: new Date(form.scheduledAt).toISOString(), agenda: form.agenda.trim() || undefined });
+      setForm({ scheduledAt: "", agenda: "" }); load(); toast("Meeting scheduled");
+    } catch (e) { fail(e); }
+  };
+  const complete = async (id: string) => { try { await updateCoachMeeting(id, { status: "COMPLETED" }); load(); toast("Marked completed"); } catch (e) { fail(e); } };
+  const saveNotes = async (id: string, notes: string) => { try { await updateCoachMeeting(id, { notes }); load(); toast("Notes saved"); } catch (e) { fail(e); } };
+  return (
+    <SectionCard title="Parent Meetings" action={<button onClick={schedule} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-bold text-white"><Plus className="size-3.5" /> Schedule</button>}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-ink-3">Date &amp; Time</span>
+          <input type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} className={inp} />
+        </label>
+        <FieldIn label="Agenda" value={form.agenda} onChange={(v) => setForm({ ...form, agenda: v })} />
+      </div>
+      <div className="mt-4 space-y-2">
+        {rows.length === 0 ? <Empty text="No meetings scheduled" /> : rows.map((m) => (
+          <MeetingRow key={m.id} m={m} onComplete={() => complete(m.id)} onSaveNotes={(n) => saveNotes(m.id, n)} />
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
+
+function MeetingRow({ m, onComplete, onSaveNotes }: { m: any; onComplete: () => void; onSaveNotes: (n: string) => void }) {
+  const [notes, setNotes] = useState<string>(m.notes ?? "");
+  return (
+    <div className="rounded-xl border border-hairline bg-surface-2 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-bold text-ink">{fmtT(m.scheduledAt)}</p>
+        <div className="flex items-center gap-2">
+          <Badge tone={m.status === "COMPLETED" ? "good" : m.status === "CANCELLED" ? "critical" : "warning"}>{m.status || "SCHEDULED"}</Badge>
+          {m.status !== "COMPLETED" && <button onClick={onComplete} className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-xs font-bold text-emerald-600 hover:bg-surface"><Check className="size-3.5" /> Mark Completed</button>}
+        </div>
+      </div>
+      {m.agenda && <p className="mt-1 text-xs text-ink-3">Agenda: {m.agenda}</p>}
+      {m.nextReviewAt && <p className="mt-0.5 text-[11px] text-ink-3">Next review: {fmtT(m.nextReviewAt)}</p>}
+      <div className="mt-2 flex items-start gap-2">
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Meeting notes…" className="w-full rounded-lg border border-hairline bg-surface px-2.5 py-1.5 text-xs text-ink focus:outline-none focus:border-accent" />
+        <button onClick={() => onSaveNotes(notes)} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-hairline px-2.5 text-xs font-bold text-ink-2 hover:bg-surface"><Save className="size-3.5" /> Save</button>
+      </div>
+    </div>
+  );
+}
+
+function RiskFlagsSection({ studentId }: { studentId: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const load = () => fetchProgressStudentDetail(studentId)
+    .then((d: any) => setRows((d?.riskFlags ?? []).filter((r: any) => r.status === "OPEN" || r.resolvedAt == null)))
+    .catch(() => undefined);
+  useEffect(() => { load(); }, [studentId]);
+  const resolve = async (id: string) => {
+    const r = await Swal.fire({ title: "Resolve risk flag?", input: "text", inputLabel: "Resolution note (optional)", showCancelButton: true, confirmButtonText: "Resolve", background: swalBg() });
+    if (!r.isConfirmed) return;
+    try { await resolveCoachRisk(id, r.value || undefined); load(); toast("Risk resolved"); } catch (e) { fail(e); }
+  };
+  const escalate = async (id: string) => {
+    const r = await Swal.fire({ title: "Escalate this risk?", text: "This raises the flag to admins/supervisors.", icon: "warning", showCancelButton: true, confirmButtonText: "Escalate", background: swalBg() });
+    if (!r.isConfirmed) return;
+    try { await escalateCoachRisk(id); load(); toast("Risk escalated"); } catch (e) { fail(e); }
+  };
+  return (
+    <SectionCard title="Risk Flags">
+      {rows.length === 0 ? <Empty text="No open risk flags" /> : (
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.id} className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+              <div className="flex min-w-0 items-start gap-2">
+                <Badge tone={r.level === "HIGH" || r.level === "CRITICAL" ? "critical" : "warning"}>{r.level || "AT RISK"}</Badge>
+                <div className="min-w-0">
+                  <p className="text-ink">{Array.isArray(r.reasons) ? r.reasons.join(", ") : (r.reasons || r.note || "Flagged at risk")}</p>
+                  <p className="mt-0.5 text-[11px] text-ink-3">{fmtT(r.createdAt)}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => resolve(r.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-xs font-bold text-emerald-600 hover:bg-surface"><Check className="size-3.5" /> Resolve</button>
+                <button onClick={() => escalate(r.id)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-xs font-bold text-red-500 hover:bg-surface"><Send className="size-3.5" /> Escalate</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function PBar({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="font-semibold text-ink-2">{label}</span>
+        <span className="font-bold text-ink">{value}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
+        <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, value)}%` }} />
+      </div>
     </div>
   );
 }

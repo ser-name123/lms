@@ -20,6 +20,10 @@ import {
   Briefcase,
   UserSearch,
   CalendarOff,
+  BadgePercent,
+  Undo2,
+  SlidersHorizontal,
+  PiggyBank,
   type LucideIcon,
 } from "lucide-react";
 
@@ -58,6 +62,7 @@ export const navGroups: NavGroup[] = [
         icon: Users,
         children: [
           { label: "All Students", href: "/students", icon: Users },
+          { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
           { label: "Student Analytics", href: "/students/analytics", icon: TrendingUp },
           { label: "Admission", href: "/registrations", icon: UserPlus },
         ],
@@ -99,9 +104,29 @@ export const navGroups: NavGroup[] = [
   {
     label: "Finance",
     items: [
-      { label: "Invoice", href: "/invoices", icon: Receipt },
-      { label: "Salary and Wages", href: "/payouts", icon: Wallet },
+      { label: "Finance Dashboard", href: "/finance", icon: PiggyBank },
+      {
+        label: "Billing",
+        icon: Receipt,
+        children: [
+          { label: "Fee Plans", href: "/finance/fee-plans", icon: Package },
+          { label: "Invoices", href: "/finance/invoices", icon: Receipt },
+          { label: "Discounts", href: "/finance/discounts", icon: BadgePercent },
+          { label: "Scholarships", href: "/finance/scholarships", icon: GraduationCap },
+          { label: "Refunds", href: "/finance/refunds", icon: Undo2 },
+        ],
+      },
+      {
+        label: "Payroll",
+        icon: Wallet,
+        children: [
+          { label: "Salary and Wages", href: "/payouts", icon: Wallet },
+          { label: "Payroll Config", href: "/finance/payroll", icon: SlidersHorizontal },
+        ],
+      },
       { label: "Expenses", href: "/expenses", icon: FileText },
+      { label: "Legacy Invoices", href: "/invoices", icon: Receipt },
+      { label: "Reports", href: "/finance/reports", icon: FileText },
     ],
   },
 ];

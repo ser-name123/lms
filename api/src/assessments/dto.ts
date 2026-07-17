@@ -90,6 +90,7 @@ export class CreateAssessmentDto {
   @IsOptional() @IsString() chapter?: string;
   @IsOptional() @IsString() topic?: string;
   @IsOptional() @IsString() category?: string;
+  @IsOptional() @IsString() skillId?: string;
   @IsOptional() @IsIn(ASSESSMENT_TYPES as unknown as string[]) type?: string;
   @IsOptional() @IsString() instructions?: string;
 

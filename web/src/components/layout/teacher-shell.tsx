@@ -20,6 +20,7 @@ import {
   CalendarClock,
   ClipboardCheck,
   FileCheck2,
+  TrendingUp,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -35,9 +36,11 @@ const teacherNavItems = [
   { label: "Live Classes", href: "/teacher/live-class", icon: Radio },
   { label: "Live Meetings", href: "/teacher/meetings", icon: Video },
   { label: "My Students", href: "/teacher/students", icon: Users },
+  { label: "Student Progress", href: "/teacher/progress", icon: TrendingUp },
   { label: "Assignments", href: "/teacher/assignments", icon: ClipboardList },
   { label: "Assessments", href: "/teacher/assessments", icon: FileCheck2 },
   { label: "Payout History", href: "/teacher/payouts", icon: Receipt },
+  { label: "My Payroll", href: "/teacher/payroll", icon: Receipt },
   { label: "Support Chat", href: "/teacher/chat", icon: MessageCircle },
   { label: "My Profile", href: "/teacher/profile", icon: User },
 ];

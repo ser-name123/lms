@@ -23,6 +23,7 @@ export class CreateAssignmentDto {
   @IsOptional() @IsString() subject?: string;
   @IsOptional() @IsString() chapter?: string;
   @IsOptional() @IsString() topic?: string;
+  @IsOptional() @IsString() skillId?: string;
   @IsOptional() @IsIn(['EASY', 'MEDIUM', 'HARD']) difficulty?: string;
   @IsOptional() @IsString() type?: string;
   @IsOptional() @IsString() dueAt?: string;

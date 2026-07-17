@@ -222,6 +222,7 @@ export class AssessmentsService implements OnModuleInit {
         title: dto.title, courseId: dto.courseId ?? null, batchId: dto.batchId ?? null,
         teacherId: teacherId ?? null, createdById: actor.id,
         subject: dto.subject, chapter: dto.chapter, topic: dto.topic, category: dto.category,
+        skillId: dto.skillId ?? null,
         type: dto.type ?? 'QUIZ', instructions: dto.instructions,
         durationMin: dto.durationMin ?? 60, totalMarks: dto.totalMarks ?? 100, passingMarks: dto.passingMarks ?? 40,
         attemptsAllowed: dto.attemptsAllowed ?? 1, questionOrder: dto.questionOrder ?? 'FIXED',

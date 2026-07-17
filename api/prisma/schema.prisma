@@ -97,8 +97,11 @@ enum SubmissionStatus {
 enum InvoiceStatus {
   DRAFT
   SENT
+  PENDING
+  PARTIALLY_PAID
   PAID
   OVERDUE
+  CANCELLED
   VOID
 }
 
@@ -107,6 +110,7 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   REFUNDED
+  CANCELLED
 }
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -136,6 +140,7 @@ model User {
   leaveRequests  LeaveRequest[]
   payouts        Payout[]
   notifications  Notification[]
+  payrollConfig  PayrollConfig?
 
   @@index([role, status])
 }
@@ -209,6 +214,8 @@ model StudentProfile {
   activities  StudentActivity[]
   transfers   StudentTransfer[]
   assessmentAttempts AssessmentAttempt[]
+  feeAssignments StudentFeeAssignment[]
+  scholarships   Scholarship[]
 }
 
 // A requested change (teacher / batch / course) that needs approval before it
@@ -539,6 +546,7 @@ model Assignment {
   subject       String?
   chapter       String?
   topic         String?
+  skillId       String?         // ProgressSkill link (feeds skill mastery %)
   difficulty    String?         // EASY / MEDIUM / HARD
   type          String?         // HOMEWORK / WORKSHEET / ESSAY / PROJECT / MCQ / CODING / ...
   instructions  String?
@@ -643,6 +651,7 @@ model Assessment {
   chapter       String?
   topic         String?
   category      String?
+  skillId       String?         // ProgressSkill link (feeds skill mastery %)
   type          String          @default("QUIZ") // QUIZ/WEEKLY_TEST/MONTHLY_TEST/UNIT_TEST/MID_TERM/FINAL_EXAM/ORAL_TEST/PRACTICE_TEST/MOCK_TEST
   instructions  String?
 
@@ -788,9 +797,39 @@ model Invoice {
   paidAt    DateTime?
   notes     String?
 
+  // ── Finance & Reporting: fee-plan billing + partial payment tracking ──
+  feePlanId     String?   // FeePlan this invoice was generated from (plain id)
+  assignmentId  String?   // StudentFeeAssignment that generated a recurring invoice
+  periodLabel   String?   // "March 2026" for recurring invoices
+  periodStart   DateTime?
+  periodEnd     DateTime?
+  subtotal      Decimal?  @db.Decimal(10, 2) // sum of items before discount + tax
+  discountAmount Decimal  @default(0) @db.Decimal(10, 2)
+  taxAmount     Decimal   @default(0) @db.Decimal(10, 2)
+  paidAmount    Decimal   @default(0) @db.Decimal(10, 2) // running total (partial payments)
+  discountId    String?   // applied Discount (plain id)
+  scholarshipId String?   // applied Scholarship (plain id)
+
   payments Payment[]
+  items    InvoiceItem[]
+  receipts Receipt[]
+  refunds  Refund[]
 
   @@index([status])
+  @@index([studentId])
+  @@index([assignmentId])
+}
+
+// A single fee line on an invoice (Course Fee, Admission Fee, ...).
+model InvoiceItem {
+  id        String           @id @default(uuid())
+  invoiceId String
+  invoice   Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  type      FeeComponentType @default(OTHER)
+  label     String
+  amount    Decimal          @db.Decimal(10, 2)
+
+  @@index([invoiceId])
 }
 
 model Payment {
@@ -804,7 +843,34 @@ model Payment {
   paidAt      DateTime?
   createdAt   DateTime      @default(now())
 
+  // ── Finance & Reporting: payment method + receipt link ──
+  method       String?  // UPI / BANK_TRANSFER / CARD / RAZORPAY / STRIPE / CASH
+  reference    String?  // txn reference the admin records
+  receivedById String?  // staff user id who recorded the payment
+  notes        String?
+  receipt      Receipt?
+
   @@index([invoiceId])
+  @@index([status])
+}
+
+// A payment receipt (first-class, numbered, e-mailable/downloadable).
+model Receipt {
+  id        String   @id @default(uuid())
+  number    String   @unique // RCPT-2026-000001
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paymentId String?  @unique
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  studentId String?
+  amount    Decimal  @db.Decimal(10, 2)
+  currency  String   @default("USD")
+  method    String?
+  notes     String?
+  issuedAt  DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([studentId])
 }
 
 model SystemSetting {
@@ -1041,6 +1107,13 @@ model Payout {
   notes              String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
+
+  // ── Finance & Reporting: payslip breakdown ──
+  payslipNo     String?  @unique // PSL-2026-000001 (set when a payslip is issued)
+  payrollModel  String?          // FIXED / PER_CLASS / PER_HOUR / PER_STUDENT / HYBRID
+  classesCount  Int?
+  hoursCount    Float?
+  studentsCount Int?
 
   @@index([userId])
   @@index([status])
@@ -1481,6 +1554,384 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+// ─── Student Progress Tracking ────────────────────────────────────────────────
+// Foreign keys are plain ids (resolved in the service), mirroring
+// StudentProfile.coachId — so the existing academic models stay untouched. The
+// raw-SQL migration adds DB-level FKs for cascade integrity where it matters.
+
+// A named skill within a course (English → Grammar, Vocabulary, ...). Graded
+// assignments/assessments link to a skill; the engine rolls them into a %.
+model ProgressSkill {
+  id        String   @id @default(uuid())
+  courseId  String
+  name      String
+  order     Int      @default(0)
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([courseId, name])
+  @@index([courseId])
+}
+
+// Cached per-student per-skill mastery %, recomputed by the progress engine.
+model StudentSkillProgress {
+  id         String   @id @default(uuid())
+  studentId  String
+  skillId    String
+  percentage Float    @default(0)
+  sampleSize Int      @default(0) // graded items that fed this figure
+  updatedAt  DateTime @updatedAt
+
+  @@unique([studentId, skillId])
+  @@index([studentId])
+}
+
+// Structured teacher feedback — per-class quick ★ ratings + weekly/monthly notes.
+model TeacherFeedback {
+  id             String   @id @default(uuid())
+  studentId      String
+  teacherId      String?
+  classSessionId String?
+  kind           String   @default("CLASS") // CLASS / WEEKLY / MONTHLY
+  participation  Int? // 1..5
+  homework       Int?
+  communication  Int?
+  understanding  Int?
+  behavior       Int?
+  remarks        String?
+  suggestions    String? // improvement tips
+  actorId        String?
+  actorName      String?
+  createdAt      DateTime @default(now())
+
+  @@index([studentId, kind])
+  @@index([studentId, createdAt])
+  @@index([teacherId])
+}
+
+// A learning goal set by the Academic Coach for a student.
+model LearningGoal {
+  id            String    @id @default(uuid())
+  studentId     String
+  title         String
+  description   String?
+  skillId       String?
+  currentPct    Int       @default(0)
+  targetPct     Int       @default(100)
+  deadline      DateTime?
+  status        String    @default("ACTIVE") // ACTIVE / ACHIEVED / MISSED / CANCELLED
+  createdById   String?
+  createdByName String?
+  achievedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([studentId, status])
+}
+
+// Academic Coach monthly review (one per student per period).
+model MonthlyReview {
+  id             String   @id @default(uuid())
+  studentId      String
+  coachId        String?
+  periodStart    DateTime
+  periodEnd      DateTime
+  monthLabel     String // "March 2026"
+  academic       Int? // 1..5
+  attendance     Int?
+  behavior       Int?
+  participation  Int?
+  learningSpeed  Int?
+  homework       Int?
+  communication  Int?
+  recommendation String? // CONTINUE_BATCH / MOVE_ADVANCED / EXTRA_PRACTICE / PARENT_MEETING
+  remarks        String?
+  actorId        String?
+  actorName      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([studentId, periodStart])
+  @@index([studentId])
+}
+
+// Badge catalogue. Auto-award rules live in the engine; criteria here is display.
+model Badge {
+  id          String   @id @default(uuid())
+  code        String   @unique // PERFECT_ATTENDANCE / ASSIGNMENT_CHAMPION / ...
+  name        String
+  description String?
+  icon        String?
+  tone        String? // good / accent / warning
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  awards StudentBadge[]
+}
+
+model StudentBadge {
+  id        String   @id @default(uuid())
+  studentId String
+  badgeId   String
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  awardedAt DateTime @default(now())
+  meta      Json?
+
+  @@unique([studentId, badgeId])
+  @@index([studentId])
+}
+
+// Risk flag raised by the engine when thresholds trip; coach is notified.
+model ProgressRiskFlag {
+  id            String    @id @default(uuid())
+  studentId     String
+  level         String    @default("AT_RISK") // AT_RISK / CRITICAL
+  reasons       String[]  @default([])
+  attendancePct Float?
+  assignmentPct Float?
+  assessmentPct Float?
+  status        String    @default("OPEN") // OPEN / ACKNOWLEDGED / RESOLVED
+  note          String?
+  resolvedById  String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([studentId, status])
+  @@index([status])
+}
+
+// Parent meeting scheduled/tracked by the Academic Coach.
+model ParentMeeting {
+  id           String    @id @default(uuid())
+  studentId    String
+  coachId      String?
+  scheduledAt  DateTime
+  status       String    @default("SCHEDULED") // SCHEDULED / COMPLETED / CANCELLED
+  agenda       String?
+  notes        String?
+  actionItems  Json? // [{ text, done }]
+  nextReviewAt DateTime?
+  actorId      String?
+  actorName    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([studentId, status])
+}
+
+// Monthly snapshot of computed progress — powers trend + timeline charts.
+model ProgressSnapshot {
+  id            String   @id @default(uuid())
+  studentId     String
+  periodStart   DateTime
+  periodEnd     DateTime
+  monthLabel    String
+  attendancePct Float    @default(0)
+  assignmentPct Float    @default(0)
+  assessmentPct Float    @default(0)
+  feedbackScore Float    @default(0)
+  coachScore    Float    @default(0)
+  overallScore  Float    @default(0)
+  statusLabel   String   @default("AVERAGE") // EXCELLENT / GOOD / AVERAGE / NEEDS_ATTENTION / CRITICAL
+  rank          Int?
+  createdAt     DateTime @default(now())
+
+  @@unique([studentId, periodStart])
+  @@index([studentId])
+}
+
+// ─── Finance & Reporting ──────────────────────────────────────────────────────
+// Extends the existing Invoice / Payment / Payout / Expense building blocks with
+// fee plans, discounts, scholarships, refunds, receipts and payroll config.
+// Foreign keys that would over-couple the academic models stay plain-id (resolved
+// in the service, like StudentProfile.coachId); the raw-SQL migration adds
+// DB-level FKs for cascade integrity where a relation is declared above.
+
+enum FeePlanCycle {
+  ONE_TIME
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+  CUSTOM
+}
+
+enum FeeComponentType {
+  ADMISSION
+  COURSE
+  REGISTRATION
+  MATERIAL
+  EXAMINATION
+  CERTIFICATE
+  OTHER
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum DiscountReason {
+  SCHOLARSHIP
+  SIBLING
+  PROMOTIONAL
+  STAFF
+  MANUAL
+}
+
+enum ScholarshipStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum PayrollModel {
+  FIXED
+  PER_CLASS
+  PER_HOUR
+  PER_STUDENT
+  HYBRID
+}
+
+// A reusable fee plan (Monthly / Quarterly / Yearly / Custom) with N components.
+model FeePlan {
+  id          String       @id @default(uuid())
+  name        String
+  cycle       FeePlanCycle @default(MONTHLY)
+  courseId    String?      // optional link to a course (plain id, resolved in service)
+  currency    String       @default("USD")
+  description String?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  components  FeePlanComponent[]
+  assignments StudentFeeAssignment[]
+
+  @@index([active])
+}
+
+model FeePlanComponent {
+  id     String           @id @default(uuid())
+  planId String
+  plan   FeePlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  type   FeeComponentType @default(COURSE)
+  label  String
+  amount Decimal          @db.Decimal(10, 2)
+
+  @@index([planId])
+}
+
+// Links a student to a recurring fee plan. The auto-generator reads active rows
+// whose nextRunAt is due and mints an invoice for the period.
+model StudentFeeAssignment {
+  id           String         @id @default(uuid())
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  planId       String
+  plan         FeePlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  startDate    DateTime       @default(now())
+  nextRunAt    DateTime?      // when the next recurring invoice is due (null = one-time/done)
+  active       Boolean        @default(true)
+  autoGenerate Boolean        @default(true)
+  discountId   String?        // default discount applied to generated invoices
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([studentId])
+  @@index([planId])
+  @@index([active])
+}
+
+// A reusable discount definition (percentage or fixed) applied to invoices.
+model Discount {
+  id          String         @id @default(uuid())
+  code        String?        @unique
+  name        String
+  type        DiscountType   @default(PERCENTAGE)
+  value       Decimal        @db.Decimal(10, 2)
+  reason      DiscountReason @default(PROMOTIONAL)
+  description String?
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([active])
+}
+
+// A scholarship request → review → approve → applied (becomes an invoice discount).
+model Scholarship {
+  id              String            @id @default(uuid())
+  studentId       String
+  student         StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name            String
+  type            DiscountType      @default(PERCENTAGE)
+  value           Decimal           @db.Decimal(10, 2)
+  reason          String?
+  status          ScholarshipStatus @default(REQUESTED)
+  requestedById   String?
+  requestedByName String?
+  reviewedById    String?
+  reviewedByName  String?
+  reviewNotes     String?
+  appliedAt       DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([studentId])
+  @@index([status])
+}
+
+// A refund request → approve → processed, with immutable history.
+model Refund {
+  id              String       @id @default(uuid())
+  invoiceId       String?
+  invoice         Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentId       String?
+  studentId       String?
+  amount          Decimal      @db.Decimal(10, 2)
+  currency        String       @default("USD")
+  reason          String
+  method          String?      // BANK_TRANSFER / UPI / CARD / CASH / ...
+  status          RefundStatus @default(REQUESTED)
+  requestedById   String?
+  requestedByName String?
+  approvedById    String?
+  approvedByName  String?
+  reviewNotes     String?
+  processedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([status])
+  @@index([studentId])
+}
+
+// How a teacher / staff member is paid. Drives payout bulk-generation.
+model PayrollConfig {
+  id             String       @id @default(uuid())
+  userId         String       @unique
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model          PayrollModel @default(FIXED)
+  baseSalary     Decimal?     @db.Decimal(10, 2)
+  perClassRate   Decimal?     @db.Decimal(10, 2)
+  perHourRate    Decimal?     @db.Decimal(10, 2)
+  perStudentRate Decimal?     @db.Decimal(10, 2)
+  standardBonus  Decimal      @default(0) @db.Decimal(10, 2)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 

@@ -32,6 +32,8 @@ import { TeacherManagementModule } from './teacher-management/teacher-management
 import { StudentManagementModule } from './student-management/student-management.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+import { ProgressModule } from './progress/progress.module';
+import { FinanceModule } from './finance/finance.module';
 
 @Module({
   imports: [
@@ -66,6 +68,8 @@ import { AssessmentsModule } from './assessments/assessments.module';
     StudentManagementModule,
     AssignmentsModule,
     AssessmentsModule,
+    ProgressModule,
+    FinanceModule,
   ],
   controllers: [HealthController],
   providers: [

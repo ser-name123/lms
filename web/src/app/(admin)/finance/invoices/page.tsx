@@ -1,0 +1,1042 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import {
+  Plus,
+  Search,
+  X,
+  Trash2,
+  Info,
+  Filter,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  RefreshCw,
+  Send,
+  Ban,
+  DollarSign,
+  Receipt,
+  FileText,
+  CreditCard,
+  Printer,
+  Clock,
+  CheckCircle2,
+  Wallet,
+  Tag
+} from "lucide-react";
+import Swal from "sweetalert2";
+
+import { Topbar } from "@/components/layout/topbar";
+import { Badge, type Tone } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/store/settings";
+import {
+  fetchFinanceInvoices,
+  fetchFinanceInvoice,
+  generateInvoice,
+  recordInvoicePayment,
+  sendInvoice,
+  cancelInvoice,
+  deleteFinanceInvoice,
+  fetchFeePlans,
+  fetchStudents,
+  fetchDiscounts,
+  type FinanceInvoice,
+  type FinanceInvoiceStatus,
+  type FeePlan,
+  type FeeComponentType,
+  ApiError
+} from "@/lib/api";
+
+// ─── Enum options / labels ──────────────────────────────────────────────────
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: "All", label: "All Status" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "SENT", label: "Sent" },
+  { value: "PENDING", label: "Pending" },
+  { value: "PARTIALLY_PAID", label: "Partially Paid" },
+  { value: "PAID", label: "Paid" },
+  { value: "OVERDUE", label: "Overdue" },
+  { value: "CANCELLED", label: "Cancelled" },
+  { value: "VOID", label: "Void" }
+];
+
+const statusTone: Record<FinanceInvoiceStatus, Tone> = {
+  DRAFT: "neutral",
+  SENT: "accent",
+  PENDING: "warning",
+  PARTIALLY_PAID: "warning",
+  PAID: "good",
+  OVERDUE: "critical",
+  CANCELLED: "neutral",
+  VOID: "neutral"
+};
+
+const statusLabel: Record<FinanceInvoiceStatus, string> = {
+  DRAFT: "Draft",
+  SENT: "Sent",
+  PENDING: "Pending",
+  PARTIALLY_PAID: "Partially Paid",
+  PAID: "Paid",
+  OVERDUE: "Overdue",
+  CANCELLED: "Cancelled",
+  VOID: "Void"
+};
+
+const PAYMENT_METHODS: { value: string; label: string }[] = [
+  { value: "UPI", label: "UPI" },
+  { value: "BANK_TRANSFER", label: "Bank Transfer" },
+  { value: "CARD", label: "Card" },
+  { value: "RAZORPAY", label: "Razorpay" },
+  { value: "STRIPE", label: "Stripe" },
+  { value: "CASH", label: "Cash" }
+];
+
+const COMPONENT_TYPES: FeeComponentType[] = [
+  "ADMISSION", "COURSE", "REGISTRATION", "MATERIAL", "EXAMINATION", "CERTIFICATE", "OTHER"
+];
+
+const money = (amount: number | null | undefined, currency: string) =>
+  `${currency} ${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+type LineItem = { type: FeeComponentType; label: string; amount: string };
+type Discount = { id: string; name?: string; label?: string; code?: string };
+const discountName = (d: Discount) => d.name || d.label || d.code || "Discount";
+const fullName = (inv: FinanceInvoice) =>
+  inv.student?.user ? `${inv.student.user.firstName} ${inv.student.user.lastName}` : "Custom Recipient";
+
+export default function FinanceInvoicesPage() {
+  const [invoices, setInvoices] = useState<FinanceInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const settings = useSettingsStore(s => s.settings);
+  const brandName = settings?.websiteName || "Al Furqan Academy";
+
+  // Filters + pagination
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [sortBy, setSortBy] = useState("date_desc");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
+  // Dropdown data
+  const [students, setStudents] = useState<{ id: string; name: string; email: string; code: string }[]>([]);
+  const [feePlans, setFeePlans] = useState<FeePlan[]>([]);
+  const [discounts, setDiscounts] = useState<Discount[]>([]);
+
+  // ─── Generate invoice modal ────────────────────────────────────────────────
+  const [showGenModal, setShowGenModal] = useState(false);
+  const [recipientOption, setRecipientOption] = useState<"student" | "custom">("student");
+  const [genStudentId, setGenStudentId] = useState("");
+  const [genCustomName, setGenCustomName] = useState("");
+  const [genCustomEmail, setGenCustomEmail] = useState("");
+  const [itemSource, setItemSource] = useState<"plan" | "manual">("plan");
+  const [genFeePlanId, setGenFeePlanId] = useState("");
+  const [genItems, setGenItems] = useState<LineItem[]>([{ type: "COURSE", label: "Course Fee", amount: "" }]);
+  const [genDiscountId, setGenDiscountId] = useState("");
+  const [genTaxPct, setGenTaxPct] = useState("");
+  const [genCurrency, setGenCurrency] = useState("INR");
+  const [genPeriodLabel, setGenPeriodLabel] = useState("");
+  const [genDueDate, setGenDueDate] = useState("");
+  const [genNotes, setGenNotes] = useState("");
+
+  // ─── Detail modal ──────────────────────────────────────────────────────────
+  const [showDetail, setShowDetail] = useState(false);
+  const [detailInvoice, setDetailInvoice] = useState<FinanceInvoice | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // ─── Record payment modal ──────────────────────────────────────────────────
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("UPI");
+  const [payReference, setPayReference] = useState("");
+  const [payNotes, setPayNotes] = useState("");
+
+  // ─── Loaders ───────────────────────────────────────────────────────────────
+  const loadInvoices = () => {
+    setLoading(true);
+    fetchFinanceInvoices({
+      page: currentPage,
+      limit: pageSize,
+      search: searchQuery || undefined,
+      status: statusFilter === "All" ? undefined : statusFilter,
+      sortBy
+    })
+      .then(res => {
+        setInvoices(res.items);
+        setTotalItems(res.meta.total);
+        setTotalPages(res.meta.totalPages);
+      })
+      .catch(err => console.error("Failed to load invoices", err))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadInvoices();
+  }, [currentPage, pageSize, searchQuery, statusFilter, sortBy]);
+
+  useEffect(() => {
+    fetchStudents({ page: 1, limit: 200 })
+      .then(res => setStudents((res.items || []).map(s => ({
+        id: s.id, name: `${s.user.firstName} ${s.user.lastName}`, email: s.user.email, code: s.studentCode
+      }))))
+      .catch(err => console.warn("Failed to load students", err));
+
+    fetchFeePlans({ page: 1, limit: 200, active: "true" })
+      .then(res => setFeePlans(res.items || []))
+      .catch(err => console.warn("Failed to load fee plans", err));
+
+    fetchDiscounts(undefined, "true")
+      .then(res => setDiscounts(res.items || []))
+      .catch(err => console.warn("Failed to load discounts", err));
+  }, []);
+
+  // ─── Stats strip computed from current list ────────────────────────────────
+  const stats = {
+    total: invoices.length,
+    paid: invoices.filter(i => i.status === "PAID").length,
+    pending: invoices.filter(i => ["SENT", "PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(i.status)).length,
+    overdue: invoices.filter(i => i.status === "OVERDUE").length,
+    outstanding: invoices.reduce((sum, i) => sum + Number(i.balance || 0), 0)
+  };
+  const listCurrency = invoices[0]?.currency || "INR";
+
+  // ─── Generate item editor helpers ──────────────────────────────────────────
+  const addItemRow = () => setGenItems(prev => [...prev, { type: "OTHER", label: "", amount: "" }]);
+  const removeItemRow = (idx: number) => setGenItems(prev => prev.filter((_, i) => i !== idx));
+  const updateItemRow = (idx: number, patch: Partial<LineItem>) =>
+    setGenItems(prev => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+
+  const genSubtotal = itemSource === "plan"
+    ? (feePlans.find(p => p.id === genFeePlanId)?.components.reduce((s, c) => s + Number(c.amount || 0), 0) || 0)
+    : genItems.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const genTaxAmount = genSubtotal * (Number(genTaxPct) || 0) / 100;
+  const genEstTotal = genSubtotal + genTaxAmount;
+
+  const openGenModal = () => {
+    setRecipientOption("student");
+    setGenStudentId(students[0]?.id || "");
+    setGenCustomName("");
+    setGenCustomEmail("");
+    setItemSource("plan");
+    setGenFeePlanId(feePlans[0]?.id || "");
+    setGenItems([{ type: "COURSE", label: "Course Fee", amount: "" }]);
+    setGenDiscountId("");
+    setGenTaxPct("");
+    setGenCurrency(feePlans[0]?.currency || "INR");
+    setGenPeriodLabel("");
+    setGenDueDate(new Date(Date.now() + 14 * 864e5).toISOString().split("T")[0]);
+    setGenNotes("");
+    setShowGenModal(true);
+  };
+
+  // Keep currency synced to selected fee plan when using plan mode.
+  useEffect(() => {
+    if (itemSource === "plan" && genFeePlanId) {
+      const p = feePlans.find(fp => fp.id === genFeePlanId);
+      if (p?.currency) setGenCurrency(p.currency);
+    }
+  }, [genFeePlanId, itemSource]);
+
+  const handleGenerate = (statusToSave: "DRAFT" | "SENT") => {
+    if (recipientOption === "student" && !genStudentId) {
+      Swal.fire({ title: "Student Required", text: "Please select a student recipient.", icon: "error" });
+      return;
+    }
+    if (recipientOption === "custom" && (!genCustomName.trim() || !genCustomEmail.trim())) {
+      Swal.fire({ title: "Recipient Required", text: "Please enter the recipient's name and email.", icon: "error" });
+      return;
+    }
+
+    let manualItems: { type: FeeComponentType; label: string; amount: number }[] | undefined;
+    if (itemSource === "manual") {
+      manualItems = genItems
+        .filter(c => c.label.trim() && Number(c.amount) > 0)
+        .map(c => ({ type: c.type, label: c.label.trim(), amount: Number(c.amount) }));
+      if (!manualItems.length) {
+        Swal.fire({ title: "No Line Items", text: "Add at least one line item with a label and amount.", icon: "error" });
+        return;
+      }
+    } else if (!genFeePlanId) {
+      Swal.fire({ title: "Fee Plan Required", text: "Please choose a fee plan to auto-fill items.", icon: "error" });
+      return;
+    }
+
+    const dto: Record<string, any> = {
+      currency: genCurrency.trim() || "INR",
+      discountId: genDiscountId || undefined,
+      taxPct: genTaxPct ? Number(genTaxPct) : undefined,
+      periodLabel: genPeriodLabel.trim() || undefined,
+      dueAt: genDueDate ? new Date(genDueDate).toISOString() : undefined,
+      notes: genNotes.trim() || undefined,
+      status: statusToSave
+    };
+    if (recipientOption === "student") dto.studentId = genStudentId;
+    else { dto.customName = genCustomName.trim(); dto.customEmail = genCustomEmail.trim(); }
+    if (itemSource === "plan") dto.feePlanId = genFeePlanId;
+    else dto.items = manualItems;
+
+    setActionLoading(true);
+    generateInvoice(dto)
+      .then(inv => {
+        setShowGenModal(false);
+        Swal.fire({
+          title: statusToSave === "SENT" ? "Invoice Sent" : "Draft Saved",
+          text: `Invoice ${inv.number} ${statusToSave === "SENT" ? "generated and sent" : "saved as draft"} successfully.`,
+          icon: "success",
+          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+        });
+        loadInvoices();
+      })
+      .catch(err => Swal.fire({ title: "Generate Failed", text: err instanceof ApiError ? err.message : "Failed to generate invoice.", icon: "error" }))
+      .finally(() => setActionLoading(false));
+  };
+
+  // ─── Detail drawer ─────────────────────────────────────────────────────────
+  const openDetail = (inv: FinanceInvoice) => {
+    setDetailInvoice(inv);
+    setShowDetail(true);
+    setDetailLoading(true);
+    fetchFinanceInvoice(inv.id)
+      .then(full => setDetailInvoice(full))
+      .catch(err => console.error("Failed to load invoice detail", err))
+      .finally(() => setDetailLoading(false));
+  };
+
+  const refreshDetail = (id: string) => {
+    fetchFinanceInvoice(id).then(setDetailInvoice).catch(() => {});
+  };
+
+  // ─── Record payment ────────────────────────────────────────────────────────
+  const openPayModal = (inv?: FinanceInvoice) => {
+    const target = inv || detailInvoice;
+    if (!target) return;
+    if (inv) setDetailInvoice(inv);
+    setPayAmount(String(target.balance ?? 0));
+    setPayMethod("UPI");
+    setPayReference(`TXN-${Math.floor(100000 + Math.random() * 900000)}`);
+    setPayNotes("");
+    setShowPayModal(true);
+  };
+
+  const showReceiptPrint = (invoice: FinanceInvoice, receipt: any, amount: number, method: string) => {
+    const currency = invoice.currency;
+    const recNo = receipt?.number || receipt?.id || `RCPT-${Math.floor(100000 + Math.random() * 900000)}`;
+    const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    Swal.fire({
+      title: `<span class="text-sm font-bold tracking-wider uppercase">Payment Receipt</span>`,
+      html: `
+        <div id="receipt-print-area" class="text-left bg-white text-zinc-950 p-6 rounded-xl border border-zinc-200 mt-3 font-sans">
+          <div class="flex justify-between items-start border-b pb-4 border-zinc-200 mb-4">
+            <div>
+              <h2 class="text-lg font-bold text-emerald-700" style="margin:0;">${brandName}</h2>
+              <p class="text-[11px] text-zinc-500 mt-1">Official Payment Receipt</p>
+            </div>
+            <div class="text-right">
+              <span class="inline-block text-[10px] font-bold px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 uppercase tracking-widest">PAID</span>
+              <p class="text-xs text-zinc-500 mt-2">${dateStr}</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-6 text-xs mb-4">
+            <div>
+              <p class="font-bold text-zinc-400 uppercase text-[10px] mb-1">Receipt No.</p>
+              <p class="font-mono font-bold text-zinc-800">${recNo}</p>
+            </div>
+            <div>
+              <p class="font-bold text-zinc-400 uppercase text-[10px] mb-1">Invoice No.</p>
+              <p class="font-mono font-bold text-zinc-800">${invoice.number}</p>
+            </div>
+            <div>
+              <p class="font-bold text-zinc-400 uppercase text-[10px] mb-1">Received From</p>
+              <p class="font-bold text-zinc-800">${fullName(invoice)}</p>
+            </div>
+            <div>
+              <p class="font-bold text-zinc-400 uppercase text-[10px] mb-1">Payment Method</p>
+              <p class="font-bold text-zinc-800">${method}</p>
+            </div>
+          </div>
+          <div class="flex justify-between items-center bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mt-4">
+            <span class="text-sm font-bold text-zinc-700">Amount Received</span>
+            <span class="text-lg font-extrabold text-emerald-700">${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
+          <p class="text-[10px] text-zinc-400 mt-4 leading-relaxed">This is a computer-generated receipt acknowledging the payment above against invoice ${invoice.number}. Thank you.</p>
+        </div>
+        <div class="flex justify-end gap-2 mt-4 text-xs font-semibold">
+          <button id="btn-print-receipt" class="h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1.5">Print Receipt</button>
+        </div>
+      `,
+      showConfirmButton: false,
+      showCloseButton: true,
+      width: "560px",
+      background: document.documentElement.classList.contains("dark") ? "#1f1f23" : "#ffffff",
+      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e",
+      didOpen: () => {
+        document.getElementById("btn-print-receipt")?.addEventListener("click", () => {
+          const content = document.getElementById("receipt-print-area")?.innerHTML;
+          const w = window.open("", "_blank");
+          if (w) {
+            w.document.write(`<html><head><title>Receipt ${recNo}</title><style>body{font-family:sans-serif;padding:40px;background:#fff;color:#000;}</style></head><body>${content}<script>window.onload=function(){window.print();window.close();}<\/script></body></html>`);
+            w.document.close();
+          }
+        });
+      }
+    });
+  };
+
+  const handleRecordPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailInvoice) return;
+    const amount = Number(payAmount);
+    if (!amount || amount <= 0) {
+      Swal.fire({ title: "Invalid Amount", text: "Please enter a valid payment amount.", icon: "error" });
+      return;
+    }
+    if (amount > Number(detailInvoice.balance || 0) + 0.001) {
+      Swal.fire({ title: "Amount Too High", text: `Payment cannot exceed the outstanding balance of ${money(detailInvoice.balance, detailInvoice.currency)}.`, icon: "error" });
+      return;
+    }
+
+    const methodLbl = PAYMENT_METHODS.find(m => m.value === payMethod)?.label || payMethod;
+    setActionLoading(true);
+    recordInvoicePayment(detailInvoice.id, {
+      amount,
+      method: payMethod,
+      reference: payReference.trim() || undefined,
+      paidAt: new Date().toISOString(),
+      notes: payNotes.trim() || undefined
+    })
+      .then(res => {
+        setShowPayModal(false);
+        const invoiceSnapshot = detailInvoice;
+        refreshDetail(detailInvoice.id);
+        loadInvoices();
+        // Show printable receipt (res may include receipt info).
+        showReceiptPrint(invoiceSnapshot, res?.receipt || res, amount, methodLbl);
+      })
+      .catch(err => Swal.fire({ title: "Payment Failed", text: err instanceof ApiError ? err.message : "Failed to record payment.", icon: "error" }))
+      .finally(() => setActionLoading(false));
+  };
+
+  // ─── Invoice actions ───────────────────────────────────────────────────────
+  const handleSend = (inv: FinanceInvoice) => {
+    Swal.fire({
+      title: "Send Invoice?",
+      text: `Mark invoice ${inv.number} as sent to ${fullName(inv)}?`,
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Send",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#386FA4",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+    }).then(result => {
+      if (result.isConfirmed) {
+        setActionLoading(true);
+        sendInvoice(inv.id)
+          .then(() => {
+            Swal.fire({ title: "Sent", text: `Invoice ${inv.number} marked as sent.`, icon: "success", background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff" });
+            loadInvoices();
+            if (detailInvoice?.id === inv.id) refreshDetail(inv.id);
+          })
+          .catch(err => Swal.fire({ title: "Send Failed", text: err instanceof ApiError ? err.message : "Failed to send invoice.", icon: "error" }))
+          .finally(() => setActionLoading(false));
+      }
+    });
+  };
+
+  const handleCancel = (inv: FinanceInvoice) => {
+    Swal.fire({
+      title: "Cancel Invoice?",
+      text: `Cancel invoice ${inv.number}? This marks it as cancelled and stops collection.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Cancel Invoice",
+      cancelButtonText: "Keep",
+      confirmButtonColor: "#f85a6b",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+    }).then(result => {
+      if (result.isConfirmed) {
+        setActionLoading(true);
+        cancelInvoice(inv.id)
+          .then(() => {
+            Swal.fire({ title: "Cancelled", text: `Invoice ${inv.number} cancelled.`, icon: "success", background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff" });
+            loadInvoices();
+            if (detailInvoice?.id === inv.id) refreshDetail(inv.id);
+          })
+          .catch(err => Swal.fire({ title: "Cancel Failed", text: err instanceof ApiError ? err.message : "Failed to cancel invoice.", icon: "error" }))
+          .finally(() => setActionLoading(false));
+      }
+    });
+  };
+
+  const handleDelete = (inv: FinanceInvoice) => {
+    Swal.fire({
+      title: "Delete Invoice?",
+      text: `Permanently delete invoice ${inv.number}? This cannot be undone.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Delete",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#f85a6b",
+      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
+    }).then(result => {
+      if (result.isConfirmed) {
+        setActionLoading(true);
+        deleteFinanceInvoice(inv.id)
+          .then(() => {
+            Swal.fire({ title: "Deleted", text: "Invoice removed successfully.", icon: "success", background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff" });
+            if (detailInvoice?.id === inv.id) setShowDetail(false);
+            loadInvoices();
+          })
+          .catch(err => Swal.fire({ title: "Delete Failed", text: err instanceof ApiError ? err.message : "Failed to delete invoice.", icon: "error" }))
+          .finally(() => setActionLoading(false));
+      }
+    });
+  };
+
+  return (
+    <>
+      <Topbar title="Invoices" subtitle="Generate, send, and collect payments on student fee invoices" />
+
+      <div className="animate-fade-up p-4 sm:p-6 space-y-6">
+
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-l-4 border-l-violet-500">
+            <CardBody className="flex items-center gap-4 py-5">
+              <span className="grid size-12 place-items-center rounded-xl bg-violet-500/10 text-violet-500"><FileText className="size-6" /></span>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-ink">{stats.total}</p>
+                <p className="text-xs font-semibold text-ink-3">Invoices (this page)</p>
+              </div>
+            </CardBody>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardBody className="flex items-center gap-4 py-5">
+              <span className="grid size-12 place-items-center rounded-xl bg-emerald-500/10 text-emerald-500"><CheckCircle2 className="size-6" /></span>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-ink">{stats.paid}</p>
+                <p className="text-xs font-semibold text-ink-3">Fully Paid</p>
+              </div>
+            </CardBody>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardBody className="flex items-center gap-4 py-5">
+              <span className="grid size-12 place-items-center rounded-xl bg-amber-500/10 text-amber-500"><Clock className="size-6" /></span>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-ink">{stats.pending}</p>
+                <p className="text-xs font-semibold text-ink-3">Awaiting Payment</p>
+              </div>
+            </CardBody>
+          </Card>
+          <Card className="border-l-4 border-l-rose-500">
+            <CardBody className="flex items-center gap-4 py-5">
+              <span className="grid size-12 place-items-center rounded-xl bg-rose-500/10 text-rose-500"><Wallet className="size-6" /></span>
+              <div>
+                <p className="text-xl font-bold tracking-tight text-ink">{money(stats.outstanding, listCurrency)}</p>
+                <p className="text-xs font-semibold text-ink-3">Outstanding Balance</p>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+
+        {/* Filters + actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-3" />
+            <input
+              type="text"
+              placeholder="Search invoice #, student, code..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              className="h-10 w-full rounded-xl border border-hairline bg-surface pl-10 pr-3 text-xs text-ink focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-ink-3">
+              <Filter className="size-3" /><span>Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs font-bold text-ink focus:outline-none cursor-pointer"
+              >
+                {STATUS_FILTERS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs font-bold text-ink-3">
+              <ArrowUpDown className="size-3" /><span>Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
+                className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs font-bold text-ink focus:outline-none cursor-pointer"
+              >
+                <option value="date_desc">Newest First</option>
+                <option value="date_asc">Oldest First</option>
+                <option value="amount_desc">Amount (High→Low)</option>
+                <option value="amount_asc">Amount (Low→High)</option>
+              </select>
+            </div>
+            <Button
+              variant="primary"
+              onClick={openGenModal}
+              className="hover:shadow-lg font-bold text-xs h-10 px-5 py-2.5 rounded-xl flex items-center gap-1.5"
+            >
+              <Plus className="size-4" /> Generate Invoice
+            </Button>
+          </div>
+        </div>
+
+        {/* Invoice table */}
+        <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
+          <div className="overflow-x-auto min-h-[300px]">
+            {loading ? (
+              <div className="flex justify-center items-center py-20 text-sm font-bold text-ink-3">
+                <Loader2 className="size-5 animate-spin mr-2 text-accent" /> Loading invoices...
+              </div>
+            ) : invoices.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-ink-3 gap-2">
+                <Receipt className="size-8 text-ink-3/40" />
+                <p className="font-bold text-sm">No invoices found.</p>
+                <p className="text-xs">Generate an invoice to start billing students.</p>
+                <Button variant="primary" onClick={openGenModal} className="mt-3 rounded-xl text-xs">
+                  <Plus className="size-4 mr-1.5" /> Generate Invoice
+                </Button>
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-hairline bg-surface-2/45 select-none text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">
+                    <th className="px-6 py-4">Invoice #</th>
+                    <th className="px-6 py-4">Student</th>
+                    <th className="px-6 py-4">Period</th>
+                    <th className="px-6 py-4 text-right">Total</th>
+                    <th className="px-6 py-4 text-right">Paid</th>
+                    <th className="px-6 py-4 text-right">Balance</th>
+                    <th className="px-6 py-4">Due</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {invoices.map(inv => {
+                    const canSend = inv.status === "DRAFT";
+                    const canPay = ["SENT", "PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(inv.status);
+                    const canCancel = !["PAID", "CANCELLED", "VOID"].includes(inv.status);
+                    return (
+                      <tr key={inv.id} className="hover:bg-surface-2/30 transition-colors">
+                        <td className="px-6 py-4 font-mono font-bold text-xs text-ink">{inv.number}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-semibold text-ink text-xs">{fullName(inv)}</div>
+                          <div className="text-[10px] text-ink-3 mt-0.5">{inv.student?.user?.email || ""}</div>
+                        </td>
+                        <td className="px-6 py-4 text-xs font-semibold text-ink-3">{inv.periodLabel || "—"}</td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-ink text-xs">{money(inv.amount, inv.currency)}</td>
+                        <td className="px-6 py-4 text-right font-mono text-xs text-emerald-600 dark:text-emerald-400 font-semibold">{money(inv.paidAmount, inv.currency)}</td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-xs text-ink">{money(inv.balance, inv.currency)}</td>
+                        <td className="px-6 py-4 text-xs font-semibold text-ink-3">
+                          {inv.dueAt ? new Date(inv.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                        </td>
+                        <td className="px-6 py-4"><Badge tone={statusTone[inv.status]}>{statusLabel[inv.status]}</Badge></td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button variant="ghost" size="icon" onClick={() => openDetail(inv)} className="rounded-lg text-ink-3 hover:text-ink hover:bg-surface-3 size-8" title="View details">
+                              <Info className="size-4.5" />
+                            </Button>
+                            {canPay && (
+                              <Button variant="ghost" size="icon" onClick={() => openPayModal(inv)} className="rounded-lg text-ink-3 hover:text-emerald-500 hover:bg-surface-3 size-8" title="Record payment">
+                                <DollarSign className="size-4" />
+                              </Button>
+                            )}
+                            {canSend && (
+                              <Button variant="ghost" size="icon" onClick={() => handleSend(inv)} className="rounded-lg text-ink-3 hover:text-accent hover:bg-surface-3 size-8" title="Send invoice">
+                                <Send className="size-4" />
+                              </Button>
+                            )}
+                            {canCancel && (
+                              <Button variant="ghost" size="icon" onClick={() => handleCancel(inv)} className="rounded-lg text-ink-3 hover:text-amber-500 hover:bg-surface-3 size-8" title="Cancel invoice">
+                                <Ban className="size-4" />
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" onClick={() => handleDelete(inv)} className="rounded-lg text-ink-3 hover:text-critical hover:bg-surface-3 size-8" title="Delete invoice">
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {invoices.length > 0 && (
+            <div className="flex items-center justify-between border-t border-hairline px-5 py-3.5 flex-wrap gap-4 select-none">
+              <div className="flex items-center gap-4 flex-wrap">
+                <p className="text-xs text-ink-3 font-medium">
+                  Showing <span className="font-bold text-ink-2">{invoices.length}</span> of{" "}
+                  <span className="font-bold text-ink-2">{totalItems}</span> invoices
+                </p>
+                <div className="flex items-center gap-1.5 text-xs text-ink-3 font-semibold">
+                  <span>Show:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                    className="h-7 rounded-lg border border-hairline bg-surface px-1.5 text-xs font-bold text-ink-2 focus:outline-none cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Button variant="ghost" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="h-8 rounded-lg text-ink-2 hover:bg-surface-3 px-3 py-1 font-bold text-xs">
+                  <ChevronLeft className="size-3.5 mr-1" /> Previous
+                </Button>
+                <span className="text-xs font-extrabold text-ink-2 px-3 py-1 bg-surface-3 rounded-lg">{currentPage} / {totalPages}</span>
+                <Button variant="ghost" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="h-8 rounded-lg text-ink-2 hover:bg-surface-3 px-3 py-1 font-bold text-xs">
+                  Next <ChevronRight className="size-3.5 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ─── MODAL: Generate Invoice ────────────────────────────────────────── */}
+      {showGenModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+          <div className="bg-surface border border-hairline rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-scale-up max-h-[95vh] overflow-y-auto">
+            <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30 sticky top-0 z-10">
+              <h3 className="font-bold text-ink text-sm flex items-center gap-2"><Receipt className="size-4.5 text-accent" /> Generate New Invoice</h3>
+              <button onClick={() => setShowGenModal(false)} className="size-8 flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface-3 rounded-full"><X className="size-4" /></button>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleGenerate("SENT"); }} className="p-6 space-y-4">
+              {/* Recipient */}
+              <div className="border border-hairline rounded-2xl p-4 space-y-3 bg-surface-2/30">
+                <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Recipient</span>
+                <div className="flex gap-4 text-xs font-semibold">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="rec" checked={recipientOption === "student"} onChange={() => setRecipientOption("student")} className="text-accent border-hairline size-3.5" />
+                    <span>Registered Student</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="rec" checked={recipientOption === "custom"} onChange={() => setRecipientOption("custom")} className="text-accent border-hairline size-3.5" />
+                    <span>Custom Recipient</span>
+                  </label>
+                </div>
+                {recipientOption === "student" ? (
+                  <select
+                    value={genStudentId}
+                    onChange={(e) => setGenStudentId(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
+                  >
+                    {students.length === 0 && <option value="">No students available</option>}
+                    {students.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+                  </select>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <input type="text" placeholder="Recipient name" value={genCustomName} onChange={(e) => setGenCustomName(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+                    <input type="email" placeholder="Recipient email" value={genCustomEmail} onChange={(e) => setGenCustomEmail(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+                  </div>
+                )}
+              </div>
+
+              {/* Items */}
+              <div className="border border-hairline rounded-2xl p-4 space-y-3 bg-surface-2/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Line Items</span>
+                  <div className="flex gap-3 text-xs font-semibold">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="src" checked={itemSource === "plan"} onChange={() => setItemSource("plan")} className="text-accent border-hairline size-3.5" />
+                      <span>From Fee Plan</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="src" checked={itemSource === "manual"} onChange={() => setItemSource("manual")} className="text-accent border-hairline size-3.5" />
+                      <span>Manual</span>
+                    </label>
+                  </div>
+                </div>
+
+                {itemSource === "plan" ? (
+                  <>
+                    <select
+                      value={genFeePlanId}
+                      onChange={(e) => setGenFeePlanId(e.target.value)}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
+                    >
+                      {feePlans.length === 0 && <option value="">No fee plans available</option>}
+                      {feePlans.map(p => <option key={p.id} value={p.id}>{p.name} ({p.currency} {p.components.reduce((s, c) => s + Number(c.amount || 0), 0).toLocaleString()})</option>)}
+                    </select>
+                    {genFeePlanId && (
+                      <div className="space-y-1 pt-1">
+                        {feePlans.find(p => p.id === genFeePlanId)?.components.map((c, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs text-ink-3">
+                            <span className="flex items-center gap-1.5"><span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline">{c.type}</span> {c.label}</span>
+                            <span className="font-bold text-ink">{money(Number(c.amount), genCurrency)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {genItems.map((c, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <select value={c.type} onChange={(e) => updateItemRow(idx, { type: e.target.value as FeeComponentType })} className="h-9 w-32 shrink-0 rounded-lg border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent cursor-pointer">
+                          {COMPONENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <input type="text" placeholder="Label" value={c.label} onChange={(e) => updateItemRow(idx, { label: e.target.value })} className="h-9 flex-1 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent" />
+                        <input type="number" min="0" step="0.01" placeholder="Amount" value={c.amount} onChange={(e) => updateItemRow(idx, { amount: e.target.value })} className="h-9 w-28 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold" />
+                        <button type="button" onClick={() => removeItemRow(idx)} disabled={genItems.length === 1} className="size-9 shrink-0 flex items-center justify-center rounded-lg text-ink-3 hover:text-critical hover:bg-surface-3 disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 className="size-4" /></button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={addItemRow} className="text-[10px] text-accent font-extrabold hover:underline uppercase flex items-center gap-0.5"><Plus className="size-3" /> Add Line Item</button>
+                  </>
+                )}
+              </div>
+
+              {/* Options */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1 flex items-center gap-1"><Tag className="size-3" /> Discount</label>
+                  <select value={genDiscountId} onChange={(e) => setGenDiscountId(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer">
+                    <option value="">No discount</option>
+                    {discounts.map(d => <option key={d.id} value={d.id}>{discountName(d)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Tax (%)</label>
+                  <input type="number" min="0" step="0.01" placeholder="e.g. 18" value={genTaxPct} onChange={(e) => setGenTaxPct(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Currency</label>
+                  <input type="text" value={genCurrency} onChange={(e) => setGenCurrency(e.target.value.toUpperCase())} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent uppercase" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Due Date</label>
+                  <input type="date" value={genDueDate} onChange={(e) => setGenDueDate(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Period Label (Optional)</label>
+                  <input type="text" placeholder="e.g. July 2026" value={genPeriodLabel} onChange={(e) => setGenPeriodLabel(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Notes (Optional)</label>
+                  <textarea value={genNotes} onChange={(e) => setGenNotes(e.target.value)} rows={2} placeholder="Any invoice notes..." className="w-full rounded-xl border border-hairline bg-surface p-3 text-xs text-ink focus:outline-none focus:border-accent resize-none" />
+                </div>
+              </div>
+
+              {/* Estimated total */}
+              <div className="bg-surface-2 border border-hairline rounded-2xl p-4 space-y-1.5 text-xs">
+                <div className="flex justify-between text-ink-3"><span>Subtotal</span><span className="font-semibold text-ink">{money(genSubtotal, genCurrency)}</span></div>
+                {Number(genTaxPct) > 0 && <div className="flex justify-between text-ink-3"><span>Tax ({genTaxPct}%)</span><span className="font-semibold text-ink">+{money(genTaxAmount, genCurrency)}</span></div>}
+                {genDiscountId && <div className="flex justify-between text-ink-3"><span>Discount</span><span className="font-semibold text-amber-600">applied</span></div>}
+                <div className="flex justify-between border-t border-hairline pt-2 mt-1 text-sm font-bold text-ink"><span>Estimated Total</span><span className="text-emerald-600 dark:text-emerald-400">{money(genEstTotal, genCurrency)}</span></div>
+                {genDiscountId && <p className="text-[10px] text-ink-3 pt-1">Final total reflects the selected discount after generation.</p>}
+              </div>
+
+              <div className="border-t border-hairline pt-4 flex justify-end gap-2.5">
+                <button type="button" onClick={() => setShowGenModal(false)} className="h-10 text-xs font-bold text-ink-2 bg-surface-2 hover:bg-surface-3 px-5 py-2.5 rounded-xl cursor-pointer">Cancel</button>
+                <button type="button" disabled={actionLoading} onClick={() => handleGenerate("DRAFT")} className="h-10 text-xs font-bold text-ink-2 bg-surface-3 hover:bg-surface-4 px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer">
+                  {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null} Save as Draft
+                </button>
+                <button type="submit" disabled={actionLoading} className="h-10 text-xs font-bold text-white bg-accent hover:opacity-90 hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer">
+                  {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Send className="size-3.5 mr-1.5" />} Generate & Send
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── DRAWER: Invoice Detail ─────────────────────────────────────────── */}
+      {showDetail && detailInvoice && (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs select-none flex justify-end">
+          <div className="absolute inset-0" onClick={() => setShowDetail(false)} />
+          <div className="relative bg-surface border-l border-hairline w-full max-w-lg h-full flex flex-col shadow-2xl animate-slide-left z-10">
+            <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30">
+              <div>
+                <h3 className="font-bold text-ink text-sm flex items-center gap-2"><Receipt className="size-4 text-accent" /> {detailInvoice.number}</h3>
+                <p className="text-[10px] text-ink-3 mt-0.5">{fullName(detailInvoice)} · {detailInvoice.student?.user?.email || detailInvoice.student?.studentCode || "custom recipient"}</p>
+              </div>
+              <button onClick={() => setShowDetail(false)} className="size-8 flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface-3 rounded-full"><X className="size-4.5" /></button>
+            </div>
+
+            <div className="p-6 flex-1 overflow-y-auto space-y-5">
+              <div className="flex items-center justify-between">
+                <Badge tone={statusTone[detailInvoice.status]}>{statusLabel[detailInvoice.status]}</Badge>
+                <span className="text-[10px] text-ink-3 font-semibold">
+                  Issued {new Date(detailInvoice.issuedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  {detailInvoice.dueAt ? ` · Due ${new Date(detailInvoice.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}
+                </span>
+              </div>
+
+              {detailLoading ? (
+                <div className="flex justify-center items-center py-10 text-xs font-bold text-ink-3">
+                  <Loader2 className="size-4 animate-spin mr-2 text-accent" /> Loading details...
+                </div>
+              ) : (
+                <>
+                  {/* Line items */}
+                  <div className="border border-hairline rounded-2xl overflow-hidden">
+                    <div className="bg-surface-2/40 px-4 py-2.5 text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Line Items</div>
+                    <div className="divide-y divide-hairline">
+                      {(detailInvoice.items || []).length === 0 ? (
+                        <div className="px-4 py-3 text-xs text-ink-3">No line items.</div>
+                      ) : detailInvoice.items!.map((it, i) => (
+                        <div key={it.id || i} className="flex items-center justify-between px-4 py-2.5 text-xs">
+                          <span className="text-ink-2 flex items-center gap-1.5"><span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline text-ink-3">{it.type}</span> {it.label}</span>
+                          <span className="font-bold text-ink">{money(it.amount, detailInvoice.currency)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Totals */}
+                  <div className="bg-surface-2 border border-hairline rounded-2xl p-4 space-y-1.5 text-xs">
+                    <div className="flex justify-between text-ink-3"><span>Subtotal</span><span className="font-semibold text-ink">{money(detailInvoice.subtotal ?? detailInvoice.amount, detailInvoice.currency)}</span></div>
+                    {Number(detailInvoice.discountAmount) > 0 && <div className="flex justify-between text-ink-3"><span>Discount</span><span className="font-semibold text-amber-600">-{money(detailInvoice.discountAmount, detailInvoice.currency)}</span></div>}
+                    {Number(detailInvoice.taxAmount) > 0 && <div className="flex justify-between text-ink-3"><span>Tax</span><span className="font-semibold text-ink">+{money(detailInvoice.taxAmount, detailInvoice.currency)}</span></div>}
+                    <div className="flex justify-between border-t border-hairline pt-2 text-sm font-bold text-ink"><span>Total</span><span>{money(detailInvoice.amount, detailInvoice.currency)}</span></div>
+                    <div className="flex justify-between text-ink-3"><span>Paid</span><span className="font-semibold text-emerald-600 dark:text-emerald-400">{money(detailInvoice.paidAmount, detailInvoice.currency)}</span></div>
+                    <div className="flex justify-between text-sm font-bold text-ink"><span>Balance Due</span><span className={cn(Number(detailInvoice.balance) > 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400")}>{money(detailInvoice.balance, detailInvoice.currency)}</span></div>
+                  </div>
+
+                  {/* Payment history */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Payment History</span>
+                    {(detailInvoice.payments || []).length === 0 ? (
+                      <p className="text-xs text-ink-3">No payments recorded yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {detailInvoice.payments!.map((p: any, i: number) => (
+                          <div key={p.id || i} className="flex items-center justify-between border border-hairline rounded-xl px-3.5 py-2.5 text-xs bg-surface-2/40">
+                            <div className="flex items-center gap-2">
+                              <CreditCard className="size-3.5 text-accent" />
+                              <div>
+                                <div className="font-bold text-ink">{money(p.amount, detailInvoice.currency)}</div>
+                                <div className="text-[10px] text-ink-3">{p.method || p.paymentMethod || "—"}{p.reference ? ` · ${p.reference}` : ""}</div>
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-ink-3 font-semibold">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Receipts */}
+                  {(detailInvoice.receipts || []).length > 0 && (
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Receipts</span>
+                      <div className="space-y-2">
+                        {detailInvoice.receipts!.map((r: any, i: number) => (
+                          <div key={r.id || i} className="flex items-center justify-between border border-hairline rounded-xl px-3.5 py-2.5 text-xs bg-surface-2/40">
+                            <span className="font-mono font-bold text-ink flex items-center gap-1.5"><FileText className="size-3.5 text-accent" /> {r.number || r.id}</span>
+                            <button
+                              onClick={() => showReceiptPrint(detailInvoice, r, Number(r.amount || 0), r.method || r.paymentMethod || "—")}
+                              className="text-[10px] text-accent font-extrabold hover:underline uppercase flex items-center gap-0.5"
+                            >
+                              <Printer className="size-3" /> Print
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {detailInvoice.notes && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Notes</span>
+                      <p className="text-xs text-ink-3 italic bg-surface-2 p-3 rounded-xl border border-hairline">{detailInvoice.notes}</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer actions */}
+            <div className="border-t border-hairline p-4 flex items-center gap-2 flex-wrap">
+              <Button onClick={() => handleDelete(detailInvoice)} className="bg-surface-3 hover:bg-surface-4 text-critical font-bold text-xs h-10 px-4 rounded-xl flex items-center gap-1 mr-auto cursor-pointer">
+                <Trash2 className="size-4" /> Delete
+              </Button>
+              {detailInvoice.status === "DRAFT" && (
+                <Button onClick={() => handleSend(detailInvoice)} className="bg-surface border border-hairline text-accent font-bold text-xs h-10 px-4 rounded-xl cursor-pointer flex items-center gap-1">
+                  <Send className="size-3.5" /> Send
+                </Button>
+              )}
+              {!["PAID", "CANCELLED", "VOID"].includes(detailInvoice.status) && (
+                <Button onClick={() => handleCancel(detailInvoice)} className="bg-surface border border-hairline text-amber-600 font-bold text-xs h-10 px-4 rounded-xl cursor-pointer flex items-center gap-1">
+                  <Ban className="size-3.5" /> Cancel
+                </Button>
+              )}
+              {["SENT", "PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(detailInvoice.status) && (
+                <Button onClick={() => openPayModal()} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs h-10 px-4 rounded-xl cursor-pointer flex items-center gap-1">
+                  <DollarSign className="size-3.5" /> Record Payment
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── MODAL: Record Payment ──────────────────────────────────────────── */}
+      {showPayModal && detailInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+          <div className="bg-surface border border-hairline rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-up">
+            <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30">
+              <h3 className="font-bold text-ink text-sm">Record Payment · {detailInvoice.number}</h3>
+              <button onClick={() => setShowPayModal(false)} className="size-8 flex items-center justify-center text-ink-3 hover:text-ink hover:bg-surface-3 rounded-full"><X className="size-4" /></button>
+            </div>
+
+            <form onSubmit={handleRecordPayment} className="p-6 space-y-4">
+              <div className="p-3.5 bg-emerald-500/5 border border-emerald-500/15 rounded-2xl flex items-center justify-between text-xs font-bold">
+                <span className="text-ink-2">Outstanding Balance</span>
+                <span className="text-emerald-500 text-sm font-extrabold">{money(detailInvoice.balance, detailInvoice.currency)}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Amount ({detailInvoice.currency})</label>
+                  <input type="number" min="0" step="0.01" required value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent font-semibold" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Method</label>
+                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer">
+                    {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Reference / Transaction ID</label>
+                <input type="text" value={payReference} onChange={(e) => setPayReference(e.target.value)} placeholder="e.g. TXN-123456" className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent font-mono" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Notes (Optional)</label>
+                <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={2} placeholder="Payment reference notes..." className="w-full rounded-xl border border-hairline bg-surface p-3 text-xs text-ink focus:outline-none focus:border-accent resize-none" />
+              </div>
+
+              <div className="border-t border-hairline pt-4 flex justify-end gap-2.5">
+                <button type="button" onClick={() => setShowPayModal(false)} className="h-10 text-xs font-bold text-ink-2 bg-surface-2 hover:bg-surface-3 px-5 py-2.5 rounded-xl cursor-pointer">Cancel</button>
+                <button type="submit" disabled={actionLoading} className="h-10 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 hover:shadow-lg px-5 py-2.5 rounded-xl flex items-center justify-center cursor-pointer">
+                  {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null} Record Payment
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

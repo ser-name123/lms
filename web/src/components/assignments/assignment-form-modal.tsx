@@ -7,6 +7,7 @@ import Swal from "sweetalert2";
 import { RichText } from "./rich-text";
 import {
   fetchAssignmentMeta, fetchTargetStudents, createAssignment, updateAssignment, assignmentLifecycle, uploadAssignmentFile,
+  fetchProgressSkills,
   type AssignmentDetail, type AssignmentAttachment, type RubricItem,
 } from "@/lib/api";
 
@@ -39,7 +40,9 @@ export function AssignmentFormModal({ editing, onClose, onSaved }: { editing: As
     lateAllowed: editing?.lateAllowed ?? true, latePenaltyPct: String(editing?.latePenaltyPct ?? 0),
     publishAt: editing?.publishAt ? editing.publishAt.slice(0, 16) : "", status: editing?.status && editing.status !== "PUBLISHED" ? editing.status : "DRAFT",
     targetType: editing?.targetType ?? "BATCH", maxFileSizeMb: editing?.maxFileSizeMb ? String(editing.maxFileSizeMb) : "",
+    skillId: (editing as { skillId?: string } | null)?.skillId ?? "",
   });
+  const [skills, setSkills] = useState<{ id: string; name: string }[]>([]);
   const [description, setDescription] = useState(editing?.description ?? "");
   const [instructions, setInstructions] = useState(editing?.instructions ?? "");
   const [attachments, setAttachments] = useState<AssignmentAttachment[]>(editing?.attachments ?? []);
@@ -53,6 +56,10 @@ export function AssignmentFormModal({ editing, onClose, onSaved }: { editing: As
   useEffect(() => {
     if (f.targetType === "SELECTED") fetchTargetStudents(f.courseId || undefined, f.batchId || undefined).then(setCandidates).catch(() => undefined);
   }, [f.targetType, f.courseId, f.batchId]);
+  useEffect(() => {
+    if (!f.courseId) { setSkills([]); return; }
+    fetchProgressSkills(f.courseId).then(setSkills).catch(() => setSkills([]));
+  }, [f.courseId]);
 
   const upload = async (file?: File) => { if (!file) return; setUploading(true); try { const a = await uploadAssignmentFile(file); setAttachments((x) => [...x, a]); } catch (e) { fail(e); } finally { setUploading(false); } };
   const quickGen = () => { const g = generateTemplate(f.type, f.topic, f.difficulty); setDescription(g.description); setInstructions(g.instructions); if (rubric.length === 0) setRubric(g.rubric); toast("Template generated — edit as needed"); };
@@ -71,6 +78,7 @@ export function AssignmentFormModal({ editing, onClose, onSaved }: { editing: As
       status: publish ? "PUBLISHED" : f.status, attachments, rubric,
       targetType: f.targetType, targetStudentIds: f.targetType === "SELECTED" ? selected : [],
       allowedFileTypes, maxFileSizeMb: f.maxFileSizeMb ? Number(f.maxFileSizeMb) : undefined,
+      skillId: f.skillId || undefined,
     };
     try {
       if (editing) { await updateAssignment(editing.id, dto); if (publish && editing.status !== "PUBLISHED") await assignmentLifecycle(editing.id, "publish"); }
@@ -91,10 +99,11 @@ export function AssignmentFormModal({ editing, onClose, onSaved }: { editing: As
         </div>
         <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
           <Field label="Title"><input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="e.g. English Grammar Worksheet 5" className={inp} /></Field>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Course"><select value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value })} className={inp}><option value="">Select…</option>{meta.courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></Field>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Course"><select value={f.courseId} onChange={(e) => setF({ ...f, courseId: e.target.value, skillId: "" })} className={inp}><option value="">Select…</option>{meta.courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></Field>
             <Field label="Batch (optional)"><select value={f.batchId} onChange={(e) => setF({ ...f, batchId: e.target.value })} className={inp}><option value="">Whole course</option>{meta.batches.map((b) => <option key={b.id} value={b.id}>{b.code} · {b.name}</option>)}</select></Field>
             <Field label="Type"><select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} className={inp}>{TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}</select></Field>
+            <Field label="Skill (optional)"><select value={f.skillId} onChange={(e) => setF({ ...f, skillId: e.target.value })} disabled={!f.courseId} className={inp}><option value="">{f.courseId ? "None" : "Select a course first"}</option>{skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-4">
             <Field label="Subject"><input value={f.subject} onChange={(e) => setF({ ...f, subject: e.target.value })} className={inp} /></Field>

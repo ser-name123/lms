@@ -18,6 +18,7 @@ import {
   MessageCircle,
   HelpCircle,
   ClipboardCheck,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 
@@ -178,6 +179,7 @@ export function Sidebar() {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { label: "Trial Classes", href: "/leads", icon: Sparkles },
     { label: "Manage Students", href: "/students", icon: Users },
+    { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
     {
       label: "Schedule",

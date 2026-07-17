@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   createAssessment, updateAssessment, getAssessment, listQuestions, fetchAssessmentMeta,
-  fetchAssessmentTargetStudents, ASSESSMENT_TYPES, type Question, type AssessmentDetail,
+  fetchAssessmentTargetStudents, fetchProgressSkills, ASSESSMENT_TYPES, type Question, type AssessmentDetail,
 } from "@/lib/api";
 
 const input = "h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent";
@@ -37,7 +37,9 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
     durationMin: 60, totalMarks: 100, passingMarks: 40, attemptsAllowed: 1, questionOrder: "FIXED",
     allowBack: true, showResultImmediately: false, negativeMarking: false, selectionMode: "MANUAL",
     startAt: "", endAt: "", targetType: "BATCH", certificateEnabled: false, certificateThreshold: 70, proctored: false,
+    skillId: "",
   });
+  const [skills, setSkills] = useState<{ id: string; name: string }[]>([]);
   const [rr, setRr] = useState({ easy: 0, medium: 0, hard: 0 });
   const [selectedQ, setSelectedQ] = useState<string[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
@@ -56,6 +58,7 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
           questionOrder: a.questionOrder, allowBack: a.allowBack, showResultImmediately: a.showResultImmediately,
           negativeMarking: a.negativeMarking, selectionMode: a.selectionMode, startAt: toLocalInput(a.startAt), endAt: toLocalInput(a.endAt),
           targetType: a.targetType, certificateEnabled: a.certificateEnabled, certificateThreshold: a.certificateThreshold, proctored: a.proctored ?? false,
+          skillId: (a as { skillId?: string }).skillId ?? "",
         });
         setSelectedQ(a.questionList.map((q) => q.id));
         setSelectedStudents(a.targetStudentIds ?? []);
@@ -63,7 +66,7 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
         setRr({ easy: r.easy ?? 0, medium: r.medium ?? 0, hard: r.hard ?? 0 });
       }).catch(() => {});
     } else {
-      setForm((f) => ({ ...f, title: "", courseId: "", batchId: "", subject: "" }));
+      setForm((f) => ({ ...f, title: "", courseId: "", batchId: "", subject: "", skillId: "" }));
       setSelectedQ([]); setSelectedStudents([]); setRr({ easy: 0, medium: 0, hard: 0 });
     }
   }, [open, assessmentId]);
@@ -71,6 +74,11 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
   useEffect(() => {
     if (form.targetType === "SELECTED") fetchAssessmentTargetStudents(form.courseId || undefined, form.batchId || undefined).then(setCandidates).catch(() => {});
   }, [form.targetType, form.courseId, form.batchId]);
+
+  useEffect(() => {
+    if (!form.courseId) { setSkills([]); return; }
+    fetchProgressSkills(form.courseId).then(setSkills).catch(() => setSkills([]));
+  }, [form.courseId]);
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -96,6 +104,7 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
       targetType: form.targetType, certificateEnabled: form.certificateEnabled, certificateThreshold: Number(form.certificateThreshold), proctored: form.proctored,
       startAt: form.startAt ? new Date(form.startAt).toISOString() : undefined,
       endAt: form.endAt ? new Date(form.endAt).toISOString() : undefined,
+      skillId: form.skillId || undefined,
     };
     if (form.selectionMode === "MANUAL") dto.questionIds = selectedQ;
     else dto.randomRules = { subject: form.subject || undefined, easy: rr.easy, medium: rr.medium, hard: rr.hard };
@@ -127,7 +136,7 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
             <div><label className={label}>Title *</label><input className={input} value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. English Weekly Test" /></div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div><label className={label}>Course</label>
-                <select className={input} value={form.courseId} onChange={(e) => set("courseId", e.target.value)}>
+                <select className={input} value={form.courseId} onChange={(e) => setForm((f) => ({ ...f, courseId: e.target.value, skillId: "" }))}>
                   <option value="">—</option>{meta.courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>
@@ -144,6 +153,11 @@ export function AssessmentFormModal({ open, onClose, onSaved, assessmentId, forR
               <div><label className={label}>Subject</label><input className={input} value={form.subject} onChange={(e) => set("subject", e.target.value)} /></div>
               <div><label className={label}>Chapter</label><input className={input} value={form.chapter} onChange={(e) => set("chapter", e.target.value)} /></div>
               <div><label className={label}>Topic</label><input className={input} value={form.topic} onChange={(e) => set("topic", e.target.value)} /></div>
+              <div><label className={label}>Skill (optional)</label>
+                <select className={input} value={form.skillId} onChange={(e) => set("skillId", e.target.value)} disabled={!form.courseId}>
+                  <option value="">{form.courseId ? "None" : "Select a course first"}</option>{skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
             </div>
             <div><label className={label}>Instructions</label>
               <textarea rows={2} className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-accent" value={form.instructions} onChange={(e) => set("instructions", e.target.value)} /></div>

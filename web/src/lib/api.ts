@@ -2420,3 +2420,294 @@ export const uploadAssessmentFile = async (file: File): Promise<{ url: string; n
   if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
   return res.json() as Promise<{ url: string; name: string }>;
 };
+
+// ─── Student Progress Tracking ─────────────────────────────────────────────────
+
+export type ProgressStatus = "EXCELLENT" | "GOOD" | "AVERAGE" | "NEEDS_ATTENTION" | "CRITICAL" | "NO_DATA";
+
+export interface ProgressConfig {
+  weights: { attendance: number; assignments: number; assessments: number; feedback: number; coach: number };
+  thresholds: { excellent: number; good: number; average: number; needsAttention: number };
+  risk: { attendance: number; assignment: number; assessment: number };
+}
+export const fetchProgressConfig = () => api<ProgressConfig>("/progress/config");
+export const updateProgressConfig = (dto: Partial<ProgressConfig>) =>
+  api<ProgressConfig>("/progress/config", { method: "PATCH", body: JSON.stringify(dto) });
+
+export interface ProgressDashboard {
+  cards: {
+    totalActiveStudents: number;
+    averageAttendance: number;
+    averageAssignmentScore: number;
+    averageAssessmentScore: number;
+    studentsImproving: number;
+    studentsAtRisk: number;
+    topPerformers: number;
+    pendingReviews: number;
+  };
+  charts: {
+    courseWise: { name: string; value: number }[];
+    teacherWise: { name: string; value: number }[];
+    countryWise: { name: string; value: number }[];
+    batchWise: { name: string; value: number }[];
+    monthlyProgressTrend: { month: string; value: number }[];
+    attendanceTrend: { name: string; value: number }[];
+  };
+}
+export const fetchProgressDashboard = () => api<ProgressDashboard>("/progress/dashboard");
+
+export interface ProgressListRow {
+  studentId: string;
+  studentCode: string;
+  name: string;
+  course: string | null;
+  teacher: string | null;
+  attendance: number | null;
+  avgScore: number | null;
+  progress: number;
+  status: ProgressStatus;
+  atRisk: boolean;
+}
+export interface ListProgressParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  courseId?: string;
+  batchId?: string;
+  teacherId?: string;
+  coachId?: string;
+  country?: string;
+  status?: string;
+  minAttendance?: number;
+  sortBy?: string;
+}
+export const fetchProgressStudents = (params: ListProgressParams = {}) => {
+  const q: Record<string, string> = {};
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "" && v !== "All") q[k] = String(v);
+  });
+  return api<{ items: ProgressListRow[]; meta: { page: number; limit: number; total: number; pages: number } }>(
+    `/progress/students?${new URLSearchParams(q).toString()}`,
+  );
+};
+
+export const fetchProgressStudentDetail = (id: string) => api<any>(`/progress/students/${id}`);
+export const addProgressRemark = (id: string, text: string) =>
+  api<any>(`/progress/students/${id}/remark`, { method: "POST", body: JSON.stringify({ text }) });
+export const flagProgressStudent = (id: string, dto: { level?: string; note?: string }) =>
+  api<any>(`/progress/students/${id}/flag`, { method: "POST", body: JSON.stringify(dto) });
+export const runProgressSnapshot = () => api<{ written: number; monthLabel: string }>("/progress/snapshot", { method: "POST" });
+
+// ─── Teacher Progress ──────────────────────────────────────────────────────────
+export interface TeacherProgressDashboard {
+  cards: { totalStudents: number; studentsImproving: number; studentsAtRisk: number; pendingFeedback: number; pendingReviews: number };
+  students: {
+    studentId: string; studentCode: string; name: string; avatarUrl: string | null;
+    attendance: number | null; avgScore: number | null; progress: number; status: ProgressStatus; atRisk: boolean;
+  }[];
+}
+export const fetchTeacherProgressDashboard = () => api<TeacherProgressDashboard>("/progress/teacher/dashboard");
+export const fetchTeacherProgressStudent = (id: string) => api<any>(`/progress/teacher/students/${id}`);
+export const fetchTeacherStudentFeedback = (id: string) => api<any[]>(`/progress/teacher/students/${id}/feedback`);
+export interface FeedbackInput {
+  studentId: string; kind?: string;
+  participation?: number; homework?: number; communication?: number; understanding?: number; behavior?: number;
+  remarks?: string; suggestions?: string;
+}
+export const addTeacherFeedback = (dto: FeedbackInput) =>
+  api<any>("/progress/teacher/feedback", { method: "POST", body: JSON.stringify(dto) });
+
+// ─── Student Progress (own view) ────────────────────────────────────────────────
+export const fetchStudentProgress = () => api<any>("/progress/student/dashboard");
+
+// ─── Coach Progress ─────────────────────────────────────────────────────────────
+export const fetchCoachProgressDashboard = () => api<any>("/progress/coach/dashboard");
+export const fetchCoachRisks = () => api<any[]>("/progress/coach/risks");
+export const resolveCoachRisk = (id: string, note?: string) =>
+  api<any>(`/progress/coach/risks/${id}/resolve`, { method: "POST", body: JSON.stringify({ note }) });
+export const escalateCoachRisk = (id: string) =>
+  api<any>(`/progress/coach/risks/${id}/escalate`, { method: "POST" });
+
+export const fetchCoachReviews = (studentId: string) => api<any[]>(`/progress/coach/reviews?studentId=${studentId}`);
+export const createCoachReview = (dto: Record<string, unknown>) =>
+  api<any>("/progress/coach/reviews", { method: "POST", body: JSON.stringify(dto) });
+
+export const fetchCoachGoals = (studentId: string) => api<any[]>(`/progress/coach/goals?studentId=${studentId}`);
+export const createCoachGoal = (dto: Record<string, unknown>) =>
+  api<any>("/progress/coach/goals", { method: "POST", body: JSON.stringify(dto) });
+export const updateCoachGoal = (id: string, dto: Record<string, unknown>) =>
+  api<any>(`/progress/coach/goals/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+
+export const fetchCoachMeetings = (studentId: string) => api<any[]>(`/progress/coach/meetings?studentId=${studentId}`);
+export const createCoachMeeting = (dto: Record<string, unknown>) =>
+  api<any>("/progress/coach/meetings", { method: "POST", body: JSON.stringify(dto) });
+export const updateCoachMeeting = (id: string, dto: Record<string, unknown>) =>
+  api<any>(`/progress/coach/meetings/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+
+// ─── Progress: reports, skills, badges ──────────────────────────────────────────
+export const fetchProgressReport = (type: string) =>
+  api<{ type: string; columns: string[]; rows: Record<string, unknown>[] }>(`/progress/reports?type=${type}`);
+export const fetchProgressSkills = (courseId?: string) =>
+  api<{ id: string; courseId: string; name: string; order: number }[]>(`/progress/skills${courseId ? `?courseId=${courseId}` : ""}`);
+export const createProgressSkill = (dto: { courseId: string; name: string; order?: number }) =>
+  api<any>("/progress/skills", { method: "POST", body: JSON.stringify(dto) });
+export const deleteProgressSkill = (id: string) =>
+  api<{ success: boolean }>(`/progress/skills/${id}`, { method: "DELETE" });
+export const fetchProgressBadges = () =>
+  api<{ id: string; code: string; name: string; description: string | null; icon: string | null; tone: string | null }[]>("/progress/badges");
+
+export const fetchProgressAnalytics = () => api<{
+  cards: { averageProgress: number; topPerformers: number; studentsAtRisk: number; courseCompletion: number; goalCompletion: number; averageAttendance: number };
+  charts: {
+    learningCurve: { month: string; value: number }[];
+    skillDistribution: { name: string; value: number }[];
+    goalAchievement: { name: string; value: number }[];
+    teacherImpact: { name: string; value: number }[];
+    batchComparison: { name: string; value: number }[];
+    weeklyGrowth: { name: string; value: number }[];
+  };
+}>("/progress/analytics");
+export const fetchProgressHistory = (id: string) => api<any[]>(`/progress/students/${id}/history`);
+
+// ─── Finance & Reporting ────────────────────────────────────────────────────
+export type FeeComponentType =
+  | "ADMISSION" | "COURSE" | "REGISTRATION" | "MATERIAL"
+  | "EXAMINATION" | "CERTIFICATE" | "OTHER";
+export type FeePlanCycle =
+  | "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "YEARLY" | "CUSTOM";
+export type FinanceDiscountType = "PERCENTAGE" | "FIXED";
+export type FinanceDiscountReason =
+  | "SCHOLARSHIP" | "SIBLING" | "PROMOTIONAL" | "STAFF" | "MANUAL";
+export type ScholarshipStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "APPLIED";
+export type FinanceRefundStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "PROCESSED";
+export type FinanceInvoiceStatus =
+  | "DRAFT" | "SENT" | "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED" | "VOID";
+export type PayrollModel = "FIXED" | "PER_CLASS" | "PER_HOUR" | "PER_STUDENT" | "HYBRID";
+
+export interface FeePlanComponent { id?: string; type: FeeComponentType; label: string; amount: number }
+export interface FeePlan {
+  id: string; name: string; cycle: FeePlanCycle; courseId: string | null;
+  currency: string; description: string | null; active: boolean;
+  components: FeePlanComponent[]; _count?: { assignments: number };
+  createdAt: string;
+}
+export type FinanceInvoiceItem = { id: string; type: FeeComponentType; label: string; amount: number };
+export interface FinanceInvoice {
+  id: string; number: string; studentId: string | null; currency: string;
+  amount: number; subtotal: number | null; discountAmount: number; taxAmount: number;
+  paidAmount: number; balance: number; status: FinanceInvoiceStatus;
+  periodLabel: string | null; issuedAt: string; dueAt: string | null; notes: string | null;
+  student?: { id: string; studentCode: string; parentEmail: string | null;
+    user: { id: string; firstName: string; lastName: string; email: string } | null } | null;
+  items?: FinanceInvoiceItem[];
+  payments?: any[]; receipts?: any[]; refunds?: any[];
+  _count?: { payments: number };
+}
+export interface PagedResult<T> { items: T[]; meta: { page: number; limit: number; total: number; totalPages: number } }
+
+// Dashboard + analytics + reports
+export const fetchFinanceDashboard = () => api<any>("/finance/dashboard");
+export const fetchFinanceAnalytics = () => api<any>("/finance/analytics");
+export const fetchFinanceReport = (type: string) =>
+  api<{ type: string; columns: string[]; rows: Record<string, any>[]; summary: Record<string, any> }>(
+    `/finance/reports?type=${encodeURIComponent(type)}`,
+  );
+export const fetchFinanceConfig = () => api<any>("/finance/config");
+export const updateFinanceConfig = (dto: Record<string, any>) =>
+  api<any>("/finance/config", { method: "PATCH", body: JSON.stringify(dto) });
+
+// Fee plans + assignments
+export const fetchFeePlans = (q: { page?: number; limit?: number; search?: string; active?: string } = {}) => {
+  const p = new URLSearchParams();
+  Object.entries(q).forEach(([k, v]) => v != null && v !== "" && p.set(k, String(v)));
+  return api<PagedResult<FeePlan>>(`/finance/fee-plans?${p.toString()}`);
+};
+export const fetchFeePlan = (id: string) => api<FeePlan>(`/finance/fee-plans/${id}`);
+export const createFeePlan = (dto: Record<string, any>) =>
+  api<FeePlan>("/finance/fee-plans", { method: "POST", body: JSON.stringify(dto) });
+export const updateFeePlan = (id: string, dto: Record<string, any>) =>
+  api<FeePlan>(`/finance/fee-plans/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const deleteFeePlan = (id: string) =>
+  api<FeePlan>(`/finance/fee-plans/${id}`, { method: "DELETE" });
+export const fetchFeeAssignments = (studentId?: string) =>
+  api<{ items: any[] }>(`/finance/fee-plans/assignments${studentId ? `?studentId=${studentId}` : ""}`);
+export const assignFeePlan = (dto: Record<string, any>) =>
+  api<any>("/finance/fee-plans/assign", { method: "POST", body: JSON.stringify(dto) });
+export const updateFeeAssignment = (id: string, dto: Record<string, any>) =>
+  api<any>(`/finance/fee-plans/assignments/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const deleteFeeAssignment = (id: string) =>
+  api<{ success: boolean }>(`/finance/fee-plans/assignments/${id}`, { method: "DELETE" });
+
+// Invoices + payments + receipts
+export const fetchFinanceInvoices = (q: { page?: number; limit?: number; search?: string; status?: string; studentId?: string; sortBy?: string } = {}) => {
+  const p = new URLSearchParams();
+  Object.entries(q).forEach(([k, v]) => v != null && v !== "" && p.set(k, String(v)));
+  return api<PagedResult<FinanceInvoice>>(`/finance/invoices?${p.toString()}`);
+};
+export const fetchFinanceInvoice = (id: string) => api<FinanceInvoice>(`/finance/invoices/${id}`);
+export const generateInvoice = (dto: Record<string, any>) =>
+  api<FinanceInvoice>("/finance/invoices", { method: "POST", body: JSON.stringify(dto) });
+export const recordInvoicePayment = (id: string, dto: Record<string, any>) =>
+  api<any>(`/finance/invoices/${id}/payments`, { method: "POST", body: JSON.stringify(dto) });
+export const sendInvoice = (id: string) =>
+  api<FinanceInvoice>(`/finance/invoices/${id}/send`, { method: "POST" });
+export const cancelInvoice = (id: string) =>
+  api<FinanceInvoice>(`/finance/invoices/${id}/cancel`, { method: "POST" });
+export const deleteFinanceInvoice = (id: string) =>
+  api<{ success: boolean }>(`/finance/invoices/${id}`, { method: "DELETE" });
+export const fetchReceipts = (studentId?: string) =>
+  api<{ items: any[] }>(`/finance/invoices/receipts${studentId ? `?studentId=${studentId}` : ""}`);
+export const fetchReceipt = (id: string) => api<any>(`/finance/invoices/receipts/${id}`);
+
+// Discounts
+export const fetchDiscounts = (search?: string, active?: string) => {
+  const p = new URLSearchParams();
+  if (search) p.set("search", search);
+  if (active) p.set("active", active);
+  return api<{ items: any[] }>(`/finance/discounts?${p.toString()}`);
+};
+export const createDiscount = (dto: Record<string, any>) =>
+  api<any>("/finance/discounts", { method: "POST", body: JSON.stringify(dto) });
+export const updateDiscount = (id: string, dto: Record<string, any>) =>
+  api<any>(`/finance/discounts/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const deleteDiscount = (id: string) =>
+  api<any>(`/finance/discounts/${id}`, { method: "DELETE" });
+
+// Scholarships
+export const fetchScholarships = (q: { page?: number; limit?: number; status?: string; search?: string } = {}) => {
+  const p = new URLSearchParams();
+  Object.entries(q).forEach(([k, v]) => v != null && v !== "" && p.set(k, String(v)));
+  return api<PagedResult<any>>(`/finance/scholarships?${p.toString()}`);
+};
+export const createScholarship = (dto: Record<string, any>) =>
+  api<any>("/finance/scholarships", { method: "POST", body: JSON.stringify(dto) });
+export const reviewScholarship = (id: string, dto: Record<string, any>) =>
+  api<any>(`/finance/scholarships/${id}/review`, { method: "POST", body: JSON.stringify(dto) });
+
+// Refunds
+export const fetchRefunds = (q: { page?: number; limit?: number; status?: string; search?: string } = {}) => {
+  const p = new URLSearchParams();
+  Object.entries(q).forEach(([k, v]) => v != null && v !== "" && p.set(k, String(v)));
+  return api<PagedResult<any>>(`/finance/refunds?${p.toString()}`);
+};
+export const createRefund = (dto: Record<string, any>) =>
+  api<any>("/finance/refunds", { method: "POST", body: JSON.stringify(dto) });
+export const reviewRefund = (id: string, dto: Record<string, any>) =>
+  api<any>(`/finance/refunds/${id}/review`, { method: "POST", body: JSON.stringify(dto) });
+export const processRefund = (id: string) =>
+  api<any>(`/finance/refunds/${id}/process`, { method: "POST" });
+
+// Payroll
+export const fetchPayrollConfigs = () => api<{ items: any[] }>("/finance/payroll/config");
+export const upsertPayrollConfig = (dto: Record<string, any>) =>
+  api<any>("/finance/payroll/config", { method: "POST", body: JSON.stringify(dto) });
+export const deletePayrollConfig = (userId: string) =>
+  api<{ success: boolean }>(`/finance/payroll/config/${userId}`, { method: "DELETE" });
+export const generatePayroll = (dto: { billingPeriodStart: string; billingPeriodEnd: string }) =>
+  api<{ generatedCount: number }>("/finance/payroll/generate", { method: "POST", body: JSON.stringify(dto) });
+export const issuePayslip = (payoutId: string) =>
+  api<any>(`/finance/payroll/payslip/${payoutId}`, { method: "POST" });
+
+// Student + teacher self-service
+export const fetchStudentFinance = () => api<any>("/finance/student/dashboard");
+export const fetchTeacherFinance = () => api<any>("/finance/teacher/dashboard");

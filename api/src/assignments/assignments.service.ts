@@ -171,6 +171,7 @@ export class AssignmentsService implements OnModuleInit {
         teacherId: teacherId ?? null, createdById: actor.id,
         description: dto.description, instructions: dto.instructions,
         subject: dto.subject, chapter: dto.chapter, topic: dto.topic,
+        skillId: dto.skillId ?? null,
         difficulty: dto.difficulty, type: dto.type,
         dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
         maxMarks: dto.maxMarks ?? 100, passingMarks: dto.passingMarks ?? 40,
