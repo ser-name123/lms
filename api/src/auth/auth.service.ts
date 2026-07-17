@@ -46,6 +46,10 @@ export class AuthService {
     /* One message for "no such user" and "wrong password" alike, so the
        endpoint cannot be used to enumerate registered emails. */
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      // A registered applicant has no User row until they're approved/activated,
+      // so a bare "invalid" is confusing. If these credentials match a pending
+      // application, tell them their account is still under review instead.
+      await this.assertNotPendingRegistration(email, password);
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -132,6 +136,47 @@ export class AuthService {
       });
 
     return { otpRequired: true, email: user.email, otp };
+  }
+
+  /**
+   * When login fails to find a matching active user, check whether the same
+   * credentials belong to a still-pending student/teacher application and, if
+   * so, throw a helpful "under review" message. The password must match the
+   * application's own hash, so this never reveals status to a stranger.
+   */
+  private async assertNotPendingRegistration(email: string, password: string) {
+    const normalized = (email || '').toLowerCase().trim();
+
+    const [student, teacher] = await Promise.all([
+      this.prisma.studentRegistration.findFirst({
+        where: { studentEmail: normalized },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, passwordHash: true },
+      }),
+      this.prisma.teacherRegistration.findFirst({
+        where: { email: normalized },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true, passwordHash: true },
+      }),
+    ]);
+
+    for (const reg of [student, teacher]) {
+      if (!reg?.passwordHash) continue;
+      if (!(await bcrypt.compare(password, reg.passwordHash))) continue;
+
+      if (reg.status === 'REJECTED') {
+        throw new ForbiddenException(
+          'Your registration was not approved. Please contact the academy for assistance.',
+        );
+      }
+      // APPROVED/ACTIVATED would already have created a User, so any other state
+      // here means the application is still moving through review.
+      if (reg.status !== 'APPROVED' && reg.status !== 'ACTIVATED') {
+        throw new ForbiddenException(
+          'Your account is under review. You can sign in once an administrator approves your registration.',
+        );
+      }
+    }
   }
 
   async verifyOtp(

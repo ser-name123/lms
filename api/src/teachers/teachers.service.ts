@@ -12,6 +12,8 @@ const TEACHER_SELECT = {
   id: true,
   teacherCode: true,
   specialisation: true,
+  subjects: true,
+  archived: true,
   hourlyRate: true,
   bio: true,
   courseId: true,

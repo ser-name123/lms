@@ -15,7 +15,6 @@ import { EmployeesModule } from './employees/employees.module';
 import { CandidatesModule } from './candidates/candidates.module';
 import { LeavesModule } from './leaves/leaves.module';
 import { InvoicesModule } from './invoices/invoices.module';
-import { TrialsModule } from './trials/trials.module';
 import { CategoriesModule } from './categories/categories.module';
 import { LmsDataModule } from './lms-data/lms-data.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -25,6 +24,14 @@ import { StudentPortalModule } from './student-portal/student-portal.module';
 import { ChatModule } from './chat/chat.module';
 import { TeacherPortalModule } from './teacher-portal/teacher-portal.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { TeacherRegistrationsModule } from './teacher-registrations/teacher-registrations.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { LeadsModule } from './leads/leads.module';
+import { AttendanceModule } from './attendance/attendance.module';
+import { TeacherManagementModule } from './teacher-management/teacher-management.module';
+import { StudentManagementModule } from './student-management/student-management.module';
+import { AssignmentsModule } from './assignments/assignments.module';
+import { AssessmentsModule } from './assessments/assessments.module';
 
 @Module({
   imports: [
@@ -42,7 +49,6 @@ import { RegistrationsModule } from './registrations/registrations.module';
     CandidatesModule,
     LeavesModule,
     InvoicesModule,
-    TrialsModule,
     CategoriesModule,
     LmsDataModule,
     DashboardModule,
@@ -52,6 +58,14 @@ import { RegistrationsModule } from './registrations/registrations.module';
     ChatModule,
     TeacherPortalModule,
     RegistrationsModule,
+    TeacherRegistrationsModule,
+    NotificationsModule,
+    LeadsModule,
+    AttendanceModule,
+    TeacherManagementModule,
+    StudentManagementModule,
+    AssignmentsModule,
+    AssessmentsModule,
   ],
   controllers: [HealthController],
   providers: [

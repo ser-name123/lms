@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   GraduationCap,
   User,
@@ -17,9 +18,16 @@ import {
   Eye,
   EyeOff,
   PartyPopper,
+  MailCheck,
 } from "lucide-react";
 
-import { ApiError, createRegistration, fetchLmsCourses } from "@/lib/api";
+import {
+  ApiError,
+  createRegistration,
+  verifyRegistrationOtp,
+  fetchLmsCourses,
+  type OtpChallenge,
+} from "@/lib/api";
 
 type Form = Record<string, string>;
 
@@ -38,6 +46,7 @@ const MODES = ["ONLINE", "OFFLINE", "HYBRID"];
 const GENDERS = ["Male", "Female", "Other"];
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Form>({ registrantType: "STUDENT", learningMode: "ONLINE" });
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -46,6 +55,9 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
+  const [otpInput, setOtpInput] = useState("");
+  const [verifying, setVerifying] = useState(false);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -80,6 +92,12 @@ export default function RegisterPage() {
   };
   const back = () => {
     setError(null);
+    if (step === 0) {
+      // On the first step, "Back" leaves the form (returns to the chooser).
+      if (typeof window !== "undefined" && window.history.length > 1) router.back();
+      else router.push("/signup");
+      return;
+    }
     setStep((s) => Math.max(0, s - 1));
   };
 
@@ -93,6 +111,20 @@ export default function RegisterPage() {
     return "Please complete the required fields.";
   };
 
+  // Only send non-empty fields; attach the selected course's title too.
+  const buildPayload = () => {
+    const payload: Record<string, string> = {};
+    Object.entries(form).forEach(([k, v]) => {
+      if (v != null && String(v).trim() !== "") payload[k] = v;
+    });
+    if (payload.courseCode) {
+      const c = courses.find((x) => x.code === payload.courseCode);
+      if (c) payload.courseTitle = c.title;
+    }
+    return payload;
+  };
+
+  // Step 1: submit → receive an email OTP challenge (record not yet created).
   const submit = async () => {
     if (!stepValid) {
       setError(errorFor("account"));
@@ -101,23 +133,116 @@ export default function RegisterPage() {
     setBusy(true);
     setError(null);
     try {
-      // Only send non-empty fields; attach the selected course's title too.
-      const payload: Record<string, string> = {};
-      Object.entries(form).forEach(([k, v]) => {
-        if (v != null && String(v).trim() !== "") payload[k] = v;
-      });
-      if (payload.courseCode) {
-        const c = courses.find((x) => x.code === payload.courseCode);
-        if (c) payload.courseTitle = c.title;
-      }
-      await createRegistration(payload);
-      setDone(true);
+      const res = await createRegistration(buildPayload());
+      setChallenge(res);
+      setOtpInput(res.otp || ""); // dev: prefill the code shown in the response
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not submit your application. Please try again.");
     } finally {
       setBusy(false);
     }
   };
+
+  // Step 2: verify the OTP → the application record is created.
+  const verify = async () => {
+    if (!challenge) return;
+    if (otpInput.trim().length < 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setVerifying(true);
+    setError(null);
+    try {
+      await verifyRegistrationOtp(challenge.email, otpInput.trim());
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Verification failed. Please try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const resend = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await createRegistration(buildPayload());
+      setChallenge(res);
+      setOtpInput(res.otp || "");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not resend the code.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // OTP verification screen (after submit, before the success screen).
+  if (challenge && !done) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-page p-4">
+        <div className="w-full max-w-md rounded-3xl border border-hairline bg-surface p-8 shadow-xl">
+          <div className="mx-auto mb-4 grid size-16 place-items-center rounded-2xl bg-accent/10 text-accent">
+            <MailCheck className="size-8" />
+          </div>
+          <h1 className="text-center text-xl font-black text-ink">Verify your email</h1>
+          <p className="mt-2 text-center text-sm text-ink-3">
+            We sent a 6-digit code to{" "}
+            <span className="font-semibold text-ink-2">{challenge.email}</span>. Enter it below to finish.
+          </p>
+
+          {challenge.otp && (
+            <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-center text-xs font-semibold text-amber-600">
+              Dev mode — your code is{" "}
+              <span className="font-black tracking-widest">{challenge.otp}</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-2.5 text-xs font-semibold text-red-500">
+              <CircleAlert className="size-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <input
+            value={otpInput}
+            onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            placeholder="——————"
+            className="mt-4 h-14 w-full rounded-xl border border-hairline bg-surface text-center text-2xl font-black tracking-[0.4em] text-ink focus:outline-none focus:border-accent"
+          />
+
+          <button
+            type="button"
+            onClick={verify}
+            disabled={verifying}
+            className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent text-sm font-bold text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {verifying ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Verify &amp; Submit
+          </button>
+
+          <div className="mt-3 flex items-center justify-between text-xs">
+            <button
+              type="button"
+              onClick={() => { setChallenge(null); setError(null); }}
+              className="font-bold text-ink-3 hover:text-ink"
+            >
+              ← Edit details
+            </button>
+            <button
+              type="button"
+              onClick={resend}
+              disabled={busy}
+              className="font-bold text-accent hover:underline disabled:opacity-50"
+            >
+              Resend code
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (done) {
     return (
@@ -149,6 +274,15 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-page px-4 py-8">
       <div className="mx-auto w-full max-w-2xl">
+        {/* Back */}
+        <button
+          type="button"
+          onClick={() => (typeof window !== "undefined" && window.history.length > 1 ? router.back() : router.push("/signup"))}
+          className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-ink-3 hover:text-ink"
+        >
+          <ChevronLeft className="size-4" /> Back
+        </button>
+
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-accent/10 text-accent">
@@ -372,8 +506,7 @@ export default function RegisterPage() {
             <button
               type="button"
               onClick={back}
-              disabled={step === 0}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl px-4 text-sm font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-40"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl px-4 text-sm font-bold text-ink-2 hover:bg-surface-2"
             >
               <ChevronLeft className="size-4" /> Back
             </button>

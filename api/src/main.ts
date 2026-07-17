@@ -48,6 +48,18 @@ async function bootstrap() {
       `${prefix}/knowledgebase`,
       express.static(path.join(uploadsRoot, 'knowledgebase')),
     );
+    app.use(
+      `${prefix}/student-docs`,
+      express.static(path.join(uploadsRoot, 'student-docs')),
+    );
+    app.use(
+      `${prefix}/assignments`,
+      express.static(path.join(uploadsRoot, 'assignments')),
+    );
+    app.use(
+      `${prefix}/assessments`,
+      express.static(path.join(uploadsRoot, 'assessments')),
+    );
   }
 
   // Standard hardening headers (CSP off by default — this is a JSON API).

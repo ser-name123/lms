@@ -13,6 +13,13 @@ import {
   Package,
   MessageCircle,
   UserPlus,
+  UserCheck,
+  Sparkles,
+  ClipboardCheck,
+  TrendingUp,
+  Briefcase,
+  UserSearch,
+  CalendarOff,
   type LucideIcon,
 } from "lucide-react";
 
@@ -45,10 +52,27 @@ export const navGroups: NavGroup[] = [
   {
     label: "Academics",
     items: [
-      { label: "Trial Classes", href: "/evaluation", icon: ClipboardList },
-      { label: "Admissions", href: "/registrations", icon: UserPlus },
-      { label: "Students", href: "/students", icon: Users },
-      { label: "Teachers", href: "/teachers", icon: GraduationCap },
+      { label: "Trial Classes", href: "/leads", icon: Sparkles },
+      {
+        label: "Students",
+        icon: Users,
+        children: [
+          { label: "All Students", href: "/students", icon: Users },
+          { label: "Student Analytics", href: "/students/analytics", icon: TrendingUp },
+          { label: "Admission", href: "/registrations", icon: UserPlus },
+        ],
+      },
+      {
+        label: "Teachers",
+        icon: GraduationCap,
+        children: [
+          { label: "All Teachers", href: "/teachers", icon: GraduationCap },
+          { label: "Teacher Analytics", href: "/teachers/analytics", icon: TrendingUp },
+          { label: "Teacher Applications", href: "/teacher-registrations", icon: UserCheck },
+        ],
+      },
+      { label: "Other Employees", href: "/employees", icon: Briefcase },
+      { label: "Recruitment", href: "/recruitment", icon: UserSearch },
       {
         label: "Learning management",
         icon: GraduationCap,
@@ -66,6 +90,8 @@ export const navGroups: NavGroup[] = [
         children: [
           { label: "Classes", href: "/classes", icon: CalendarDays },
           { label: "Meetings", href: "/meetings", icon: Users },
+          { label: "Attendance", href: "/attendance", icon: ClipboardCheck },
+          { label: "Leave Requests", href: "/leaves", icon: CalendarOff },
         ],
       },
     ],

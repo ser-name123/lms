@@ -34,7 +34,7 @@ import {
   type RegistrationStatus,
 } from "@/lib/api";
 
-const STATUS_TABS = ["All", "PENDING", "NEEDS_INFO", "APPROVED", "REJECTED"] as const;
+const STATUS_TABS = ["PENDING", "NEEDS_INFO", "APPROVED", "REJECTED"] as const;
 
 const statusTone: Record<RegistrationStatus, Tone> = {
   PENDING: "warning",
@@ -115,10 +115,11 @@ export default function RegistrationsPage() {
     try {
       const updated = await reviewRegistration(reg.id, { status, notes });
       setSelected(null);
+      const sentTo = updated.notification?.to;
       if (status === "APPROVED") {
         Swal.fire({
           title: "Approved!",
-          html: `Student account created.<br/><b>ID:</b> ${updated.approvedStudentCode}<br/><b>Admission:</b> ${updated.admissionNumber}<br/><b>Roll:</b> ${updated.rollNumber}`,
+          html: `Student account created.<br/><b>ID:</b> ${updated.approvedStudentCode}<br/><b>Admission:</b> ${updated.admissionNumber}<br/><b>Roll:</b> ${updated.rollNumber}${sentTo ? `<br/><span style="color:#10b981;font-size:12px;">📧 Update sent to ${sentTo}</span>` : ""}`,
           icon: "success",
           confirmButtonColor: "#10b981",
           background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
@@ -128,9 +129,13 @@ export default function RegistrationsPage() {
           toast: true,
           position: "top-end",
           icon: "success",
-          title: status === "REJECTED" ? "Application rejected" : "Information requested",
+          title: sentTo
+            ? `Update sent to ${sentTo}`
+            : status === "REJECTED"
+              ? "Application rejected"
+              : "Information requested",
           showConfirmButton: false,
-          timer: 2000,
+          timer: 2500,
         });
       }
       load();
@@ -182,7 +187,7 @@ export default function RegistrationsPage() {
                   statusFilter === t ? "bg-surface text-accent shadow-sm border border-hairline/80" : "text-ink-3 hover:text-ink-2"
                 }`}
               >
-                {t === "All" ? "All" : statusLabel[t as RegistrationStatus]}
+                {statusLabel[t as RegistrationStatus]}
               </button>
             ))}
           </div>

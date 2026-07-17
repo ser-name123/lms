@@ -17,6 +17,8 @@ import {
   Video,
   Library,
   MessageCircle,
+  ClipboardCheck,
+  FileCheck2,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -27,8 +29,10 @@ const studentNavItems = [
   { label: "Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
   { label: "My Courses", href: "/student/courses", icon: BookOpen },
   { label: "My Schedule", href: "/student/classes", icon: CalendarDays },
+  { label: "My Attendance", href: "/student/attendance", icon: ClipboardCheck },
   { label: "Live Meetings", href: "/student/meetings", icon: Video },
   { label: "Homework & Grades", href: "/student/assignments", icon: ClipboardList },
+  { label: "Assessments", href: "/student/assessments", icon: FileCheck2 },
   { label: "Knowledge Base", href: "/student/knowledgebase", icon: Library },
   { label: "Billing & Invoices", href: "/student/invoices", icon: Receipt },
   { label: "Support Chat", href: "/student/chat", icon: MessageCircle },

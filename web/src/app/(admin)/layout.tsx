@@ -24,11 +24,13 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
   if (user && user.role === "ACADEMIC_COACH") {
     const allowedCoachPrefixes = [
       "/dashboard",
+      "/leads",
       "/evaluation",
       "/students",
       "/teachers",
       "/classes",
       "/meetings",
+      "/attendance",
       "/chat",
       "/support",
       "/profile",

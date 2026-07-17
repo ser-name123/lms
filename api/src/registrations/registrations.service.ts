@@ -19,6 +19,7 @@ import {
   CreateRegistrationDto,
   ListRegistrationsDto,
   ReviewRegistrationDto,
+  UpdateStudentRegistrationDto,
 } from './dto';
 
 @Injectable()
@@ -28,8 +29,20 @@ export class RegistrationsService {
     private readonly emails: EmailsService,
   ) {}
 
-  // ── Public: submit an application ──────────────────────────────────────────
-  async create(dto: CreateRegistrationDto) {
+  // Pending applications awaiting email-OTP verification. The DB record is only
+  // created once the applicant confirms the code, so unverified emails never
+  // leave junk rows. In-memory + short TTL, mirroring the auth OTP flow.
+  private otpPending = new Map<
+    string,
+    { otp: string; expiresAt: Date; attempts: number; dto: CreateRegistrationDto }
+  >();
+
+  private newOtp() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  // ── Public: step 1 — submit application, receive an email OTP ───────────────
+  async requestOtp(dto: CreateRegistrationDto) {
     const email = dto.studentEmail.toLowerCase().trim();
 
     // An email that already owns an account cannot register again.
@@ -53,6 +66,58 @@ export class RegistrationsService {
       );
     }
 
+    const otp = this.newOtp();
+    this.otpPending.set(email, {
+      otp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min TTL
+      attempts: 0,
+      dto: { ...dto, studentEmail: email },
+    });
+
+    // Fire the OTP email in the background (SMTP delay must not block the client).
+    // The code is also returned in the response for now; email delivery is the
+    // eventual channel.
+    this.sendOtpEmail(email, `${dto.firstName} ${dto.lastName}`.trim(), otp).catch(
+      () => undefined,
+    );
+
+    return {
+      otpRequired: true,
+      email,
+      otp, // shown to the client for now; will move to email-only later
+      message: 'A verification code has been sent to your email. Enter it to finish.',
+    };
+  }
+
+  // ── Public: step 2 — verify the OTP, then create the application ────────────
+  async verifyOtp(rawEmail: string, code: string) {
+    const email = (rawEmail || '').toLowerCase().trim();
+    const record = this.otpPending.get(email);
+    if (!record) {
+      throw new BadRequestException(
+        'No pending application for this email, or the code expired. Please register again.',
+      );
+    }
+    if (record.expiresAt < new Date()) {
+      this.otpPending.delete(email);
+      throw new BadRequestException('Verification code has expired. Please register again.');
+    }
+    if (record.otp !== code) {
+      record.attempts += 1;
+      if (record.attempts >= 5) {
+        this.otpPending.delete(email);
+        throw new BadRequestException('Too many incorrect attempts. Please register again.');
+      }
+      throw new BadRequestException('Invalid verification code.');
+    }
+
+    this.otpPending.delete(email);
+    return this.persist(record.dto);
+  }
+
+  // Actual DB creation, run only after the email OTP is confirmed.
+  private async persist(dto: CreateRegistrationDto) {
+    const email = dto.studentEmail.toLowerCase().trim();
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
     const created = await this.prisma.studentRegistration.create({
@@ -107,6 +172,27 @@ export class RegistrationsService {
     };
   }
 
+  private async sendOtpEmail(to: string, name: string, otp: string) {
+    const html = this.emailShell(
+      'Verify your email',
+      `
+      <p>Dear ${name || 'applicant'},</p>
+      <p>Use the code below to verify your email and complete your registration. It is valid for <b>10 minutes</b>.</p>
+      <div style="background:#f0f3ff;border:1px dashed #386FA4;border-radius:12px;padding:16px;text-align:center;margin:16px 0;">
+        <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:900;letter-spacing:8px;color:#133C55;">${otp}</span>
+      </div>
+      <p style="color:#6b7280;">If you did not request this, you can ignore this email.</p>
+    `,
+    );
+    await this.emails.sendMail(
+      to,
+      'Your registration verification code',
+      `Your verification code is: ${otp} (valid for 10 minutes)`,
+      undefined,
+      html,
+    );
+  }
+
   // ── Admin: list / detail / stats ───────────────────────────────────────────
   async list(dto: ListRegistrationsDto) {
     const { page = 1, limit = 20, search, status } = dto;
@@ -149,6 +235,79 @@ export class RegistrationsService {
     return reg;
   }
 
+  // The full application linked to an approved student profile (may be null for
+  // students an admin created directly, who never went through registration).
+  async getByStudent(profileId: string) {
+    const profile = await this.prisma.studentProfile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+    if (!profile) throw new NotFoundException(`Student ${profileId} not found`);
+
+    return this.prisma.studentRegistration.findFirst({
+      where: { studentProfileId: profileId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // Admin edits the linked application AND the change syncs to the live account
+  // for the overlapping fields (name / country / phone / gender / guardian).
+  async updateByStudent(profileId: string, dto: UpdateStudentRegistrationDto) {
+    const reg = await this.prisma.studentRegistration.findFirst({
+      where: { studentProfileId: profileId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!reg) {
+      throw new NotFoundException(
+        'No registration on file for this student (added directly by an admin).',
+      );
+    }
+
+    const data: any = { ...dto };
+    delete data.password; // never editable here
+    if (dto.dateOfBirth !== undefined) {
+      data.dateOfBirth = dto.dateOfBirth ? new Date(dto.dateOfBirth) : null;
+    }
+    // studentEmail is the stored application email; the login email is not
+    // touched from here to keep the account's identity stable.
+    delete data.studentEmail;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.studentRegistration.update({
+        where: { id: reg.id },
+        data,
+      });
+
+      const profile = await tx.studentProfile.findUnique({
+        where: { id: profileId },
+        select: { userId: true },
+      });
+      if (profile) {
+        await tx.user.update({
+          where: { id: profile.userId },
+          data: {
+            firstName: dto.firstName ?? undefined,
+            lastName: dto.lastName ?? undefined,
+            country: dto.country ?? undefined,
+          },
+        });
+        await tx.studentProfile.update({
+          where: { id: profileId },
+          data: {
+            phone: dto.studentMobile ?? undefined,
+            gender: dto.gender ?? undefined,
+            guardianName:
+              dto.fatherName || dto.motherName || dto.guardianRelation
+                ? dto.fatherName || dto.motherName || dto.guardianRelation
+                : undefined,
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
   async getStats() {
     const [total, pending, approved, rejected, needsInfo] = await Promise.all([
       this.prisma.studentRegistration.count(),
@@ -187,8 +346,8 @@ export class RegistrationsService {
       },
     });
 
-    this.notify(updated).catch(() => undefined);
-    return updated;
+    const notification = await this.notify(updated).catch(() => null);
+    return { ...updated, notification };
   }
 
   private async approve(reg: any, notes?: string, reviewerId?: string) {
@@ -282,18 +441,22 @@ export class RegistrationsService {
       });
     });
 
-    this.notify(updated).catch(() => undefined);
-    return updated;
+    const notification = await this.notify(updated).catch(() => null);
+    return { ...updated, notification };
   }
 
   // ── Email notifications (SMS/WhatsApp intentionally deferred) ───────────────
-  private async notify(reg: any) {
+  // Returns the notification it dispatched so the admin action can echo it back
+  // in its response (visible now; email is the eventual delivery channel).
+  private async notify(reg: any): Promise<{ to: string; subject: string; message: string }> {
     const name = `${reg.firstName} ${reg.lastName}`;
     let subject = '';
+    let message = '';
     let html = '';
 
     if (reg.status === RegistrationStatus.APPROVED) {
       subject = 'Your admission is approved 🎉';
+      message = `Approved. Student ID ${reg.approvedStudentCode}, Admission ${reg.admissionNumber}, Roll ${reg.rollNumber}. You can now sign in.`;
       html = this.emailShell(
         'Admission Approved',
         `
@@ -310,6 +473,7 @@ export class RegistrationsService {
       );
     } else if (reg.status === RegistrationStatus.REJECTED) {
       subject = 'Update on your admission application';
+      message = `Your application was not approved.${reg.reviewNotes ? ` Reason: ${reg.reviewNotes}` : ''}`;
       html = this.emailShell(
         'Application Not Approved',
         `
@@ -320,6 +484,7 @@ export class RegistrationsService {
       );
     } else {
       subject = 'We need a little more information';
+      message = `We need more information to proceed.${reg.reviewNotes ? ` ${reg.reviewNotes}` : ''}`;
       html = this.emailShell(
         'More Information Needed',
         `
@@ -330,13 +495,11 @@ export class RegistrationsService {
       );
     }
 
-    await this.emails.sendMail(
-      reg.studentEmail,
-      subject,
-      html.replace(/<[^>]+>/g, ' '),
-      undefined,
-      html,
-    );
+    this.emails
+      .sendMail(reg.studentEmail, subject, message, undefined, html)
+      .catch(() => undefined);
+
+    return { to: reg.studentEmail, subject, message };
   }
 
   private emailShell(title: string, body: string) {

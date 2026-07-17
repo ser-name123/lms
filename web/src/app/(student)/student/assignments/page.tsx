@@ -1,336 +1,186 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  BookOpen,
-  Calendar,
-  CheckCircle2,
-  Clock,
-  FileText,
-  Loader2,
-  MessageSquare,
-  Send,
-  Trophy,
-} from "lucide-react";
+import { Loader2, X, Upload, Send, FileText, Clock, CheckCircle2, Save, Lightbulb } from "lucide-react";
 import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchStudentAssignments, submitStudentAssignment } from "@/lib/api";
+import { RichHtml } from "@/components/assignments/rich-text";
+import {
+  fetchMyAssignments, openMyAssignment, saveMyAssignmentDraft, submitMyAssignment,
+  uploadAssignmentFile, resolveFileUrl,
+  type StudentAssignmentView, type AssignmentAttachment,
+} from "@/lib/api";
 
-export default function StudentAssignments() {
-  const [assignments, setAssignments] = useState<any[]>([]);
+const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
+const toast = (t: string, icon: "success" | "error" = "success") => Swal.fire({ toast: true, position: "top-end", icon, title: t, showConfirmButton: false, timer: 1800 });
+const fail = (e: unknown) => Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed", icon: "error", background: swalBg() });
+const fmtT = (d?: string | null) => d ? new Date(d).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+const isDone = (s: StudentAssignmentView) => !!s.submission && ["SUBMITTED", "LATE_SUBMITTED", "UNDER_REVIEW", "EVALUATED"].includes(s.submission.status);
+const isGraded = (s: StudentAssignmentView) => s.submission?.status === "EVALUATED" || s.submission?.status === "RETURNED";
+
+export default function StudentAssignmentsPage() {
+  const [items, setItems] = useState<StudentAssignmentView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState<StudentAssignmentView | null>(null);
 
-  // Submit Modal state
-  const [submittingAssignment, setSubmittingAssignment] = useState<any | null>(null);
-  const [submitContent, setSubmitContent] = useState("");
-  const [submitFileUrl, setSubmitFileUrl] = useState("");
-  const [submittingBusy, setSubmittingBusy] = useState(false);
+  const load = () => { setLoading(true); fetchMyAssignments().then(setItems).catch(() => undefined).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, []);
 
-  const loadAssignments = () => {
-    setLoading(true);
-    fetchStudentAssignments()
-      .then((res) => {
-        setAssignments(res);
-      })
-      .catch((err) => {
-        console.error("Failed to load student assignments", err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    loadAssignments();
-  }, []);
-
-  const handleOpenSubmit = (asg: any) => {
-    setSubmittingAssignment(asg);
-    setSubmitContent("");
-    setSubmitFileUrl("");
-  };
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!submitContent.trim()) {
-      Swal.fire({
-        title: "Content Required",
-        text: "Please enter your submission text or answers before submitting.",
-        icon: "warning",
-        confirmButtonColor: "#386FA4",
-      });
-      return;
-    }
-
-    setSubmittingBusy(true);
-    try {
-      await submitStudentAssignment(
-        submittingAssignment.id,
-        submitContent,
-        submitFileUrl || undefined
-      );
-
-      Swal.fire({
-        title: "Submitted!",
-        text: "Your homework solution has been submitted successfully to your teacher.",
-        icon: "success",
-        confirmButtonColor: "#10b981",
-      });
-
-      setSubmittingAssignment(null);
-      loadAssignments();
-    } catch (err) {
-      Swal.fire({
-        title: "Error",
-        text: "Failed to submit assignment. Please try again.",
-        icon: "error",
-        confirmButtonColor: "#f85a6b",
-      });
-    } finally {
-      setSubmittingBusy(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <>
-        <Topbar title="Homework & Grades" subtitle="Check your coursework" />
-        <div className="flex h-[calc(100vh-4.5rem)] items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="mx-auto size-8 animate-spin text-accent" />
-            <p className="mt-3 text-sm font-bold text-ink-3">Loading assignments list...</p>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  const pending = assignments.filter((a) => a.status === "PENDING" || a.status === "ASSIGNED");
-  const completed = assignments.filter((a) => a.status !== "PENDING" && a.status !== "ASSIGNED");
+  const pending = items.filter((a) => !isDone(a));
+  const done = items.filter((a) => isDone(a) || isGraded(a));
 
   return (
     <>
-      <Topbar title="Homework & Grades" subtitle="Manage tasks, review homework, and check evaluations" />
-
-      <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
-          {/* Left Column: Pending Submissions */}
-          <div className="lg:col-span-7 space-y-5">
-            <div className="flex items-center justify-between border-b border-hairline pb-2.5">
-              <h3 className="font-extrabold text-sm text-ink flex items-center gap-2">
-                <Clock className="size-4.5 text-warning-ink" />
-                Pending Submissions
-              </h3>
-              <Badge tone="accent" className="font-black text-[10px] px-2">{pending.length} Due</Badge>
+      <Topbar title="Homework & Grades" subtitle="Your assignments, submissions and results" />
+      <div className="animate-fade-up space-y-5 p-4 sm:p-6">
+        {loading ? <Loading /> : (
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-black text-ink"><Clock className="size-4 text-amber-500" /> To Submit ({pending.length})</h3>
+              <div className="space-y-2">
+                {pending.length === 0 ? <Empty text="Nothing pending 🎉" /> : pending.map((a) => (
+                  <Card key={a.id} className="border border-hairline bg-surface"><CardBody className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div><p className="font-bold text-ink">{a.title}</p><p className="text-xs text-ink-3">{a.course} · {a.type || "Assignment"} · {a.maxMarks} marks</p></div>
+                      {a.submission?.status === "DRAFT" && <Badge tone="neutral">Draft saved</Badge>}
+                      {a.submission?.status === "RETURNED" && <Badge tone="critical">Returned</Badge>}
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-xs text-ink-3">Due {fmtT(a.dueAt)}{a.lateAllowed ? "" : " · no late"}</span>
+                      <button onClick={() => setOpen(a)} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-white">Open</button>
+                    </div>
+                    {a.submission?.status === "RETURNED" && a.submission.returnedReason && <p className="mt-2 rounded-lg bg-red-500/5 p-2 text-xs text-red-500">Teacher: {a.submission.returnedReason}</p>}
+                  </CardBody></Card>
+                ))}
+              </div>
             </div>
-
-            {pending.length > 0 ? (
-              <div className="space-y-4">
-                {pending.map((asg) => {
-                  const due = asg.dueDate ? new Date(asg.dueDate) : null;
-                  return (
-                    <Card key={asg.id} className="border border-hairline bg-surface rounded-3xl p-5 hover:shadow-md transition">
-                      <div className="flex flex-col justify-between h-full space-y-4">
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <h4 className="font-bold text-xs text-ink">{asg.title}</h4>
-                            {due && (
-                              <span className="text-[10px] font-extrabold text-rose-500 flex items-center gap-0.5 whitespace-nowrap">
-                                <Clock className="size-3" />
-                                Due: {due.toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-ink-3 leading-relaxed">
-                            {asg.description || "No homework outline provided. Complete exercises as directed by your teacher."}
-                          </p>
-                          <p className="text-[10px] text-ink-3 font-bold flex items-center gap-1">
-                            <BookOpen className="size-3.5" />
-                            Course: {asg.courseTitle} ({asg.courseCode})
-                          </p>
-                        </div>
-                        <div className="pt-2">
-                          <Button
-                            onClick={() => handleOpenSubmit(asg)}
-                            className="bg-accent hover:bg-accent-hover text-white text-[11px] font-bold h-8.5 px-4 rounded-xl flex items-center gap-1 cursor-pointer"
-                          >
-                            <Send className="size-3.5" />
-                            Submit Homework
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
+            <div>
+              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-black text-ink"><CheckCircle2 className="size-4 text-emerald-500" /> Submitted & Graded ({done.length})</h3>
+              <div className="space-y-2">
+                {done.length === 0 ? <Empty text="No submissions yet" /> : done.map((a) => (
+                  <Card key={a.id} className="border border-hairline bg-surface"><CardBody className="p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div><p className="font-bold text-ink">{a.title}</p><p className="text-xs text-ink-3">{a.course} · submitted {fmtT(a.submission?.submittedAt)}</p></div>
+                      {a.submission?.status === "EVALUATED"
+                        ? <Badge tone={a.submission.grade != null && a.submission.grade >= a.passingMarks ? "good" : "critical"}>{a.submission.grade}/{a.maxMarks}</Badge>
+                        : <Badge tone={a.submission?.isLate ? "warning" : "accent"}>{a.submission?.status}</Badge>}
+                    </div>
+                    <button onClick={() => setOpen(a)} className="mt-2 text-xs font-bold text-accent hover:underline">View details →</button>
+                  </CardBody></Card>
+                ))}
               </div>
-            ) : (
-              <div className="border border-hairline/80 rounded-3xl bg-surface py-12 text-center shadow-sm text-ink-3">
-                <CheckCircle2 className="size-8 text-good/60 mx-auto mb-2" />
-                <p className="font-bold text-xs">No pending homework!</p>
-                <p className="text-[11px]">All your active tasks have been submitted successfully.</p>
-              </div>
-            )}
-          </div>
-
-          {/* Right Column: Submission History & Grades */}
-          <div className="lg:col-span-5 space-y-5">
-            <div className="flex items-center justify-between border-b border-hairline pb-2.5">
-              <h3 className="font-extrabold text-sm text-ink flex items-center gap-2">
-                <Trophy className="size-4.5 text-good" />
-                Submission & Grading History
-              </h3>
-              <Badge tone="good" className="font-black text-[10px] px-2">{completed.length} Completed</Badge>
             </div>
-
-            {completed.length > 0 ? (
-              <div className="space-y-4">
-                {completed.map((asg) => {
-                  const sub = asg.submission || {};
-                  const isGraded = asg.status === "EVALUATED" || sub.grade !== null;
-
-                  return (
-                    <Card key={asg.id} className="border border-hairline bg-surface rounded-3xl p-5 space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex items-start justify-between gap-3">
-                          <h4 className="font-bold text-xs text-ink">{asg.title}</h4>
-                          {isGraded ? (
-                            <Badge tone="good" className="font-black text-[10px] tracking-wider uppercase px-2 py-0.5">
-                              Graded
-                            </Badge>
-                          ) : (
-                            <Badge tone="accent" className="font-black text-[10px] tracking-wider uppercase px-2 py-0.5">
-                              Submitted
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-ink-3 font-semibold">
-                          Course: <span className="text-ink-2 font-bold">{asg.courseTitle}</span>
-                        </p>
-                      </div>
-
-                      {/* Grades capsule indicator */}
-                      {isGraded && (
-                        <div className="flex items-center gap-3 bg-good-soft/8 border border-good/10 rounded-2xl p-3">
-                          <div className="size-10 bg-good/10 text-good rounded-xl flex items-center justify-center font-black text-sm">
-                            {sub.grade || 0}
-                          </div>
-                          <div>
-                            <span className="block text-[9px] text-ink-3 font-extrabold uppercase tracking-wider">Evaluation Grade</span>
-                            <span className="block text-xs font-extrabold text-good mt-0.5">Syllabus Criteria Satisfied</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Feedback comments */}
-                      {sub.feedback && (
-                        <div className="bg-surface-2 border border-hairline rounded-2xl p-3 space-y-1.5">
-                          <span className="text-[9px] text-ink-3 font-extrabold uppercase tracking-wider flex items-center gap-1">
-                            <MessageSquare className="size-3.5" />
-                            Instructor's Feedback Note:
-                          </span>
-                          <p className="text-[11px] text-ink-2 font-medium italic leading-relaxed">
-                            "{sub.feedback}"
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Submission details */}
-                      <div className="text-[10px] text-ink-3 font-bold border-t border-hairline/80 pt-3 flex justify-between items-center">
-                        <span>Submitted on: {sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : "—"}</span>
-                        {sub.fileUrl && (
-                          <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline flex items-center gap-0.5">
-                            <FileText className="size-3" />
-                            View Attached File
-                          </a>
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="border border-hairline/80 rounded-3xl bg-surface py-12 text-center shadow-sm text-ink-3">
-                <Trophy className="size-8 text-ink-3/40 mx-auto mb-2" />
-                <p className="font-bold text-xs">No grades history yet.</p>
-                <p className="text-[11px]">Submit homework tasks to receive grading scores.</p>
-              </div>
-            )}
           </div>
-
-        </div>
-      </main>
-
-      {/* Submission Modal Dialog */}
-      {submittingAssignment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in select-none">
-          <div className="bg-surface border border-hairline w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-scale-up">
-            <div className="border-b border-hairline px-6 py-4 flex items-center justify-between bg-surface-2/30">
-              <div>
-                <h3 className="font-extrabold text-ink text-sm">Submit Homework Solution</h3>
-                <p className="text-[10px] text-ink-3 font-semibold mt-0.5">{submittingAssignment.title}</p>
-              </div>
-              <button
-                onClick={() => setSubmittingAssignment(null)}
-                className="size-8 rounded-full hover:bg-surface-3 transition-colors grid place-items-center text-ink-3 hover:text-ink cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <form onSubmit={handleFormSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-ink-2 mb-1.5 uppercase tracking-wider">Solution Text / Answers</label>
-                <textarea
-                  required
-                  rows={6}
-                  value={submitContent}
-                  onChange={(e) => setSubmitContent(e.target.value)}
-                  placeholder="Type your notes, solution code, or answers here..."
-                  className="w-full rounded-xl border border-hairline bg-surface p-3 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent leading-relaxed"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-2 mb-1.5 uppercase tracking-wider">Attachments Link (Optional)</label>
-                <input
-                  type="url"
-                  value={submitFileUrl}
-                  onChange={(e) => setSubmitFileUrl(e.target.value)}
-                  placeholder="https://drive.google.com/file/d/..."
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-                <span className="text-[10px] text-ink-3 leading-none mt-1.5 block">
-                  You can paste a Google Drive, Dropbox, or GitHub link to attach documents.
-                </span>
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-hairline pt-4 bg-surface">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setSubmittingAssignment(null)}
-                  className="h-9 px-4 text-xs font-bold text-ink-2 border border-hairline hover:bg-surface-2 rounded-xl"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={submittingBusy}
-                  className="h-9 px-5 bg-accent hover:bg-accent-hover text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm"
-                >
-                  {submittingBusy && <Loader2 className="size-4 animate-spin mr-1" />}
-                  Submit Work
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
+      {open && <AssignmentModal id={open.id} onClose={() => setOpen(null)} onDone={() => { setOpen(null); load(); }} />}
     </>
   );
 }
+
+function AssignmentModal({ id, onClose, onDone }: { id: string; onClose: () => void; onDone: () => void }) {
+  const [a, setA] = useState<StudentAssignmentView | null>(null);
+  const [content, setContent] = useState("");
+  const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    openMyAssignment(id).then((d) => { setA(d); setContent(d.submission?.content ?? ""); setAttachments((d.submission?.attachments as AssignmentAttachment[]) ?? []); }).catch(() => undefined);
+  }, [id]);
+
+  const locked = !!a && isDone(a);
+  const upload = async (file?: File) => {
+    if (!file || !a) return;
+    if (a.allowedFileTypes.length) {
+      const ext = (file.name.split(".").pop() || "").toLowerCase();
+      if (!a.allowedFileTypes.map((t) => t.toLowerCase().replace(/^\./, "")).includes(ext)) return toast(`Only allowed: ${a.allowedFileTypes.join(", ")}`, "error");
+    }
+    if (a.maxFileSizeMb && file.size > a.maxFileSizeMb * 1024 * 1024) return toast(`Max file size is ${a.maxFileSizeMb} MB`, "error");
+    setUploading(true); try { const at = await uploadAssignmentFile(file); setAttachments((x) => [...x, at]); } catch (e) { fail(e); } finally { setUploading(false); }
+  };
+  const hint = () => {
+    if (!a) return;
+    const tips = [
+      a.instructions ? "Re-read the instructions and address every point listed." : "Break the task into small steps and tackle them one by one.",
+      a.subject ? `Focus on the key ideas of "${a.subject}" and explain them in your own words.` : "Explain concepts in your own words rather than copying.",
+      "Check spelling, grammar and structure before submitting.",
+      a.rubric.length ? `You'll be marked on: ${a.rubric.map((r) => r.name).join(", ")} — cover each one.` : "Make sure your answer is complete and well-organised.",
+    ];
+    Swal.fire({ title: "💡 Hint (not the full answer)", html: `<ul style="text-align:left;font-size:13px;line-height:1.7">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>`, background: swalBg(), confirmButtonText: "Got it" });
+  };
+  const draft = async () => { setBusy(true); try { await saveMyAssignmentDraft(id, { content, attachments }); toast("Draft saved"); onDone(); } catch (e) { fail(e); } finally { setBusy(false); } };
+  const submit = async () => {
+    const r = await Swal.fire({ title: "Submit assignment?", text: "You cannot edit after submission.", icon: "warning", showCancelButton: true, confirmButtonText: "Yes, submit", background: swalBg() });
+    if (!r.isConfirmed) return;
+    setBusy(true);
+    try { await submitMyAssignment(id, { content, attachments }); toast("Submitted"); onDone(); } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+
+  if (!a) return null;
+  const sub = a.submission;
+  const graded = sub?.status === "EVALUATED";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm">
+      <div className="my-6 w-full max-w-2xl rounded-2xl border border-hairline bg-surface shadow-2xl">
+        <div className="flex items-center justify-between border-b border-hairline p-4">
+          <div><h3 className="text-sm font-black text-ink">{a.title}</h3><p className="text-xs text-ink-3">{a.course} · {a.maxMarks} marks · pass {a.passingMarks}</p></div>
+          <button onClick={onClose} className="grid size-8 place-items-center rounded-lg hover:bg-surface-2"><X className="size-4" /></button>
+        </div>
+        <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
+          {a.dueAt && <div className="flex flex-wrap items-center gap-2 text-xs text-ink-3"><Clock className="size-3.5" /> Due {fmtT(a.dueAt)} {!a.lateAllowed && <Badge tone="critical">No late submission</Badge>} {a.lateAllowed && a.latePenaltyPct > 0 && <Badge tone="warning">Late penalty {a.latePenaltyPct}%</Badge>} {a.allowedFileTypes.length > 0 && <Badge tone="neutral">Files: {a.allowedFileTypes.join(", ")}</Badge>} {a.maxFileSizeMb && <Badge tone="neutral">Max {a.maxFileSizeMb} MB</Badge>}</div>}
+          {a.instructions && <div><p className="text-[11px] font-bold uppercase text-ink-3">Instructions</p><RichHtml html={a.instructions} className="mt-1" /></div>}
+          {a.description && <RichHtml html={a.description} className="text-ink-2" />}
+          {a.attachments.length > 0 && <div className="flex flex-wrap gap-2">{a.attachments.map((x, i) => <a key={i} href={resolveFileUrl(x.url)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-hairline px-2 py-1 text-xs font-bold text-accent"><FileText className="size-3" /> {x.name}</a>)}</div>}
+          {!locked && <button onClick={hint} className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1 text-xs font-bold text-amber-600 hover:bg-surface-2"><Lightbulb className="size-3.5" /> Get a hint</button>}
+
+          {/* Graded result */}
+          {graded && sub && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+              <div className="flex items-center justify-between"><p className="text-sm font-black text-ink">Result</p><Badge tone={sub.grade != null && sub.grade >= a.passingMarks ? "good" : "critical"}>{sub.grade}/{a.maxMarks}</Badge></div>
+              {sub.isLate && <p className="mt-1 text-xs text-amber-600">Late submission{sub.penaltyApplied ? ` · −${sub.penaltyApplied}% penalty applied` : ""}</p>}
+              {sub.rubricScores && Object.keys(sub.rubricScores).length > 0 && <div className="mt-2 space-y-1">{a.rubric.map((r) => <div key={r.name} className="flex justify-between text-xs"><span className="text-ink-3">{r.name}</span><span className="font-bold text-ink">{sub.rubricScores?.[r.name] ?? 0}/{r.max}</span></div>)}</div>}
+              {sub.feedback && <div className="mt-2"><p className="text-[11px] font-bold uppercase text-ink-3">Teacher feedback</p><p className="mt-0.5 text-sm text-ink">{sub.feedback}</p></div>}
+              {sub.feedbackFileUrl && <a href={resolveFileUrl(sub.feedbackFileUrl)} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-accent"><FileText className="size-3" /> Download feedback</a>}
+            </div>
+          )}
+
+          {/* Submission form */}
+          {!locked ? (
+            <>
+              {sub?.status === "RETURNED" && <div className="rounded-lg bg-red-500/5 p-2 text-xs text-red-500">Returned for changes: {sub.returnedReason}</div>}
+              <div><p className="mb-1 text-[11px] font-bold uppercase text-ink-3">Your answer</p><textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Write your answer or notes…" className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" /></div>
+              <div>
+                <p className="mb-1 text-[11px] font-bold uppercase text-ink-3">Attach files</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {attachments.map((x, i) => <span key={i} className="inline-flex items-center gap-1 rounded-lg border border-hairline bg-surface-2 px-2 py-1 text-xs"><FileText className="size-3" /> {x.name} <button onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}><X className="size-3 text-red-500" /></button></span>)}
+                  <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-xs font-bold text-ink-2 hover:bg-surface-2">{uploading ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />} Upload<input type="file" className="hidden" onChange={(e) => upload(e.target.files?.[0])} /></label>
+                </div>
+              </div>
+            </>
+          ) : !graded && sub && (
+            <div className="rounded-xl border border-hairline bg-surface-2 p-4 text-sm">
+              <p className="font-bold text-ink">Submitted {fmtT(sub.submittedAt)} {sub.isLate && <Badge tone="warning">Late</Badge>}</p>
+              <p className="mt-1 text-ink-3">Awaiting teacher review.</p>
+              {sub.content && <p className="mt-2 whitespace-pre-wrap text-ink-2">{sub.content}</p>}
+            </div>
+          )}
+        </div>
+        {!locked && (
+          <div className="flex items-center justify-end gap-2 border-t border-hairline p-4">
+            <button onClick={onClose} className="h-10 rounded-xl border border-hairline px-4 text-xs font-bold text-ink-2 hover:bg-surface-2">Close</button>
+            <button onClick={draft} disabled={busy} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-hairline px-4 text-xs font-bold text-ink hover:bg-surface-2 disabled:opacity-50"><Save className="size-3.5" /> Save Draft</button>
+            <button onClick={submit} disabled={busy} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white disabled:opacity-50">{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Submit</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ text }: { text: string }) { return <p className="rounded-xl border border-dashed border-hairline py-8 text-center text-sm text-ink-3">{text}</p>; }
+function Loading() { return <div className="flex items-center justify-center py-16 text-sm font-bold text-ink-3"><Loader2 className="mr-2 size-5 animate-spin text-accent" /> Loading…</div>; }

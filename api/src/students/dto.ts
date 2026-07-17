@@ -52,6 +52,21 @@ export class ListStudentsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  batchId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  coachId?: string;
+
+  @ApiPropertyOptional({ description: 'Only students converted from a trial/lead' })
+  @IsOptional()
+  @IsString()
+  trialConverted?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   country?: string;
 
   @ApiPropertyOptional()

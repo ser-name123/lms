@@ -16,3 +16,7 @@ uploads/
 *.log
 .DS_Store
 .vercel
+
+# Local handoff note — never commit
+PROJECT-HANDOFF.md
+handover.md

@@ -1,765 +1,212 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  ClipboardList,
-  Search,
-  Loader2,
-  ExternalLink,
-  Award,
-  AlertCircle,
-  CheckCircle,
-  Filter,
-  Eye,
-  SlidersHorizontal,
-  Plus,
-  Trash2,
-  Edit2,
-  Calendar,
-  X,
-  BookOpen,
-} from "lucide-react";
+import { Plus, Loader2, Send, ClipboardList, Clock, AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
 import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AssignmentFormModal } from "@/components/assignments/assignment-form-modal";
+import { GradeModal } from "@/components/assignments/grade-modal";
 import {
-  fetchTeacherAssignments,
-  gradeStudentSubmission,
-  resolveFileUrl,
-  fetchLmsAssignments,
-  fetchLmsCourses,
-  createLmsAssignment,
-  updateLmsAssignment,
-  deleteLmsAssignment,
+  fetchAssignmentTeacherDashboard, listAssignments, deleteAssignment, assignmentLifecycle,
+  getAssignment, getAssignmentSubmissions, fetchAssignmentCalendar,
+  type AssignmentListRow, type AssignmentSubmissionRow, type AssignmentDetail, type AssignmentCalendarItem,
 } from "@/lib/api";
 
-export default function TeacherAssignments() {
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [assignments, setAssignments] = useState<any[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
+const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
+const toast = (t: string, icon: "success" | "error" = "success") => Swal.fire({ toast: true, position: "top-end", icon, title: t, showConfirmButton: false, timer: 1800 });
+const fail = (e: unknown) => Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed", icon: "error", background: swalBg() });
+const fmt = (d?: string | null) => d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtT = (d?: string | null) => d ? new Date(d).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+const statusTone = (s: string): "good" | "warning" | "critical" | "accent" | "neutral" =>
+  s === "PUBLISHED" ? "good" : s === "DRAFT" ? "neutral" : s === "SCHEDULED" ? "accent" : s === "CLOSED" ? "warning" : s === "ARCHIVED" ? "critical" : "neutral";
+
+export default function TeacherAssignmentsPage() {
+  const [tab, setTab] = useState<"list" | "review" | "calendar">("list");
+  const [cards, setCards] = useState<Record<string, number>>({});
+  const [rows, setRows] = useState<AssignmentListRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"SUBMISSIONS" | "MANAGE">("SUBMISSIONS");
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<AssignmentDetail | null>(null);
+  const [reviewId, setReviewId] = useState<string | null>(null);
 
-  // Filters for Submissions
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "EVALUATED">("ALL");
+  const load = () => {
+    setLoading(true);
+    Promise.all([fetchAssignmentTeacherDashboard().then((d) => setCards(d.cards)), listAssignments().then((r) => setRows(r.items))])
+      .catch(() => undefined).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
 
-  // Filters for Homework Manager
-  const [assignmentSearch, setAssignmentSearch] = useState("");
-  const [courseFilter, setCourseFilter] = useState("ALL");
-
-  // Evaluation Modal State
-  const [activeSubmission, setActiveSubmission] = useState<any | null>(null);
-  const [score, setScore] = useState<number>(100);
-  const [feedback, setFeedback] = useState("");
-  const [submittingGrade, setSubmittingGrade] = useState(false);
-
-  // Assignment Create/Edit Modal State
-  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<"CREATE" | "EDIT">("CREATE");
-  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
-  const [assignmentTitle, setAssignmentTitle] = useState("");
-  const [assignmentCourseCode, setAssignmentCourseCode] = useState("");
-  const [assignmentDueDate, setAssignmentDueDate] = useState("");
-  const [assignmentDescription, setAssignmentDescription] = useState("");
-  const [assignmentCategory, setAssignmentCategory] = useState("Homework");
-  const [savingAssignment, setSavingAssignment] = useState(false);
-
-  const loadSubmissions = (isFirst = false) => {
-    if (isFirst) setLoading(true);
-    fetchTeacherAssignments()
-      .then((res) => {
-        setSubmissions(res);
-      })
-      .catch((err) => {
-        console.error("Failed to load homework submissions", err);
-      })
-      .finally(() => {
-        if (isFirst) setLoading(false);
-      });
+  const openEdit = async (id: string) => { try { const d = await getAssignment(id); setEditing(d); setShowCreate(true); } catch (e) { fail(e); } };
+  const lifecycle = async (id: string, action: "publish" | "unpublish" | "archive" | "close" | "duplicate") => {
+    try { await assignmentLifecycle(id, action); load(); toast(action === "publish" ? "Published & students notified" : `Done: ${action}`); } catch (e) { fail(e); }
+  };
+  const del = async (id: string) => {
+    const r = await Swal.fire({ title: "Delete assignment?", icon: "warning", showCancelButton: true, confirmButtonText: "Delete", background: swalBg() });
+    if (!r.isConfirmed) return;
+    try { await deleteAssignment(id); load(); toast("Deleted"); } catch (e) { fail(e); }
   };
 
-  const loadAssignmentsAndCourses = () => {
-    Promise.all([fetchLmsAssignments(), fetchLmsCourses()])
-      .then(([asmRes, crsRes]) => {
-        setAssignments(asmRes);
-        setCourses(crsRes);
-      })
-      .catch((err) => {
-        console.error("Failed to load homework templates list", err);
-      });
-  };
-
-  useEffect(() => {
-    loadSubmissions(true);
-    loadAssignmentsAndCourses();
-  }, []);
-
-  const handleGradeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeSubmission) return;
-
-    setSubmittingGrade(true);
-    try {
-      await gradeStudentSubmission(activeSubmission.id, score, feedback.trim());
-      Swal.fire({
-        title: "Homework Graded!",
-        text: "Student homework has been graded and status set to Evaluated.",
-        icon: "success",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-      });
-      setActiveSubmission(null);
-      loadSubmissions(false);
-    } catch (err) {
-      Swal.fire("Error", "Could not submit grading evaluation.", "error");
-    } finally {
-      setSubmittingGrade(false);
-    }
-  };
-
-  const handleSaveAssignment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!assignmentTitle || !assignmentCourseCode || !assignmentDueDate) {
-      Swal.fire("Validation Error", "Please fill in all required fields.", "warning");
-      return;
-    }
-
-    setSavingAssignment(true);
-    const selectedCourse = courses.find((c) => c.code === assignmentCourseCode);
-    const payload = {
-      title: assignmentTitle.trim(),
-      courseCode: assignmentCourseCode,
-      courseTitle: selectedCourse?.title || assignmentCourseCode,
-      category: assignmentCategory,
-      dueDate: assignmentDueDate,
-      description: assignmentDescription.trim(),
-    };
-
-    try {
-      if (modalMode === "CREATE") {
-        await createLmsAssignment(payload);
-        Swal.fire({
-          title: "Assignment Created",
-          text: "New homework template published successfully.",
-          icon: "success",
-          toast: true,
-          position: "top-end",
-          showConfirmButton: false,
-          timer: 3000,
-        });
-      } else if (editingAssignmentId) {
-        await updateLmsAssignment(editingAssignmentId, payload);
-        Swal.fire({
-          title: "Assignment Updated",
-          text: "Homework template changes saved.",
-          icon: "success",
-          toast: true,
-          position: "top-end",
-          showConfirmButton: false,
-          timer: 3000,
-        });
-      }
-      setAssignmentModalOpen(false);
-      loadAssignmentsAndCourses();
-      // Clean states
-      setAssignmentTitle("");
-      setAssignmentCourseCode("");
-      setAssignmentDueDate("");
-      setAssignmentDescription("");
-      setAssignmentCategory("Homework");
-    } catch (err) {
-      Swal.fire("Error", "Could not save assignment details.", "error");
-    } finally {
-      setSavingAssignment(false);
-    }
-  };
-
-  const handleOpenEditModal = (asm: any) => {
-    setModalMode("EDIT");
-    setEditingAssignmentId(asm.id);
-    setAssignmentTitle(asm.title);
-    setAssignmentCourseCode(asm.courseCode);
-    setAssignmentDueDate(asm.dueDate);
-    setAssignmentDescription(asm.description || "");
-    setAssignmentCategory(asm.category || "Homework");
-    setAssignmentModalOpen(true);
-  };
-
-  const handleDeleteAssignment = (id: string) => {
-    Swal.fire({
-      title: "Delete Homework?",
-      text: "Are you sure you want to remove this assignment template? This will delete associated submissions.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonColor: "#EF4444",
-      cancelButtonColor: "#6B7280",
-      confirmButtonText: "Yes, Delete",
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        try {
-          await deleteLmsAssignment(id);
-          Swal.fire("Deleted!", "Assignment template has been deleted.", "success");
-          loadAssignmentsAndCourses();
-        } catch (err) {
-          Swal.fire("Error", "Failed to delete assignment template.", "error");
-        }
-      }
-    });
-  };
-
-  const filteredSubmissions = submissions.filter((s) => {
-    const q = searchQuery.toLowerCase();
-    const studentName = `${s.student?.user?.firstName} ${s.student?.user?.lastName}`.toLowerCase();
-    const matchesSearch =
-      studentName.includes(q) ||
-      s.assignment?.title?.toLowerCase().includes(q);
-
-    const matchesStatus =
-      statusFilter === "ALL" ||
-      (statusFilter === "PENDING" && s.status !== "EVALUATED") ||
-      (statusFilter === "EVALUATED" && s.status === "EVALUATED");
-
-    return matchesSearch && matchesStatus;
-  });
-
-  const uniqueCourses = Array.from(new Set(assignments.map((asm) => asm.courseCode))).filter(Boolean);
-
-  const filteredAssignments = assignments.filter((asm) => {
-    const q = assignmentSearch.toLowerCase();
-    const matchesSearch =
-      asm.title?.toLowerCase().includes(q) ||
-      asm.description?.toLowerCase().includes(q);
-
-    const matchesCourse = courseFilter === "ALL" || asm.courseCode === courseFilter;
-
-    return matchesSearch && matchesCourse;
-  });
-
-  if (loading) {
-    return (
-      <>
-        <Topbar title="Assignments" subtitle="Review student tasks" />
-        <div className="flex h-[calc(100vh-4.5rem)] items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="mx-auto size-8 animate-spin text-accent" />
-            <p className="mt-3 text-sm font-bold text-ink-3">Loading homework logs...</p>
-          </div>
-        </div>
-      </>
-    );
-  }
+  const CARDS = [
+    { label: "Today's Assignments", value: cards.todays ?? 0, icon: ClipboardList },
+    { label: "Pending Review", value: cards.pendingReview ?? 0, icon: Clock },
+    { label: "Submitted Today", value: cards.submittedToday ?? 0, icon: Send },
+    { label: "Late Submissions", value: cards.lateSubmissions ?? 0, icon: AlertTriangle },
+    { label: "Need Recheck", value: cards.needRecheck ?? 0, icon: RefreshCw },
+  ];
 
   return (
     <>
-      <Topbar title="Assignments" subtitle="Manage assignment templates and evaluate student submissions" />
-
-      <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
-        
-        {/* Futuristic Tab Switcher */}
-        <div className="flex border-b border-hairline/80 pb-px">
-          <button
-            onClick={() => setActiveTab("SUBMISSIONS")}
-            className={`pb-3.5 text-xs font-black uppercase tracking-wider px-2.5 relative transition cursor-pointer ${
-              activeTab === "SUBMISSIONS" ? "text-accent" : "text-ink-3 hover:text-ink"
-            }`}
-          >
-            Submissions & Grading
-            {activeTab === "SUBMISSIONS" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("MANAGE")}
-            className={`pb-3.5 text-xs font-black uppercase tracking-wider px-2.5 ml-6 relative transition cursor-pointer ${
-              activeTab === "MANAGE" ? "text-accent" : "text-ink-3 hover:text-ink"
-            }`}
-          >
-            Homework Assignments List
-            {activeTab === "MANAGE" && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />
-            )}
-          </button>
+      <Topbar title="Assignments" subtitle="Create, publish and review student assignments" />
+      <div className="animate-fade-up space-y-5 p-4 sm:p-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {CARDS.map((c) => (
+            <Card key={c.label} className="border border-hairline bg-surface"><CardBody className="flex items-center gap-3 p-4">
+              <span className="grid size-9 place-items-center rounded-xl bg-accent/10 text-accent"><c.icon className="size-4.5" /></span>
+              <div><p className="text-lg font-black text-ink leading-none">{c.value}</p><p className="mt-0.5 text-[11px] font-semibold text-ink-3">{c.label}</p></div>
+            </CardBody></Card>
+          ))}
         </div>
 
-        {activeTab === "SUBMISSIONS" ? (
-          <>
-            {/* Interactive evaluation summary cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 animate-fade-up">
-              <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-                <div className="size-12 rounded-2xl bg-accent-soft/20 text-accent flex items-center justify-center shrink-0">
-                  <ClipboardList className="size-6" />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Total Submissions</span>
-                  <h4 className="text-xl font-black text-ink leading-none mt-1">{submissions.length} Tasks</h4>
-                </div>
-              </Card>
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1.5 rounded-xl border border-hairline bg-surface-2 p-1">
+            {(["list", "review", "calendar"] as const).map((t) => (
+              <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-4 py-2 text-xs font-bold capitalize transition-all ${tab === t ? "bg-surface text-accent shadow-sm border border-hairline/80" : "text-ink-3 hover:text-ink-2"}`}>{t === "list" ? "My Assignments" : t === "review" ? "Review" : "Calendar"}</button>
+            ))}
+          </div>
+          {tab === "list" && <button onClick={() => { setEditing(null); setShowCreate(true); }} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white"><Plus className="size-4" /> New Assignment</button>}
+        </div>
 
-              <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-                <div className="size-12 rounded-2xl bg-warning-soft/20 text-warning flex items-center justify-center shrink-0">
-                  <AlertCircle className="size-6 animate-pulse" />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Ungraded Homework</span>
-                  <h4 className="text-xl font-black text-ink leading-none mt-1">
-                    {submissions.filter((s) => s.status !== "EVALUATED").length} Submissions
-                  </h4>
-                </div>
-              </Card>
-
-              <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-                <div className="size-12 rounded-2xl bg-good-soft/20 text-good flex items-center justify-center shrink-0">
-                  <CheckCircle className="size-6" />
-                </div>
-                <div>
-                  <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Evaluated Submissions</span>
-                  <h4 className="text-xl font-black text-ink leading-none mt-1">
-                    {submissions.filter((s) => s.status === "EVALUATED").length} Tasks
-                  </h4>
-                </div>
-              </Card>
-            </div>
-
-            {/* Filter Hub Panel */}
-            <Card className="border border-hairline bg-surface rounded-3xl p-5 shadow-sm space-y-4 animate-fade-up">
-              <div className="flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
-                
-                {/* Status Switchers */}
-                <div className="flex items-center gap-2 overflow-x-auto w-full xl:w-auto pb-1 xl:pb-0 scrollbar-none select-none">
-                  <button
-                    onClick={() => setStatusFilter("ALL")}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                      statusFilter === "ALL"
-                        ? "bg-accent text-white shadow-sm"
-                        : "bg-surface-2/45 border border-hairline text-ink-2 hover:bg-surface-2"
-                    }`}
-                  >
-                    All Submissions ({submissions.length})
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter("PENDING")}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                      statusFilter === "PENDING"
-                        ? "bg-accent text-white shadow-sm"
-                        : "bg-surface-2/45 border border-hairline text-ink-2 hover:bg-surface-2"
-                    }`}
-                  >
-                    Pending evaluation ({submissions.filter((s) => s.status !== "EVALUATED").length})
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter("EVALUATED")}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                      statusFilter === "EVALUATED"
-                        ? "bg-accent text-white shadow-sm"
-                        : "bg-surface-2/45 border border-hairline text-ink-2 hover:bg-surface-2"
-                    }`}
-                  >
-                    Evaluated ({submissions.filter((s) => s.status === "EVALUATED").length})
-                  </button>
-                </div>
-
-                {/* Submissions Search Input */}
-                <div className="relative w-full xl:w-80">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3 pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Search student or homework title..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-9.5 w-full pl-9 pr-4 rounded-xl border border-hairline bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-ink-3"
-                  />
-                </div>
-
-              </div>
-            </Card>
-
-            {/* Submissions Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-up">
-              {filteredSubmissions.length > 0 ? (
-                filteredSubmissions.map((s) => {
-                  const studentName = `${s.student?.user?.firstName} ${s.student?.user?.lastName}`;
-                  const isGraded = s.status === "EVALUATED";
-                  
-                  return (
-                    <Card
-                      key={s.id}
-                      className="border border-hairline bg-surface rounded-3xl p-6 hover:shadow-md transition flex flex-col justify-between"
-                    >
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h3 className="font-extrabold text-sm text-ink">{s.assignment?.title}</h3>
-                            <span className="text-[10px] font-bold text-accent mt-0.5 block">{s.assignment?.courseTitle}</span>
-                          </div>
-                          <Badge tone={isGraded ? "good" : "warning"} className="font-black text-[9px] uppercase tracking-wider px-2 py-0.5">
-                            {isGraded ? `Graded: ${s.grade} pts` : "Pending Evaluation"}
-                          </Badge>
+        {loading && tab !== "calendar" ? <Loading /> : tab === "list" ? (
+          <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead><tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">
+                  <th className="px-4 py-3">Title</th><th className="px-4 py-3">Course / Batch</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Submissions</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
+                </tr></thead>
+                <tbody className="divide-y divide-hairline">
+                  {rows.length === 0 ? <tr><td colSpan={7} className="py-12 text-center text-ink-3">No assignments yet. Create one.</td></tr> : rows.map((a) => (
+                    <tr key={a.id} className="hover:bg-surface-2/20">
+                      <td className="px-4 py-3"><p className="font-bold text-ink">{a.title}</p><p className="text-[10px] text-ink-3">{a.subject || "—"} · {a.difficulty || "—"}</p></td>
+                      <td className="px-4 py-3 text-ink-2">{a.course}{a.batch ? ` · ${a.batch}` : ""}</td>
+                      <td className="px-4 py-3 text-ink-2">{a.type || "—"}</td>
+                      <td className="px-4 py-3 text-ink-2">{fmt(a.dueAt)}</td>
+                      <td className="px-4 py-3 text-ink-2">{a.submitted}/{a.targetCount} · <span className="text-accent font-bold">{a.checked} checked</span></td>
+                      <td className="px-4 py-3"><Badge tone={statusTone(a.status)}>{a.status}</Badge>{a.locked && <span className="ml-1 text-[10px] text-red-500">🔒</span>}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button onClick={() => { setReviewId(a.id); setTab("review"); }} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-accent hover:bg-surface-2">Review</button>
+                          {a.status === "DRAFT" && <button onClick={() => lifecycle(a.id, "publish")} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-emerald-600 hover:bg-surface-2">Publish</button>}
+                          {a.status === "PUBLISHED" && <button onClick={() => lifecycle(a.id, "close")} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-ink-2 hover:bg-surface-2">Close</button>}
+                          <button onClick={() => openEdit(a.id)} disabled={a.locked} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-40">Edit</button>
+                          <button onClick={() => lifecycle(a.id, "duplicate")} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-ink-2 hover:bg-surface-2">Duplicate</button>
+                          <button onClick={() => del(a.id)} className="rounded-lg border border-hairline px-2 py-1 text-[11px] font-bold text-red-500 hover:bg-surface-2"><Trash2 className="size-3.5" /></button>
                         </div>
-
-                        <div className="p-3.5 rounded-2xl bg-surface-2/45 border border-hairline space-y-1 text-xs">
-                          <p className="text-ink-3 font-semibold">Submitted by: <strong className="text-ink-2">{studentName}</strong></p>
-                          <p className="text-ink-3 font-semibold line-clamp-2">Answer Notes: <span className="text-ink font-semibold">{s.submissionNotes || "No notes attached."}</span></p>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 mt-4 border-t border-hairline/80 flex items-center justify-between gap-3 flex-wrap">
-                        {s.submissionFileUrl ? (
-                          <a
-                            href={resolveFileUrl(s.submissionFileUrl)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-accent font-extrabold flex items-center gap-1 hover:underline cursor-pointer"
-                          >
-                            <ExternalLink className="size-3.5" />
-                            View Attached File
-                          </a>
-                        ) : (
-                          <span className="text-[10px] text-ink-3 font-bold">No file attachment</span>
-                        )}
-
-                        <Button
-                          onClick={() => {
-                            setActiveSubmission(s);
-                            setScore(s.grade || 100);
-                            setFeedback(s.feedback || "");
-                          }}
-                          className="bg-accent hover:bg-accent-hover text-white text-xs font-extrabold h-9 px-4.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm ml-auto"
-                        >
-                          <Award className="size-3.5" />
-                          {isGraded ? "Edit Evaluation" : "Evaluate"}
-                        </Button>
-                      </div>
-                    </Card>
-                  );
-                })
-              ) : (
-                <Card className="border border-hairline bg-surface rounded-3xl p-12 text-center shadow-sm w-full lg:col-span-2 space-y-4">
-                  <ClipboardList className="size-12 text-ink-3/40 mx-auto" />
-                  <h3 className="font-extrabold text-sm text-ink">No Submissions Found</h3>
-                  <p className="text-xs text-ink-3 leading-relaxed">
-                    No student homework uploads found matching this filter category.
-                  </p>
-                </Card>
-              )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </>
-        ) : (
-          <>
-            {/* Homework Assignment Templates Manager */}
-            <Card className="border border-hairline bg-surface rounded-3xl p-5 shadow-sm space-y-4 animate-fade-up">
-              <div className="flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
-                
-                {/* Create Trigger button */}
-                <Button
-                  onClick={() => {
-                    setModalMode("CREATE");
-                    setAssignmentTitle("");
-                    setAssignmentCourseCode("");
-                    setAssignmentDueDate("");
-                    setAssignmentDescription("");
-                    setAssignmentCategory("Homework");
-                    setAssignmentModalOpen(true);
-                  }}
-                  className="bg-accent hover:bg-accent-hover text-white text-xs font-extrabold h-9.5 px-5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Plus className="size-4" />
-                  Create New Assignment
-                </Button>
-
-                {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto items-stretch sm:items-center">
-                  
-                  {/* Course Dropdown */}
-                  <div className="relative">
-                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3 pointer-events-none" />
-                    <select
-                      value={courseFilter}
-                      onChange={(e) => setCourseFilter(e.target.value)}
-                      className="h-9.5 pl-9 pr-8 rounded-xl border border-hairline bg-surface text-xs font-bold text-ink-2 focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer appearance-none min-w-[150px]"
-                    >
-                      <option value="ALL">All Courses</option>
-                      {uniqueCourses.map((c: any) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Title Search */}
-                  <div className="relative flex-1 sm:flex-initial sm:w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3 pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Search assignment title..."
-                      value={assignmentSearch}
-                      onChange={(e) => setAssignmentSearch(e.target.value)}
-                      className="h-9.5 w-full pl-9 pr-4 rounded-xl border border-hairline bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-ink-3"
-                    />
-                  </div>
-
-                </div>
-
-              </div>
-            </Card>
-
-            {/* Assignments Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-up">
-              {filteredAssignments.length > 0 ? (
-                filteredAssignments.map((asm) => {
-                  return (
-                    <Card
-                      key={asm.id}
-                      className="border border-hairline bg-surface rounded-3xl p-6 hover:shadow-md transition flex flex-col justify-between"
-                    >
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h3 className="font-extrabold text-sm text-ink">{asm.title}</h3>
-                            <span className="text-[10px] font-bold text-accent mt-0.5 block">{asm.courseTitle} ({asm.courseCode})</span>
-                          </div>
-                          <Badge tone="accent" className="font-black text-[9px] uppercase tracking-wider px-2 py-0.5">
-                            {asm.category || "Homework"}
-                          </Badge>
-                        </div>
-
-                        {asm.description && (
-                          <p className="text-xs text-ink-3 leading-relaxed font-semibold line-clamp-3">
-                            {asm.description}
-                          </p>
-                        )}
-
-                        <div className="space-y-1.5 pt-2 border-t border-hairline text-xs font-bold text-ink-2 flex items-center gap-1.5">
-                          <Calendar className="size-4 text-accent" />
-                          <span>Due Date: {asm.dueDate}</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 mt-4 border-t border-hairline/80 flex items-center justify-end gap-2.5">
-                        <Button
-                          onClick={() => handleOpenEditModal(asm)}
-                          className="bg-surface border border-hairline text-ink-2 hover:bg-surface-2 text-[10px] font-extrabold h-8.5 px-3 rounded-lg flex items-center gap-1 cursor-pointer shadow-xs"
-                        >
-                          <Edit2 className="size-3.5" />
-                          Edit Details
-                        </Button>
-                        <Button
-                          onClick={() => handleDeleteAssignment(asm.id)}
-                          className="bg-bad-soft/20 text-bad hover:bg-bad-soft/40 text-[10px] font-extrabold h-8.5 px-3 rounded-lg flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="size-3.5" />
-                          Delete
-                        </Button>
-                      </div>
-                    </Card>
-                  );
-                })
-              ) : (
-                <Card className="border border-hairline bg-surface rounded-3xl p-12 text-center shadow-sm w-full md:col-span-2 space-y-4">
-                  <ClipboardList className="size-12 text-ink-3/40 mx-auto" />
-                  <h3 className="font-extrabold text-sm text-ink">No Assignments Published</h3>
-                  <p className="text-xs text-ink-3 leading-relaxed">
-                    You have not created any course homework templates yet. Click "Create New Assignment" above to publish one.
-                  </p>
-                </Card>
-              )}
-            </div>
-          </>
-        )}
-
-      </main>
-
-      {/* Futuristic Evaluation modal overlay */}
-      {activeSubmission && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
-          <Card className="bg-surface border border-hairline rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-5 animate-scale-up">
-            
-            <div className="pb-3.5 border-b border-hairline flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-base text-ink flex items-center gap-2">
-                  <Award className="size-5 text-accent" />
-                  Homework Evaluation
-                </h3>
-                <p className="text-[10px] text-ink-3 font-semibold mt-0.5">
-                  Assign marks for {activeSubmission.student?.user?.firstName} {activeSubmission.student?.user?.lastName}
-                </p>
-              </div>
-              <button onClick={() => setActiveSubmission(null)} className="text-ink-3 hover:text-ink cursor-pointer">
-                <X className="size-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleGradeSubmit} className="space-y-4.5">
-              
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-ink-2">
-                  Score Points (Max {activeSubmission.assignment?.maxPoints || 100} pts)
-                </label>
-                <input
-                  type="number"
-                  required
-                  min={0}
-                  max={activeSubmission.assignment?.maxPoints || 100}
-                  value={score}
-                  onChange={(e) => setScore(Number(e.target.value))}
-                  className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-ink-2">Feedback Commentary</label>
-                <textarea
-                  rows={4}
-                  required
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Provide guidance tips, remarks, and critique corrections..."
-                  className="w-full p-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-ink-3"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-hairline">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setActiveSubmission(null)}
-                  className="rounded-xl border border-hairline font-bold text-xs h-10 px-5 cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={submittingGrade}
-                  className="rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-xs h-10 px-6 cursor-pointer"
-                >
-                  {submittingGrade ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
-                  Submit Grade Evaluation
-                </Button>
-              </div>
-
-            </form>
           </Card>
-        </div>
-      )}
+        ) : tab === "review" ? <ReviewPanel rows={rows} reviewId={reviewId} setReviewId={setReviewId} onGraded={load} /> : <CalendarView />}
+      </div>
 
-      {/* Assignment Create/Edit Modal */}
-      {assignmentModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
-          <Card className="bg-surface border border-hairline rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-5 animate-scale-up">
-            
-            <div className="pb-3.5 border-b border-hairline flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-base text-ink flex items-center gap-2">
-                  <BookOpen className="size-5 text-accent" />
-                  {modalMode === "CREATE" ? "Publish Homework" : "Edit Homework"}
-                </h3>
-                <p className="text-[10px] text-ink-3 font-semibold mt-0.5">
-                  Configure assignment criteria details
-                </p>
-              </div>
-              <button onClick={() => setAssignmentModalOpen(false)} className="text-ink-3 hover:text-ink cursor-pointer">
-                <X className="size-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveAssignment} className="space-y-4">
-              
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-ink-2">Assignment Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={assignmentTitle}
-                  onChange={(e) => setAssignmentTitle(e.target.value)}
-                  placeholder="e.g. Arabic Grammar Lesson 4 Exercises"
-                  className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Course Code *</label>
-                  <select
-                    required
-                    value={assignmentCourseCode}
-                    onChange={(e) => setAssignmentCourseCode(e.target.value)}
-                    className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer"
-                  >
-                    <option value="">Select Course</option>
-                    {courses.map((c) => (
-                      <option key={c.id} value={c.code}>
-                        {c.code} – {c.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Due Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={assignmentDueDate}
-                    onChange={(e) => setAssignmentDueDate(e.target.value)}
-                    className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-ink-2">Category *</label>
-                <select
-                  required
-                  value={assignmentCategory}
-                  onChange={(e) => setAssignmentCategory(e.target.value)}
-                  className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer"
-                >
-                  <option value="Homework">Homework</option>
-                  <option value="Quiz">Quiz</option>
-                  <option value="Exam">Exam</option>
-                  <option value="Project">Project</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-bold text-ink-2">Task Instructions / Description</label>
-                <textarea
-                  rows={4}
-                  value={assignmentDescription}
-                  onChange={(e) => setAssignmentDescription(e.target.value)}
-                  placeholder="Describe homework task prompts, reference books, and grading metrics details..."
-                  className="w-full p-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent placeholder:text-ink-3"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-hairline">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setAssignmentModalOpen(false)}
-                  className="rounded-xl border border-hairline font-bold text-xs h-10 px-5 cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={savingAssignment}
-                  className="rounded-xl bg-accent hover:bg-accent-hover text-white font-bold text-xs h-10 px-6 cursor-pointer"
-                >
-                  {savingAssignment ? <Loader2 className="size-4 animate-spin mr-1.5" /> : null}
-                  Publish Task
-                </Button>
-              </div>
-
-            </form>
-          </Card>
-        </div>
-      )}
+      {showCreate && <AssignmentFormModal editing={editing} onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} />}
     </>
   );
 }
+
+// ── Review panel ──────────────────────────────────────────────────────────────
+function ReviewPanel({ rows, reviewId, setReviewId, onGraded }: { rows: AssignmentListRow[]; reviewId: string | null; setReviewId: (id: string | null) => void; onGraded: () => void }) {
+  const [subs, setSubs] = useState<AssignmentSubmissionRow[]>([]);
+  const [detail, setDetail] = useState<AssignmentDetail | null>(null);
+  const [grading, setGrading] = useState<AssignmentSubmissionRow | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = (id: string) => { setLoading(true); Promise.all([getAssignment(id).then(setDetail), getAssignmentSubmissions(id).then(setSubs)]).catch(() => undefined).finally(() => setLoading(false)); };
+  useEffect(() => { if (reviewId) load(reviewId); }, [reviewId]);
+
+  if (!reviewId) return (
+    <Card className="border border-hairline bg-surface"><CardBody className="p-5">
+      <p className="mb-3 text-sm font-bold text-ink">Pick an assignment to review:</p>
+      <div className="space-y-2">
+        {rows.filter((a) => a.status !== "DRAFT").map((a) => (
+          <button key={a.id} onClick={() => setReviewId(a.id)} className="flex w-full items-center justify-between rounded-xl border border-hairline px-3 py-2 text-left text-sm hover:bg-surface-2">
+            <span className="font-bold text-ink">{a.title} <span className="text-xs font-normal text-ink-3">· {a.course}</span></span>
+            <Badge tone="accent">{a.submitted}/{a.targetCount}</Badge>
+          </button>
+        ))}
+        {rows.filter((a) => a.status !== "DRAFT").length === 0 && <p className="py-6 text-center text-sm text-ink-3">No published assignments yet.</p>}
+      </div>
+    </CardBody></Card>
+  );
+
+  return (
+    <div className="space-y-4">
+      <button onClick={() => setReviewId(null)} className="text-xs font-bold text-accent hover:underline">← All assignments</button>
+      {loading ? <Loading /> : (
+        <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
+          <div className="border-b border-hairline p-4"><h3 className="text-sm font-black text-ink">{detail?.title}</h3><p className="text-xs text-ink-3">{detail?.courseTitle} · max {detail?.maxMarks} marks · due {fmt(detail?.dueAt)}</p></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead><tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3"><th className="px-4 py-3">Student</th><th className="px-4 py-3">Submitted</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Marks</th><th className="px-4 py-3 text-right">Action</th></tr></thead>
+              <tbody className="divide-y divide-hairline">
+                {subs.map((s) => (
+                  <tr key={s.studentId} className="hover:bg-surface-2/20">
+                    <td className="px-4 py-3"><p className="font-bold text-ink">{s.name}</p><p className="text-[10px] text-ink-3">{s.studentCode}</p></td>
+                    <td className="px-4 py-3 text-ink-2">{fmtT(s.submittedAt)} {s.isLate && <Badge tone="warning">Late</Badge>}</td>
+                    <td className="px-4 py-3"><Badge tone={s.status === "EVALUATED" ? "good" : s.status === "RETURNED" ? "critical" : s.status === "ASSIGNED" ? "neutral" : "accent"}>{s.status}</Badge></td>
+                    <td className="px-4 py-3 font-bold text-ink">{s.grade != null ? `${s.grade}/${detail?.maxMarks}` : "—"}</td>
+                    <td className="px-4 py-3 text-right">{s.submissionId ? <button onClick={() => setGrading(s)} className="rounded-lg bg-accent px-3 py-1 text-[11px] font-bold text-white">{s.grade != null ? "Re-grade" : "Grade"}</button> : <span className="text-ink-3">Not submitted</span>}</td>
+                  </tr>
+                ))}
+                {subs.length === 0 && <tr><td colSpan={5} className="py-10 text-center text-ink-3">No target students.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+      {grading && detail && <GradeModal sub={grading} detail={detail} onClose={() => setGrading(null)} onGraded={() => { setGrading(null); if (reviewId) load(reviewId); onGraded(); }} />}
+    </div>
+  );
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+function CalendarView() {
+  const now = new Date();
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [items, setItems] = useState<AssignmentCalendarItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setLoading(true); fetchAssignmentCalendar(month).then(setItems).catch(() => undefined).finally(() => setLoading(false)); }, [month]);
+  const [y, m] = month.split("-").map(Number);
+  const first = new Date(y, m - 1, 1).getDay();
+  const days = new Date(y, m, 0).getDate();
+  const byDay = new Map<number, AssignmentCalendarItem[]>();
+  for (const it of items) if (it.day) byDay.set(it.day, [...(byDay.get(it.day) ?? []), it]);
+  return (
+    <Card className="border border-hairline bg-surface"><CardBody className="p-5">
+      <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-black text-ink">Assignment Calendar</h3><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-9 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink" /></div>
+      {loading ? <Loading /> : (
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-1 text-[10px] font-bold uppercase text-ink-3">{d}</div>)}
+          {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: days }).map((_, i) => {
+            const day = i + 1; const list = byDay.get(day) ?? [];
+            return (
+              <div key={day} className={`min-h-16 rounded-lg border p-1 text-left ${list.length ? "border-accent/40 bg-accent/5" : "border-hairline"}`}>
+                <p className="text-[10px] font-bold text-ink-3">{day}</p>
+                {list.slice(0, 3).map((it) => <p key={it.id} className="truncate rounded bg-accent/10 px-1 text-[9px] font-bold text-accent" title={`${it.title} · ${it.course}`}>{it.title}</p>)}
+                {list.length > 3 && <p className="text-[9px] text-ink-3">+{list.length - 3}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </CardBody></Card>
+  );
+}
+
+function Loading() { return <div className="flex items-center justify-center py-16 text-sm font-bold text-ink-3"><Loader2 className="mr-2 size-5 animate-spin text-accent" /> Loading…</div>; }

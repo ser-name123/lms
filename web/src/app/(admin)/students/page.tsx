@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { 
-  ChevronLeft, 
+import { useRouter } from "next/navigation";
+import {
+  ChevronLeft,
   ChevronRight, 
   Download, 
   Plus, 
@@ -27,7 +28,8 @@ import {
   Laptop,
   MapPin,
   Clock,
-  MoreVertical
+  MoreVertical,
+  FileText
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -42,17 +44,23 @@ import {
   deleteStudent, 
   fetchStudentsCourses,
   fetchStudentsTeachers,
+  fetchBatches,
+  fetchCoaches,
   fetchLmsCourses,
   fetchStudentStats,
   fetchStudentSessions,
   revokeStudentSession,
-  StudentProfile, 
+  fetchStudentRegistration,
+  updateStudentRegistration,
+  StudentProfile,
   StudentStats,
   StudentSession,
-  ApiError 
+  ApiError
 } from "@/lib/api";
 import { cn, initials, parseUserAgent } from "@/lib/utils";
 import { useAuth } from "@/store/auth";
+import { FullDetailsDrawer } from "@/components/admin/full-details-drawer";
+import { STUDENT_DETAIL_SECTIONS } from "@/components/admin/registration-detail-config";
 
 const FILTERS = ["All", "Active", "Trial", "Pending", "Paused"] as const;
 // Default items per page limit config
@@ -73,6 +81,7 @@ const statusTone: Record<string, Tone> = {
 
 export default function StudentsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const isAdmin = user?.role === "ADMIN";
 
   const [query, setQuery] = useState("");
@@ -227,10 +236,15 @@ export default function StudentsPage() {
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [coursesList, setCoursesList] = useState<{ id: string; title: string }[]>([]);
   const [teachersList, setTeachersList] = useState<{ id: string; user: { firstName: string; lastName: string } }[]>([]);
-  
+  const [batchesList, setBatchesList] = useState<{ id: string; code: string; name: string }[]>([]);
+  const [coachesList, setCoachesList] = useState<{ id: string; name: string }[]>([]);
+
   // Active Filter states used in the API call
   const [selectedCourse, setSelectedCourse] = useState("");
   const [selectedTeacher, setSelectedTeacher] = useState("");
+  const [selectedBatch, setSelectedBatch] = useState("");
+  const [selectedCoach, setSelectedCoach] = useState("");
+  const [selectedTrialConverted, setSelectedTrialConverted] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("");
   const [joiningStart, setJoiningStart] = useState("");
   const [joiningEnd, setJoiningEnd] = useState("");
@@ -240,6 +254,9 @@ export default function StudentsPage() {
   // Temporary inputs inside the Filters panel
   const [tempCourse, setTempCourse] = useState("");
   const [tempTeacher, setTempTeacher] = useState("");
+  const [tempBatch, setTempBatch] = useState("");
+  const [tempCoach, setTempCoach] = useState("");
+  const [tempTrialConverted, setTempTrialConverted] = useState("");
   const [tempCountry, setTempCountry] = useState("");
   const [tempJoiningStart, setTempJoiningStart] = useState("");
   const [tempJoiningEnd, setTempJoiningEnd] = useState("");
@@ -287,6 +304,9 @@ export default function StudentsPage() {
   const [manageBusy, setManageBusy] = useState(false);
   const [manageStatusMsg, setManageStatusMsg] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // Full registration-details drawer (all the data the student registered with).
+  const [detailsStudent, setDetailsStudent] = useState<StudentProfile | null>(null);
+
   // Sessions Modal states
   const [sessionsStudent, setSessionsStudent] = useState<StudentProfile | null>(null);
   const [sessions, setSessions] = useState<StudentSession[]>([]);
@@ -302,14 +322,18 @@ export default function StudentsPage() {
   useEffect(() => {
     const loadFilterHelpers = async () => {
       try {
-        const [courses, teachers, catalog] = await Promise.all([
+        const [courses, teachers, catalog, batches, coaches] = await Promise.all([
           fetchStudentsCourses(),
           fetchStudentsTeachers(),
-          fetchLmsCourses()
+          fetchLmsCourses(),
+          fetchBatches(),
+          fetchCoaches(),
         ]);
         setCoursesList(courses);
         setTeachersList(teachers);
         setCatalogCourses(catalog.map(c => ({ id: c.id, code: c.code, title: c.title })));
+        setBatchesList(batches.map(b => ({ id: b.id, code: b.code, name: b.name })));
+        setCoachesList(coaches.map(c => ({ id: c.id, name: c.name })));
       } catch (err) {
         console.error("Failed to load search filter options:", err);
       }
@@ -342,6 +366,9 @@ export default function StudentsPage() {
         status: filter === "All" ? undefined : filter.toUpperCase(),
         courseId: selectedCourse || undefined,
         teacherId: selectedTeacher || undefined,
+        batchId: selectedBatch || undefined,
+        coachId: selectedCoach || undefined,
+        trialConverted: selectedTrialConverted || undefined,
         country: selectedCountry || undefined,
         joiningDateStart: joiningStart || undefined,
         joiningDateEnd: joiningEnd || undefined,
@@ -367,11 +394,14 @@ export default function StudentsPage() {
     filter, 
     selectedCourse, 
     selectedTeacher, 
-    selectedCountry, 
-    joiningStart, 
-    joiningEnd, 
-    paymentDueStart, 
-    paymentDueEnd
+    selectedCountry,
+    joiningStart,
+    joiningEnd,
+    paymentDueStart,
+    paymentDueEnd,
+    selectedBatch,
+    selectedCoach,
+    selectedTrialConverted,
   ]);
 
   useEffect(() => {
@@ -673,6 +703,9 @@ export default function StudentsPage() {
   const handleApplyFilters = () => {
     setSelectedCourse(tempCourse);
     setSelectedTeacher(tempTeacher);
+    setSelectedBatch(tempBatch);
+    setSelectedCoach(tempCoach);
+    setSelectedTrialConverted(tempTrialConverted);
     setSelectedCountry(tempCountry);
     setJoiningStart(tempJoiningStart);
     setJoiningEnd(tempJoiningEnd);
@@ -684,6 +717,9 @@ export default function StudentsPage() {
   const handleClearFilters = () => {
     setTempCourse("");
     setTempTeacher("");
+    setTempBatch("");
+    setTempCoach("");
+    setTempTrialConverted("");
     setTempCountry("");
     setTempJoiningStart("");
     setTempJoiningEnd("");
@@ -692,6 +728,9 @@ export default function StudentsPage() {
 
     setSelectedCourse("");
     setSelectedTeacher("");
+    setSelectedBatch("");
+    setSelectedCoach("");
+    setSelectedTrialConverted("");
     setSelectedCountry("");
     setJoiningStart("");
     setJoiningEnd("");
@@ -700,13 +739,16 @@ export default function StudentsPage() {
     setPage(1);
   };
 
-  const hasActiveFilters = 
-    selectedCourse !== "" || 
-    selectedTeacher !== "" || 
-    selectedCountry !== "" || 
-    joiningStart !== "" || 
-    joiningEnd !== "" || 
-    paymentDueStart !== "" || 
+  const hasActiveFilters =
+    selectedCourse !== "" ||
+    selectedTeacher !== "" ||
+    selectedBatch !== "" ||
+    selectedCoach !== "" ||
+    selectedTrialConverted !== "" ||
+    selectedCountry !== "" ||
+    joiningStart !== "" ||
+    joiningEnd !== "" ||
+    paymentDueStart !== "" ||
     paymentDueEnd !== "";
 
   return (
@@ -973,6 +1015,49 @@ export default function StudentsPage() {
                 </select>
               </div>
 
+              {/* Batch Selection */}
+              <div>
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Filter by Batch</label>
+                <select
+                  value={tempBatch}
+                  onChange={(e) => setTempBatch(e.target.value)}
+                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                >
+                  <option value="">All Batches</option>
+                  {batchesList.map((b) => (
+                    <option key={b.id} value={b.id}>{b.code} · {b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Academic Coach Selection */}
+              <div>
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Filter by Academic Coach</label>
+                <select
+                  value={tempCoach}
+                  onChange={(e) => setTempCoach(e.target.value)}
+                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                >
+                  <option value="">All Coaches</option>
+                  {coachesList.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Trial Converted */}
+              <div>
+                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Trial Converted</label>
+                <select
+                  value={tempTrialConverted}
+                  onChange={(e) => setTempTrialConverted(e.target.value)}
+                  className="h-10.5 w-full rounded-xl border border-hairline bg-surface px-3.5 text-sm text-ink focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all"
+                >
+                  <option value="">All Students</option>
+                  <option value="true">Only Trial-Converted</option>
+                </select>
+              </div>
+
               {/* Country Selection */}
               <div>
                 <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-ink-3">Filter by Country</label>
@@ -1084,13 +1169,15 @@ export default function StudentsPage() {
                     </th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student ID</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Parent</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Date of Joining</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Teacher Name</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Batch</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Contact</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Scheduled Classes</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Level</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Attendance</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Status</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3 text-right">Actions</th>
                   </tr>
@@ -1146,6 +1233,9 @@ export default function StudentsPage() {
                         {/* Student ID */}
                         <td className="tnum px-4 py-3 text-xs font-bold text-ink-3">{row.studentCode}</td>
 
+                        {/* Parent */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.parentName || row.guardianName || "—"}</td>
+
                         {/* Package */}
                         <td className="px-4 py-3 text-xs text-ink font-semibold">
                           <span className="px-2.5 py-1 bg-accent/5 border border-accent/10 rounded-xl text-accent font-black">
@@ -1159,6 +1249,9 @@ export default function StudentsPage() {
                         {/* Teacher Name */}
                         <td className="px-4 py-3 text-xs text-ink-2 font-medium">{teacherName}</td>
 
+                        {/* Batch */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.batchCode || "—"}</td>
+
                         {/* Course Name */}
                         <td className="px-4 py-3 text-xs text-ink-2 font-medium">{courseName}</td>
 
@@ -1168,8 +1261,8 @@ export default function StudentsPage() {
                         {/* Scheduled Classes */}
                         <td className="tnum px-4 py-3 text-xs font-bold text-ink">{classesCount != null ? `${classesCount} Classes` : "—"}</td>
 
-                        {/* Level (mocked fallback level 1 as shown in user reference) */}
-                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-2">Level 1</td>
+                        {/* Attendance */}
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-2">{row.attendanceRate != null ? `${row.attendanceRate}%` : "—"}</td>
 
                         {/* Account Status */}
                         <td className="px-4 py-3">
@@ -1192,6 +1285,26 @@ export default function StudentsPage() {
                                 {/* Overlay to close dropdown */}
                                 <div className="fixed inset-0 z-10" onClick={() => setActiveMenuId(null)} />
                                 <div className="absolute right-0 mt-1.5 w-44 rounded-xl border border-hairline bg-surface shadow-lg z-20 py-1 animate-fade-in text-left">
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      router.push(`/students/${row.id}`);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <SlidersHorizontal className="size-3.5 text-accent" />
+                                    Manage
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setActiveMenuId(null);
+                                      setDetailsStudent(row);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs font-bold text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+                                  >
+                                    <FileText className="size-3.5 text-accent" />
+                                    Full Details
+                                  </button>
                                   <button
                                     onClick={() => {
                                       setActiveMenuId(null);
@@ -1258,7 +1371,7 @@ export default function StudentsPage() {
 
                   {students.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-5 py-16 text-center">
+                      <td colSpan={13} className="px-5 py-16 text-center">
                         <p className="text-sm font-semibold text-ink">No students found</p>
                         <p className="mt-1 text-xs text-ink-3">
                           Try a different search term or clear the filters.
@@ -2139,6 +2252,18 @@ export default function StudentsPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {detailsStudent && (
+        <FullDetailsDrawer
+          open={!!detailsStudent}
+          onClose={() => setDetailsStudent(null)}
+          title={`${detailsStudent.user.firstName} ${detailsStudent.user.lastName}`}
+          subtitle={`${detailsStudent.studentCode} · registration details`}
+          sections={STUDENT_DETAIL_SECTIONS}
+          load={() => fetchStudentRegistration(detailsStudent.id)}
+          save={(patch) => updateStudentRegistration(detailsStudent.id, patch)}
+        />
       )}
     </>
   );

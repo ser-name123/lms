@@ -17,6 +17,9 @@ import {
   MessageCircle,
   Video,
   Radio,
+  CalendarClock,
+  ClipboardCheck,
+  FileCheck2,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -26,10 +29,14 @@ import { cn } from "@/lib/utils";
 const teacherNavItems = [
   { label: "Dashboard", href: "/teacher/dashboard", icon: LayoutDashboard },
   { label: "My Schedule", href: "/teacher/classes", icon: CalendarDays },
+  { label: "My Availability", href: "/teacher/availability", icon: CalendarClock },
+  { label: "Attendance", href: "/teacher/attendance", icon: ClipboardCheck },
+  { label: "Trial Classes", href: "/teacher/trials", icon: CalendarClock },
   { label: "Live Classes", href: "/teacher/live-class", icon: Radio },
   { label: "Live Meetings", href: "/teacher/meetings", icon: Video },
   { label: "My Students", href: "/teacher/students", icon: Users },
   { label: "Assignments", href: "/teacher/assignments", icon: ClipboardList },
+  { label: "Assessments", href: "/teacher/assessments", icon: FileCheck2 },
   { label: "Payout History", href: "/teacher/payouts", icon: Receipt },
   { label: "Support Chat", href: "/teacher/chat", icon: MessageCircle },
   { label: "My Profile", href: "/teacher/profile", icon: User },

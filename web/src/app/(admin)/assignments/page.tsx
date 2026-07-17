@@ -1,1189 +1,278 @@
 "use client";
 
-import { authHeader } from "@/lib/api";
-
-import { useState, useEffect } from "react";
-import { 
-  Plus, 
-  Search, 
-  X, 
-  Users, 
-  GraduationCap, 
-  Edit2, 
-  Trash2, 
-  Info,
-  Calendar,
-  Filter,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
-  ClipboardList,
-  Sparkles,
-  CheckCircle,
-  Clock,
-  BookOpen,
-  FolderPlus
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Search, ClipboardList, Clock, CheckCircle2, AlertTriangle, Archive, Copy, Lock, Unlock, Eye, Trash2, Download, Plus, Pencil } from "lucide-react";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid } from "recharts";
 import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
-import { Badge, type Tone } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { AssignmentFormModal } from "@/components/assignments/assignment-form-modal";
+import {
+  fetchAssignmentAdminDashboard, fetchAssignmentAnalytics, listAssignments, getAssignment,
+  deleteAssignment, assignmentLifecycle, fetchAssignmentReport, fetchAssignmentCalendar, fetchAssignmentMeta,
+  type AssignmentListRow, type AssignmentAnalytics, type AssignmentCalendarItem, type AssignmentDetail,
+} from "@/lib/api";
 
-// Course List (for linking in dropdowns)
-const AVAILABLE_COURSES = [
-  { code: "QRN-101", title: "Basic Quran Reading", studentsCount: 42 },
-  { code: "TAJ-202", title: "Advanced Tajweed Rules", studentsCount: 28 },
-  { code: "ARB-101", title: "Arabic Grammar Level 1", studentsCount: 35 },
-  { code: "ISL-301", title: "Seerah of Prophet Muhammad", studentsCount: 56 },
-  { code: "QRN-401", title: "Quran Memorization Hifz", studentsCount: 18 },
-  { code: "QRN-099", title: "Noorani Qaida for Kids", studentsCount: 84 },
-  { code: "ARB-201", title: "Arabic Conversational Skills", studentsCount: 22 },
-  { code: "ISL-202", title: "Fiqh of Worship", studentsCount: 40 },
-  { code: "ISL-102", title: "Introduction to Hadith", studentsCount: 30 },
-  { code: "ARB-302", title: "Advanced Arabic Rhetoric", studentsCount: 12 },
-  { code: "ARB-150", title: "Quranic Arabic Vocabulary", studentsCount: 48 },
-  { code: "TAJ-150", title: "Intermediate Tajweed Practice", studentsCount: 32 },
-  { code: "ISL-101", title: "Islamic Creed Aqeedah", studentsCount: 50 },
-  { code: "ISL-050", title: "Pillars of Islam Course", studentsCount: 15 },
-  { code: "QRN-250", title: "Tafseer of Juz Amma", studentsCount: 65 },
-  { code: "ISL-401", title: "Advanced Seerah Analysis", studentsCount: 9 },
-  { code: "ARB-099", title: "Arabic Handwriting Naskh", studentsCount: 19 },
-  { code: "ISL-250", title: "Rulings of Hajj & Umrah", studentsCount: 72 },
-  { code: "QRN-102", title: "Quran Recitation Correction", studentsCount: 60 },
-  { code: "ISL-080", title: "Basic Islamic Manners Akhlaq", studentsCount: 44 },
-  { code: "TAJ-101", title: "Tajweed Rules for Kids", studentsCount: 75 },
-  { code: "ARB-401", title: "Advanced Arabic Syntax", studentsCount: 8 },
-  { code: "ISL-302", title: "Fiqh of Transactions Muamalat", studentsCount: 14 },
-  { code: "ISL-350", title: "History of Islamic Caliphates", studentsCount: 25 },
-  { code: "TAJ-301", title: "Tajweed Masterclass", studentsCount: 16 },
-  { code: "ARB-350", title: "Arabic Media Translation", studentsCount: 11 },
-  { code: "QRN-301", title: "Quranic Reflections", studentsCount: 38 },
-  { code: "QRN-202", title: "Intro to Quran Sciences", studentsCount: 29 },
-  { code: "ISL-220", title: "Islamic History & Heritage", studentsCount: 31 },
-  { code: "TAJ-099", title: "Introduction to Tajweed", studentsCount: 90 }
+const COLORS = ["#386FA4", "#133C55", "#59A5D8", "#84D2F6", "#0EA5E9", "#2563EB", "#7C3AED", "#059669", "#F59E0B", "#EF4444"];
+const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
+const toast = (t: string, icon: "success" | "error" = "success") => Swal.fire({ toast: true, position: "top-end", icon, title: t, showConfirmButton: false, timer: 1600 });
+const fail = (e: unknown) => Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed", icon: "error", background: swalBg() });
+const fmt = (d?: string | null) => d ? new Date(d).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const statusTone = (s: string): "good" | "warning" | "critical" | "accent" | "neutral" =>
+  s === "PUBLISHED" ? "good" : s === "DRAFT" ? "neutral" : s === "SCHEDULED" ? "accent" : s === "CLOSED" ? "warning" : "critical";
+
+const REPORTS = [
+  { key: "completion", label: "Assignment Completion" },
+  { key: "teacher", label: "Teacher Performance" },
+  { key: "late", label: "Late Submission" },
+  { key: "course", label: "Course Report" },
 ];
 
-// Initial Mock Assignments Data (30 items with independent assignment categories)
-const INITIAL_ASSIGNMENTS: any[] = [];
-
-const INITIAL_CATEGORIES: string[] = [];
-const STATUSES = ["All", "Active", "Draft", "Closed"] as const;
-
-const statusBadgeTone: Record<string, Tone> = {
-  Active: "good",
-  Draft: "warning",
-  Closed: "critical"
-};
-
-export default function AssignmentsPage() {
-  const [assignments, setAssignments] = useState(INITIAL_ASSIGNMENTS);
-  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
-  const [categoryIds, setCategoryIds] = useState<Record<string, string>>({});
-  
-  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-
-  // Fetch categories on mount
-  useEffect(() => {
-    fetch(`${apiBase}/categories?type=ASSIGNMENT`)
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setCategories(data.map(item => item.name));
-        const ids: Record<string, string> = {};
-        data.forEach(item => {
-          ids[item.name.toLowerCase()] = item.id;
-        });
-        setCategoryIds(ids);
-      })
-      .catch(console.error);
-  }, [apiBase]);
-
-  const [availableCourses, setAvailableCourses] = useState<any[]>([]);
-
-  // Fetch assignments on mount
-  useEffect(() => {
-    fetch(`${apiBase}/lms-data/assignments`, { headers: authHeader() })
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setAssignments(data);
-      })
-      .catch(console.error);
-
-    fetch(`${apiBase}/lms-data/courses`)
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setAvailableCourses(data);
-        if (data.length > 0) {
-          setFormCourseCode(data[0].code);
-        }
-      })
-      .catch(console.error);
-  }, [apiBase]);
-
-  // Filters, sorting, and pagination
-  const [searchQuery, setSearchQuery] = useState("");
-  const [courseFilter, setCourseFilter] = useState("All");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [sortBy, setSortBy] = useState("dueDate-asc");
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-
-  // Modals
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedAssignment, setSelectedAssignment] = useState<typeof INITIAL_ASSIGNMENTS[0] | null>(null);
-
-  // Add/Edit form fields
-  const [formTitle, setFormTitle] = useState("");
-  const [formCourseCode, setFormCourseCode] = useState("");
-  const [formCategory, setFormCategory] = useState("");
-  const [formSubmissions, setFormSubmissions] = useState<number>(0);
-  const [formEvaluated, setFormEvaluated] = useState<number>(0);
-  const [formDueDate, setFormDueDate] = useState("");
-  const [formStatus, setFormStatus] = useState("Active");
-  const [formDescription, setFormDescription] = useState("");
-
-  // Reset page when filter triggers
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, courseFilter, categoryFilter, statusFilter, pageSize]);
-
-  // Compute Stats
-  const totalAssignmentsCount = assignments.length;
-  const totalSubmissions = assignments.reduce((sum, a) => sum + a.submissionsCount, 0);
-  const totalStudentsEnrolled = assignments.reduce((sum, a) => sum + a.studentsCount, 0);
-  const totalPendingEvaluations = assignments.reduce((sum, a) => sum + (a.submissionsCount - a.evaluatedCount), 0);
-  const avgSubmissionRate = totalStudentsEnrolled > 0 ? Math.round((totalSubmissions / totalStudentsEnrolled) * 100) : 0;
-
-  // Filter & Sort Logic
-  const filteredAssignments = assignments
-    .filter(asm => {
-      const matchesSearch = 
-        asm.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        asm.courseTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asm.courseCode.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCourse = courseFilter === "All" || asm.courseCode === courseFilter;
-      const matchesCategory = categoryFilter === "All" || asm.category === categoryFilter;
-      const matchesStatus = statusFilter === "All" || asm.status === statusFilter;
-      return matchesSearch && matchesCourse && matchesCategory && matchesStatus;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case "dueDate-asc":
-          return a.dueDate.localeCompare(b.dueDate);
-        case "dueDate-desc":
-          return b.dueDate.localeCompare(a.dueDate);
-        case "title-asc":
-          return a.title.localeCompare(b.title);
-        case "title-desc":
-          return b.title.localeCompare(a.title);
-        case "submissions-desc":
-          return b.submissionsCount - a.submissionsCount;
-        case "pending-desc":
-          return (b.submissionsCount - b.evaluatedCount) - (a.submissionsCount - a.evaluatedCount);
-        default:
-          return 0;
-      }
-    });
-
-  // Pagination Bounds
-  const totalItems = filteredAssignments.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedAssignments = filteredAssignments.slice(startIndex, startIndex + pageSize);
-
-  // CRUD handlers
-  const handleDelete = (id: string, name: string) => {
-    Swal.fire({
-      title: "Delete Assignment?",
-      text: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, Delete",
-      cancelButtonText: "Cancel",
-      confirmButtonColor: "#f85a6b",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
-    }).then((result) => {
-      if (result.isConfirmed) {
-        fetch(`${apiBase}/lms-data/assignments/${id}`, { method: "DELETE", headers: authHeader() })
-          .then(() => {
-            setAssignments(prev => prev.filter(a => a.id !== id));
-            Swal.fire({
-              title: "Deleted!",
-              text: "The assignment has been deleted.",
-              icon: "success",
-              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-            });
-          })
-          .catch(err => {
-            Swal.fire({ title: "Error", text: "Could not delete assignment.", icon: "error" });
-          });
-      }
-    });
-  };
-
-  const handleOpenAddModal = () => {
-    setFormTitle("");
-    setFormCourseCode(availableCourses[0]?.code || "");
-    setFormCategory(categories[0] || "");
-    setFormSubmissions(0);
-    setFormEvaluated(0);
-    setFormDueDate(new Date().toISOString().split("T")[0]);
-    setFormStatus("Active");
-    setFormDescription("");
-    setShowAddModal(true);
-  };
-
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formTitle || !formDueDate) {
-      Swal.fire({ title: "Fields Required", text: "Please enter a title and a due date.", icon: "error" });
-      return;
-    }
-    if (!formCategory) {
-      Swal.fire({ title: "Category Required", text: "Please select or add a category first using 'Manage Categories'.", icon: "error" });
-      return;
-    }
-
-    const courseObj = availableCourses.find(c => c.code === formCourseCode) || {
-      code: formCourseCode,
-      title: "Unknown Course",
-      studentsCount: 0
-    };
-
-    if (formSubmissions > courseObj.studentsCount) {
-      Swal.fire({ 
-        title: "Invalid Submission Count", 
-        text: `Submissions (${formSubmissions}) cannot exceed total students in course (${courseObj.studentsCount}).`, 
-        icon: "error" 
-      });
-      return;
-    }
-
-    if (formEvaluated > formSubmissions) {
-      Swal.fire({ 
-        title: "Invalid Evaluation Count", 
-        text: `Evaluated submissions (${formEvaluated}) cannot exceed total submissions (${formSubmissions}).`, 
-        icon: "error" 
-      });
-      return;
-    }
-
-    const newAssignment = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      category: formCategory,
-      studentsCount: courseObj.studentsCount,
-      submissionsCount: Number(formSubmissions) || 0,
-      evaluatedCount: Number(formEvaluated) || 0,
-      dueDate: formDueDate,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
-
-    fetch(`${apiBase}/lms-data/assignments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify(newAssignment),
-    })
-      .then(res => res.json())
-      .then(savedAssignment => {
-        setAssignments([savedAssignment, ...assignments]);
-        setShowAddModal(false);
-        Swal.fire({
-          title: "Created",
-          text: "New assignment successfully published!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not save assignment.", icon: "error" });
-      });
-  };
-
-  const handleOpenEditModal = (asm: typeof INITIAL_ASSIGNMENTS[0]) => {
-    setSelectedAssignment(asm);
-    setFormTitle(asm.title);
-    setFormCourseCode(asm.courseCode);
-    setFormCategory(asm.category || categories[0] || "");
-    setFormSubmissions(asm.submissionsCount);
-    setFormEvaluated(asm.evaluatedCount);
-    setFormDueDate(asm.dueDate);
-    setFormStatus(asm.status);
-    setFormDescription(asm.description);
-    setShowEditModal(true);
-  };
-
-  const handleEditSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAssignment) return;
-    if (!formTitle || !formDueDate) {
-      Swal.fire({ title: "Fields Required", text: "Please enter a title and a due date.", icon: "error" });
-      return;
-    }
-
-    const courseObj = availableCourses.find(c => c.code === formCourseCode) || {
-      code: formCourseCode,
-      title: "Unknown Course",
-      studentsCount: 0
-    };
-
-    if (formSubmissions > courseObj.studentsCount) {
-      Swal.fire({ 
-        title: "Invalid Submission Count", 
-        text: `Submissions (${formSubmissions}) cannot exceed total students in course (${courseObj.studentsCount}).`, 
-        icon: "error" 
-      });
-      return;
-    }
-
-    if (formEvaluated > formSubmissions) {
-      Swal.fire({ 
-        title: "Invalid Evaluation Count", 
-        text: `Evaluated submissions (${formEvaluated}) cannot exceed total submissions (${formSubmissions}).`, 
-        icon: "error" 
-      });
-      return;
-    }
-
-    const updatedPayload = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      category: formCategory,
-      studentsCount: courseObj.studentsCount,
-      submissionsCount: Number(formSubmissions) || 0,
-      evaluatedCount: Number(formEvaluated) || 0,
-      dueDate: formDueDate,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
-
-    fetch(`${apiBase}/lms-data/assignments/${selectedAssignment.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify(updatedPayload),
-    })
-      .then(res => res.json())
-      .then(updatedAssignment => {
-        setAssignments(prev => prev.map(a => a.id === updatedAssignment.id ? updatedAssignment : a));
-        setShowEditModal(false);
-        Swal.fire({
-          title: "Updated",
-          text: "Assignment details saved successfully!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not update assignment.", icon: "error" });
-      });
-  };
-
-
-  const handleOpenViewDetails = (asm: typeof INITIAL_ASSIGNMENTS[0]) => {
-    setSelectedAssignment(asm);
-    const pending = asm.submissionsCount - asm.evaluatedCount;
-    Swal.fire({
-      title: `<span class="text-lg font-bold">${asm.title}</span>`,
-      html: `
-        <div class="text-left mt-3 text-sm space-y-2">
-          <p><strong>Category:</strong> ${asm.category || "General"}</p>
-          <p><strong>Course:</strong> ${asm.courseTitle} (${asm.courseCode})</p>
-          <p><strong>Total Students in Course:</strong> ${asm.studentsCount} Students</p>
-          <p><strong>Submissions Received:</strong> ${asm.submissionsCount}</p>
-          <p><strong>Evaluated:</strong> ${asm.evaluatedCount} (Pending: ${pending})</p>
-          <p><strong>Due Date:</strong> ${asm.dueDate}</p>
-          <p><strong>Status:</strong> ${asm.status}</p>
-          <p class="mt-4 border-t pt-2 text-ink-2"><strong>Instructions:</strong></p>
-          <p class="text-xs text-ink-3 italic bg-surface-2 p-2.5 rounded-lg border">${asm.description}</p>
-        </div>
-      `,
-      icon: "info",
-      showCloseButton: true,
-      confirmButtonText: "Close",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e",
-      confirmButtonColor: "#59A5D8"
-    });
-  };
-
+export default function AdminAssignmentsPage() {
+  const [tab, setTab] = useState<"overview" | "list" | "calendar" | "reports">("overview");
   return (
     <>
-      <Topbar title="Assignments Console" subtitle="Manage, track and evaluate student coursework assignments" />
-      
-      <div className="animate-fade-up p-4 sm:p-6 space-y-6">
-        
-        {/* Statistics section */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-accent/10 text-accent">
-                <ClipboardList className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{totalAssignmentsCount}</p>
-                <p className="text-xs font-semibold text-ink-3">Total Assignments</p>
-              </div>
-            </CardBody>
-          </Card>
-          
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-emerald-500/10 text-emerald-500">
-                <CheckCircle className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{totalSubmissions}</p>
-                <p className="text-xs font-semibold text-ink-3">Total Submissions</p>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-amber-500/10 text-amber-500">
-                <Clock className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{totalPendingEvaluations}</p>
-                <p className="text-xs font-semibold text-ink-3">Pending Grading</p>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-violet-500/10 text-violet-500">
-                <Sparkles className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{avgSubmissionRate}%</p>
-                <p className="text-xs font-semibold text-ink-3">Submission Rate</p>
-              </div>
-            </CardBody>
-          </Card>
+      <Topbar title="Assignment Management" subtitle="Monitor, moderate and analyse assignments across the academy" />
+      <div className="animate-fade-up space-y-5 p-4 sm:p-6">
+        <div className="flex gap-1.5 overflow-x-auto rounded-xl border border-hairline bg-surface-2 p-1">
+          {(["overview", "list", "calendar", "reports"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold capitalize transition-all ${tab === t ? "bg-surface text-accent shadow-sm border border-hairline/80" : "text-ink-3 hover:text-ink-2"}`}>{t}</button>
+          ))}
         </div>
-
-        {/* Filters and Actions */}
-        <Card>
-          <CardBody className="pt-5 space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              
-              {/* Search field */}
-              <div className="relative flex-1 max-w-sm">
-                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-                <input
-                  type="text"
-                  placeholder="Search assignments or courses..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 pr-4 pl-10 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-accent focus:bg-surface-3 transition-all"
-                />
-              </div>
-
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2">
-                
-                {/* Course Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><Filter className="size-3" /> Course:</span>
-                  <select
-                    value={courseFilter}
-                    onChange={(e) => setCourseFilter(e.target.value)}
-                    className="h-9 max-w-[140px] rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="All">All Courses</option>
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>{c.code}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Category Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><Filter className="size-3" /> Cat:</span>
-                  <select
-                    value={categoryFilter}
-                    onChange={(e) => setCategoryFilter(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {["All", ...categories].map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Status Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {STATUSES.map(st => (
-                      <option key={st} value={st}>{st}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Sort selector */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><ArrowUpDown className="size-3" /> Sort:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="dueDate-asc">Due Date (Ascending)</option>
-                    <option value="dueDate-desc">Due Date (Descending)</option>
-                    <option value="title-asc">Title (A-Z)</option>
-                    <option value="title-desc">Title (Z-A)</option>
-                    <option value="submissions-desc">Submissions (High to Low)</option>
-                    <option value="pending-desc">Pending Grade (High to Low)</option>
-                  </select>
-                </div>
-
-                {/* Manage Categories Button */}
-                <Button 
-                  variant="outline" 
-                  size="md" 
-                  onClick={() => setShowCategoriesModal(true)} 
-                  className="rounded-xl flex items-center gap-2 border border-hairline hover:bg-surface-2"
-                >
-                  <FolderPlus className="size-4" />
-                  <span>Manage Categories</span>
-                </Button>
-
-                {/* Add assignment button */}
-                <Button 
-                  variant="primary" 
-                  size="md" 
-                  onClick={handleOpenAddModal} 
-                  className="rounded-xl flex items-center gap-2"
-                >
-                  <Plus className="size-4" />
-                  <span>Add Assignment</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Assignments Table Grid */}
-            <div className="overflow-x-auto border border-hairline rounded-xl">
-              <table className="w-full border-collapse text-left text-sm text-ink-2">
-                <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
-                  <tr>
-                    <th scope="col" className="px-6 py-4">Assignment Title</th>
-                    <th scope="col" className="px-6 py-4">Course Name (Code) & Students Count</th>
-                    <th scope="col" className="px-6 py-4">Submissions Rate</th>
-                    <th scope="col" className="px-6 py-4">Due Date</th>
-                    <th scope="col" className="px-6 py-4">Status</th>
-                    <th scope="col" className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline bg-surface">
-                  {paginatedAssignments.length > 0 ? (
-                    paginatedAssignments.map((asm) => {
-                      const submissionPercent = asm.studentsCount > 0 ? Math.round((asm.submissionsCount / asm.studentsCount) * 100) : 0;
-                      const pendingGrading = asm.submissionsCount - asm.evaluatedCount;
-
-                      return (
-                        <tr 
-                          key={asm.id} 
-                          className="hover:bg-surface-2/60 transition-colors"
-                        >
-                          <td className="px-6 py-4 max-w-xs">
-                            <div className="font-semibold text-ink">{asm.title}</div>
-                            <div className="mt-1">
-                              <Badge tone="neutral" className="text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider">
-                                {asm.category || "General"}
-                              </Badge>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-ink flex items-center gap-1.5">
-                              <BookOpen className="size-3.5 text-accent" />
-                              {asm.courseTitle}
-                            </div>
-                            <div className="text-xs text-ink-3 font-semibold mt-1 flex items-center gap-2">
-                              <span className="font-mono bg-surface-3 px-1 py-0.5 rounded text-[10px] border border-hairline">{asm.courseCode}</span>
-                              <span className="flex items-center gap-1 text-[11px]"><Users className="size-3 text-emerald-500/80" /> {asm.studentsCount} Students in Course</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div>
-                              <div className="flex items-center justify-between text-xs font-bold mb-1">
-                                <span className="text-ink">{asm.submissionsCount}/{asm.studentsCount} ({submissionPercent}%)</span>
-                                {pendingGrading > 0 && (
-                                  <span className="text-[10px] text-amber-500 bg-amber-500/8 border border-amber-500/15 px-1 py-0.2 rounded font-semibold">
-                                    {pendingGrading} to grade
-                                  </span>
-                                )}
-                              </div>
-                              <div className="h-1.5 w-32 bg-surface-3 rounded-full overflow-hidden border border-hairline">
-                                <div 
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-300",
-                                    submissionPercent >= 80 ? "bg-emerald-500" : submissionPercent >= 50 ? "bg-accent" : "bg-amber-500"
-                                  )}
-                                  style={{ width: `${Math.min(100, submissionPercent)}%` }}
-                                />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-xs font-semibold text-ink flex items-center gap-2 mt-4.5">
-                            <Calendar className="size-4 text-zinc-400" />
-                            {asm.dueDate}
-                          </td>
-                          <td className="px-6 py-4">
-                            <Badge tone={statusBadgeTone[asm.status] || "neutral"}>
-                              {asm.status}
-                            </Badge>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex justify-end gap-1.5">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleOpenViewDetails(asm)}
-                                className="rounded-lg text-ink-3 hover:text-ink hover:bg-surface-3 size-8"
-                                title="View Details"
-                              >
-                                <Info className="size-4.5" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleOpenEditModal(asm)}
-                                className="rounded-lg text-ink-3 hover:text-accent hover:bg-surface-3 size-8"
-                                title="Edit Assignment"
-                              >
-                                <Edit2 className="size-4" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleDelete(asm.id, asm.title)}
-                                className="rounded-lg text-ink-3 hover:text-critical hover:bg-surface-3 size-8"
-                                title="Delete Assignment"
-                              >
-                                <Trash2 className="size-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-ink-3">
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <ClipboardList className="size-8 text-ink-3/60" />
-                          <p className="font-semibold text-sm">No assignments matched the search parameters.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination controls */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-hairline text-xs font-semibold text-ink-3">
-              
-              {/* Page Size selector */}
-              <div className="flex items-center gap-2">
-                <span>Show:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value={5}>5 per page</option>
-                  <option value={10}>10 per page</option>
-                  <option value={20}>20 per page</option>
-                  <option value={50}>50 per page</option>
-                  <option value={100}>100 per page</option>
-                </select>
-                <span>of {totalItems} filtered assignments</span>
-              </div>
-
-              {/* Showing stats */}
-              <div>
-                Showing {totalItems > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + pageSize, totalItems)} of {totalItems} items
-              </div>
-
-              {/* Pages selectors */}
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="rounded-lg p-1.5 h-8 size-8 justify-center disabled:opacity-40"
-                >
-                  <ChevronLeft className="size-4" />
-                </Button>
-                
-                {Array.from({ length: totalPages }).map((_, idx) => {
-                  const pNum = idx + 1;
-                  const isCurrent = currentPage === pNum;
-                  return (
-                    <Button
-                      key={pNum}
-                      variant={isCurrent ? "primary" : "outline"}
-                      size="sm"
-                      onClick={() => setCurrentPage(pNum)}
-                      className={cn(
-                        "rounded-lg text-xs size-8 justify-center h-8 font-bold",
-                        isCurrent ? "bg-accent text-accent-ink" : "text-ink hover:bg-surface-2"
-                      )}
-                    >
-                      {pNum}
-                    </Button>
-                  );
-                })}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                  className="rounded-lg p-1.5 h-8 size-8 justify-center disabled:opacity-40"
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
+        {tab === "overview" && <Overview />}
+        {tab === "list" && <ListTab />}
+        {tab === "calendar" && <CalendarTab />}
+        {tab === "reports" && <ReportsTab />}
       </div>
-
-      {/* Add Assignment Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Add New Assignment</h3>
-              <button 
-                onClick={() => setShowAddModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Assignment Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Surah Memorization Quiz"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Link to Course</label>
-                  <select
-                    value={formCourseCode}
-                    onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={formDueDate}
-                    onChange={(e) => setFormDueDate(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Submissions Count</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formSubmissions}
-                    onChange={(e) => setFormSubmissions(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Evaluated / Graded</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formEvaluated}
-                    onChange={(e) => setFormEvaluated(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Status</label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Closed">Closed</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Instructions / Description</label>
-                <textarea
-                  placeholder="Enter details on what students need to submit..."
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-                />
-              </div>
-
-              <footer className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary">
-                  Publish Assignment
-                </Button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Assignment Modal */}
-      {showEditModal && selectedAssignment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Edit Assignment</h3>
-              <button 
-                onClick={() => setShowEditModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Assignment Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Surah Memorization Quiz"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Linked Course</label>
-                  <select
-                    value={formCourseCode}
-                    onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={formDueDate}
-                    onChange={(e) => setFormDueDate(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Submissions Count</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formSubmissions}
-                    onChange={(e) => setFormSubmissions(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Evaluated / Graded</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formEvaluated}
-                    onChange={(e) => setFormEvaluated(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Status</label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Closed">Closed</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Instructions / Description</label>
-                <textarea
-                  placeholder="Enter details on what students need to submit..."
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-                />
-              </div>
-
-              <footer className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowEditModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary">
-                  Save Changes
-                </Button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Manage Categories Modal */}
-      {showCategoriesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-md rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Manage Categories</h3>
-              <button 
-                onClick={() => setShowCategoriesModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <div className="p-6 space-y-4">
-              {/* Add category input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter new category name..."
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="h-10 flex-1 rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    const trimmed = newCategoryName.trim();
-                    if (!trimmed) return;
-                    if (categories.some(cat => cat.toLowerCase() === trimmed.toLowerCase())) {
-                      Swal.fire({
-                        title: "Category Exists",
-                        text: `The category "${trimmed}" already exists.`,
-                        icon: "warning",
-                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                      });
-                      return;
-                    }
-                    fetch(`${apiBase}/categories`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", ...authHeader() },
-                      body: JSON.stringify({ name: trimmed, type: "ASSIGNMENT" }),
-                    })
-                      .then(res => res.json())
-                      .then(item => {
-                        setCategories([...categories, item.name]);
-                        setCategoryIds({ ...categoryIds, [item.name.toLowerCase()]: item.id });
-                        setNewCategoryName("");
-                        Swal.fire({
-                          title: "Success",
-                          text: `Category "${trimmed}" has been added.`,
-                          icon: "success",
-                          toast: true,
-                          position: "top-end",
-                          showConfirmButton: false,
-                          timer: 2000,
-                          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                        });
-                      })
-                      .catch(err => {
-                        Swal.fire({
-                          title: "Error",
-                          text: "Could not add category.",
-                          icon: "error",
-                          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                        });
-                      });
-                  }}
-                >
-                  Add
-                </Button>
-              </div>
-
-              {/* Categories list */}
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-2">Current Categories</label>
-                <div className="border border-hairline rounded-xl divide-y divide-hairline bg-surface max-h-60 overflow-y-auto">
-                  {categories.map(cat => {
-                    const usageCount = assignments.filter(a => a.category === cat).length;
-
-                    return (
-                      <div key={cat} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                        <span className="font-semibold text-ink flex items-center gap-2">
-                          <span className="size-2 rounded-full bg-accent" />
-                          {cat}
-                          <span className="text-[10px] text-ink-3 font-bold bg-surface-2 px-1.5 py-0.5 rounded-md border border-hairline">
-                            {usageCount} {usageCount === 1 ? "assignment" : "assignments"}
-                          </span>
-                        </span>
-                        
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            if (usageCount > 0) {
-                              Swal.fire({
-                                title: "Cannot Delete",
-                                text: `Category "${cat}" is in use by ${usageCount} assignment(s). Please delete or reassign those first.`,
-                                icon: "error",
-                                background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                              });
-                              return;
-                            }
-
-                            Swal.fire({
-                              title: "Delete Category?",
-                              text: `Are you sure you want to delete category "${cat}"?`,
-                              icon: "question",
-                              showCancelButton: true,
-                              confirmButtonText: "Yes, Delete",
-                              cancelButtonText: "Cancel",
-                              confirmButtonColor: "#f85a6b",
-                              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                            }).then((result) => {
-                              if (result.isConfirmed) {
-                                const categoryId = categoryIds[cat.toLowerCase()];
-                                if (categoryId) {
-                                  fetch(`${apiBase}/categories/${categoryId}`, {
-                                    method: "DELETE", headers: authHeader(),
-                                  })
-                                    .then(() => {
-                                      setCategories(categories.filter(c => c !== cat));
-                                      const updatedIds = { ...categoryIds };
-                                      delete updatedIds[cat.toLowerCase()];
-                                      setCategoryIds(updatedIds);
-                                      Swal.fire({
-                                        title: "Deleted!",
-                                        text: `Category "${cat}" has been deleted.`,
-                                        icon: "success",
-                                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                                      });
-                                    })
-                                    .catch(err => {
-                                      Swal.fire({
-                                        title: "Error",
-                                        text: "Could not delete category.",
-                                        icon: "error",
-                                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                                      });
-                                    });
-                                } else {
-                                  setCategories(categories.filter(c => c !== cat));
-                                }
-                              }
-                            });
-                          }}
-                          className="text-ink-3 hover:text-critical size-7 rounded-lg"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
+
+function Overview() {
+  const [cards, setCards] = useState<Record<string, number>>({});
+  const [an, setAn] = useState<AssignmentAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { Promise.all([fetchAssignmentAdminDashboard().then((d) => setCards(d.cards)), fetchAssignmentAnalytics().then(setAn)]).catch(() => undefined).finally(() => setLoading(false)); }, []);
+  if (loading) return <Loading />;
+  const KPIS = [
+    { label: "Total Assignments", value: cards.total ?? 0, icon: ClipboardList, c: "text-accent bg-accent/10" },
+    { label: "Submitted", value: cards.submitted ?? 0, icon: CheckCircle2, c: "text-emerald-500 bg-emerald-500/10" },
+    { label: "Pending Review", value: cards.pendingReview ?? 0, icon: Clock, c: "text-amber-500 bg-amber-500/10" },
+    { label: "Checked", value: cards.checked ?? 0, icon: CheckCircle2, c: "text-sky-500 bg-sky-500/10" },
+    { label: "Late", value: cards.lateSubmissions ?? 0, icon: AlertTriangle, c: "text-orange-500 bg-orange-500/10" },
+    { label: "Overdue", value: cards.overdue ?? 0, icon: AlertTriangle, c: "text-red-500 bg-red-500/10" },
+  ];
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        {KPIS.map((k) => (
+          <Card key={k.label} className="border border-hairline bg-surface"><CardBody className="flex items-center gap-3 p-4"><span className={`grid size-10 place-items-center rounded-xl ${k.c}`}><k.icon className="size-5" /></span><div><p className="text-xl font-black text-ink leading-none">{k.value}</p><p className="mt-1 text-[11px] font-semibold text-ink-3">{k.label}</p></div></CardBody></Card>
+        ))}
+      </div>
+      {an && (
+        <>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <Mini label="Assignments" value={an.cards.assignments} /><Mini label="Completed" value={an.cards.completed} />
+            <Mini label="Pending" value={an.cards.pending} /><Mini label="Late" value={an.cards.late} /><Mini label="Avg Marks" value={an.cards.avgMarks} />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Chart title="Submission Trend"><LineView data={an.submissionTrend.map((m) => ({ name: m.month.slice(2), val: m.count }))} /></Chart>
+            <Chart title="Marks Trend"><LineView data={an.marksTrend.map((m) => ({ name: m.month.slice(2), val: m.score }))} color="#059669" /></Chart>
+            <Chart title="Teacher-wise"><Bars data={an.teacherWise.map((t) => ({ name: t.name, val: t.value }))} rotate /></Chart>
+            <Chart title="Course-wise"><Bars data={an.courseWise.map((c) => ({ name: c.name, val: c.value }))} rotate /></Chart>
+            <Chart title="Difficulty-wise"><PieView data={an.difficultyWise} /></Chart>
+            <Chart title="Batch-wise"><Bars data={an.batchWise.map((b) => ({ name: b.name, val: b.value }))} rotate /></Chart>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <RankCard title="Top Students" rows={an.topStudents} tone="good" />
+            <RankCard title="Weak Students" rows={an.weakStudents} tone="critical" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ListTab() {
+  const [rows, setRows] = useState<AssignmentListRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("All");
+  const [courseId, setCourseId] = useState("");
+  const [batchId, setBatchId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
+  const [subject, setSubject] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [courses, setCourses] = useState<{ id: string; title: string }[]>([]);
+  const [batches, setBatches] = useState<{ id: string; code: string; name: string }[]>([]);
+  const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<AssignmentDetail | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    const q: Record<string, string> = {};
+    if (search) q.search = search;
+    if (status !== "All") q.status = status;
+    if (courseId) q.courseId = courseId;
+    if (batchId) q.batchId = batchId;
+    if (teacherId) q.teacherId = teacherId;
+    if (subject) q.subject = subject;
+    if (from) q.from = new Date(from).toISOString();
+    if (to) q.to = new Date(to).toISOString();
+    listAssignments(q).then((r) => setRows(r.items)).catch(() => undefined).finally(() => setLoading(false));
+  };
+  useEffect(() => { fetchAssignmentMeta().then((m) => { setCourses(m.courses); setBatches(m.batches); setTeachers(m.teachers ?? []); }).catch(() => undefined); }, []);
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [search, status, courseId, batchId, teacherId, subject, from, to]);
+
+  const act = async (id: string, action: "publish" | "unpublish" | "archive" | "close" | "lock" | "unlock" | "duplicate") => {
+    try { await assignmentLifecycle(id, action); load(); toast(`Done: ${action}`); } catch (e) { fail(e); }
+  };
+  const del = async (id: string) => { const r = await Swal.fire({ title: "Delete?", icon: "warning", showCancelButton: true, confirmButtonText: "Delete", background: swalBg() }); if (!r.isConfirmed) return; try { await deleteAssignment(id); load(); toast("Deleted"); } catch (e) { fail(e); } };
+  const view = async (id: string) => {
+    try { const d = await getAssignment(id); Swal.fire({ title: d.title, background: swalBg(), html: `<div style="text-align:left;font-size:13px"><p><b>Course:</b> ${d.courseTitle}</p><p><b>Teacher:</b> ${d.teacherName ?? "—"}</p><p><b>Type:</b> ${d.type ?? "—"} · ${d.difficulty ?? "—"}</p><p><b>Due:</b> ${fmt(d.dueAt)}</p><p><b>Marks:</b> ${d.maxMarks} (pass ${d.passingMarks})</p><p><b>Targets:</b> ${d.targetCount} students</p><p><b>Status:</b> ${d.status}</p><p style="margin-top:8px">${d.instructions ?? d.description ?? ""}</p></div>` }); } catch (e) { fail(e); }
+  };
+  const edit = async (id: string) => { try { setEditing(await getAssignment(id)); setShowForm(true); } catch (e) { fail(e); } };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title / topic…" className="h-10 w-56 rounded-xl border border-hairline bg-surface pl-9 pr-3 text-xs text-ink focus:outline-none focus:border-accent" /></div>
+        <select value={courseId} onChange={(e) => setCourseId(e.target.value)} className="h-10 rounded-xl border border-hairline bg-surface px-3 text-xs font-bold text-ink"><option value="">All Courses</option>{courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select>
+        <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className="h-10 rounded-xl border border-hairline bg-surface px-3 text-xs font-bold text-ink"><option value="">All Batches</option>{batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select>
+        <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className="h-10 rounded-xl border border-hairline bg-surface px-3 text-xs font-bold text-ink"><option value="">All Teachers</option>{teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+        <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="h-10 w-28 rounded-xl border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent" />
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Due from" className="h-10 rounded-xl border border-hairline bg-surface px-2 text-xs text-ink" />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Due to" className="h-10 rounded-xl border border-hairline bg-surface px-2 text-xs text-ink" />
+        <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 rounded-xl border border-hairline bg-surface px-3 text-xs font-bold text-ink">{["All", "DRAFT", "SCHEDULED", "PUBLISHED", "CLOSED", "ARCHIVED"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
+        <button onClick={() => { setEditing(null); setShowForm(true); }} className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white"><Plus className="size-4" /> New</button>
+      </div>
+      {showForm && <AssignmentFormModal editing={editing} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load(); }} />}
+      {loading ? <Loading /> : (
+        <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead><tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">
+                <th className="px-4 py-3">Title</th><th className="px-4 py-3">Course</th><th className="px-4 py-3">Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Submissions</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
+              </tr></thead>
+              <tbody className="divide-y divide-hairline">
+                {rows.length === 0 ? <tr><td colSpan={8} className="py-12 text-center text-ink-3">No assignments.</td></tr> : rows.map((a) => (
+                  <tr key={a.id} className="hover:bg-surface-2/20">
+                    <td className="px-4 py-3"><p className="font-bold text-ink">{a.title}</p><p className="text-[10px] text-ink-3">{a.subject || "—"} · {a.type || "—"}</p></td>
+                    <td className="px-4 py-3 text-ink-2">{a.course}</td>
+                    <td className="px-4 py-3 text-ink-2">{a.batch || "—"}</td>
+                    <td className="px-4 py-3 text-ink-2">{a.teacher || "—"}</td>
+                    <td className="px-4 py-3 text-ink-2">{fmt(a.dueAt)}</td>
+                    <td className="px-4 py-3 text-ink-2">{a.submitted}/{a.targetCount} · {a.checked}✓</td>
+                    <td className="px-4 py-3"><Badge tone={statusTone(a.status)}>{a.status}</Badge></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <IconBtn title="View" onClick={() => view(a.id)}><Eye className="size-3.5" /></IconBtn>
+                        <IconBtn title="Edit" onClick={() => edit(a.id)}><Pencil className="size-3.5" /></IconBtn>
+                        {a.status === "DRAFT" || a.status === "SCHEDULED" ? <IconBtn title="Publish" onClick={() => act(a.id, "publish")}><CheckCircle2 className="size-3.5 text-emerald-600" /></IconBtn> : <IconBtn title="Unpublish" onClick={() => act(a.id, "unpublish")}><Clock className="size-3.5" /></IconBtn>}
+                        <IconBtn title={a.locked ? "Unlock" : "Lock"} onClick={() => act(a.id, a.locked ? "unlock" : "lock")}>{a.locked ? <Unlock className="size-3.5 text-amber-500" /> : <Lock className="size-3.5" />}</IconBtn>
+                        <IconBtn title="Duplicate" onClick={() => act(a.id, "duplicate")}><Copy className="size-3.5" /></IconBtn>
+                        <IconBtn title="Archive" onClick={() => act(a.id, "archive")}><Archive className="size-3.5" /></IconBtn>
+                        <IconBtn title="Delete" onClick={() => del(a.id)}><Trash2 className="size-3.5 text-red-500" /></IconBtn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function CalendarTab() {
+  const now = new Date();
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [items, setItems] = useState<AssignmentCalendarItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setLoading(true); fetchAssignmentCalendar(month).then(setItems).catch(() => undefined).finally(() => setLoading(false)); }, [month]);
+  const [y, m] = month.split("-").map(Number);
+  const first = new Date(y, m - 1, 1).getDay();
+  const days = new Date(y, m, 0).getDate();
+  const byDay = new Map<number, AssignmentCalendarItem[]>();
+  for (const it of items) if (it.day) byDay.set(it.day, [...(byDay.get(it.day) ?? []), it]);
+  return (
+    <Card className="border border-hairline bg-surface"><CardBody className="p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-black text-ink">Assignment Calendar</h3>
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-9 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink" />
+      </div>
+      {loading ? <Loading /> : (
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-1 text-[10px] font-bold uppercase text-ink-3">{d}</div>)}
+          {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: days }).map((_, i) => {
+            const day = i + 1; const list = byDay.get(day) ?? [];
+            return (
+              <div key={day} className={`min-h-16 rounded-lg border p-1 text-left ${list.length ? "border-accent/40 bg-accent/5" : "border-hairline"}`}>
+                <p className="text-[10px] font-bold text-ink-3">{day}</p>
+                {list.slice(0, 3).map((it) => <p key={it.id} className="truncate rounded bg-accent/10 px-1 text-[9px] font-bold text-accent" title={`${it.title} · ${it.course}`}>{it.title}</p>)}
+                {list.length > 3 && <p className="text-[9px] text-ink-3">+{list.length - 3}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </CardBody></Card>
+  );
+}
+
+function ReportsTab() {
+  const [type, setType] = useState("completion");
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setLoading(true); fetchAssignmentReport(type).then((r) => setRows(r)).catch(() => setRows([])).finally(() => setLoading(false)); }, [type]);
+  const cols = rows[0] ? Object.keys(rows[0]) : [];
+  const csv = () => {
+    if (!rows.length) return;
+    const data = [cols.join(","), ...rows.map((r) => cols.map((c) => `"${String(r[c] ?? "")}"`).join(","))].join("\n");
+    const a = document.createElement("a"); a.href = encodeURI(`data:text/csv;charset=utf-8,${data}`); a.download = `assignments_${type}.csv`; a.click();
+  };
+  return (
+    <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline p-4">
+        <div className="flex items-center gap-2"><h3 className="text-sm font-bold text-ink">Report</h3><select value={type} onChange={(e) => setType(e.target.value)} className="h-9 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink">{REPORTS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select></div>
+        <button onClick={csv} disabled={!rows.length} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-hairline px-3 text-xs font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-40"><Download className="size-3.5" /> CSV</button>
+      </div>
+      <div className="overflow-x-auto">
+        {loading ? <Loading /> : rows.length === 0 ? <p className="p-8 text-center text-sm text-ink-3">No data.</p> : (
+          <table className="w-full text-left text-xs">
+            <thead><tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">{cols.map((c) => <th key={c} className="px-4 py-3">{c}</th>)}</tr></thead>
+            <tbody className="divide-y divide-hairline">{rows.map((r, i) => <tr key={i} className="hover:bg-surface-2/20">{cols.map((c) => <td key={c} className="px-4 py-2.5 text-ink-2">{String(r[c] ?? "—")}</td>)}</tr>)}</tbody>
+          </table>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ── Shared ──
+function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) { return <button title={title} onClick={onClick} className="grid size-7 place-items-center rounded-lg border border-hairline text-ink-2 hover:bg-surface-2">{children}</button>; }
+function Mini({ label, value }: { label: string; value: number }) { return <Card className="border border-hairline bg-surface"><CardBody className="p-3 text-center"><p className="text-lg font-black text-ink">{value}</p><p className="text-[10px] font-bold uppercase text-ink-3">{label}</p></CardBody></Card>; }
+function Chart({ title, children }: { title: string; children: React.ReactNode }) { return <Card className="border border-hairline bg-surface shadow-sm"><CardBody className="p-5"><h3 className="mb-3 text-xs font-extrabold uppercase tracking-wider text-ink-3">{title}</h3>{children}</CardBody></Card>; }
+function RankCard({ title, rows, tone }: { title: string; rows: { name: string; avg: number }[]; tone: "good" | "critical" }) {
+  return <Card className="border border-hairline bg-surface"><CardBody className="p-5"><h3 className="mb-2 text-xs font-extrabold uppercase tracking-wider text-ink-3">{title}</h3>{rows.length === 0 ? <p className="text-sm text-ink-3">No data</p> : <div className="space-y-1.5">{rows.map((r, i) => <div key={i} className="flex items-center justify-between text-sm"><span className="text-ink">{r.name}</span><Badge tone={tone}>{r.avg}</Badge></div>)}</div>}</CardBody></Card>;
+}
+function Bars({ data, rotate }: { data: { name: string; val: number }[]; rotate?: boolean }) {
+  if (!data.length) return <div className="grid h-44 place-items-center text-xs text-ink-3">No data yet</div>;
+  return <div className="h-44 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: rotate ? 30 : 0 }}><XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={0} angle={rotate ? -30 : 0} textAnchor={rotate ? "end" : "middle"} height={rotate ? 40 : 20} /><YAxis allowDecimals={false} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} /><Tooltip cursor={{ fill: "rgba(0,0,0,0.04)" }} contentStyle={{ fontSize: 12, borderRadius: 10 }} /><Bar dataKey="val" radius={[6, 6, 0, 0]}>{data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Bar></BarChart></ResponsiveContainer></div>;
+}
+function LineView({ data, color = "#386FA4" }: { data: { name: string; val: number }[]; color?: string }) {
+  if (!data.length) return <div className="grid h-44 place-items-center text-xs text-ink-3">No data yet</div>;
+  return <div className="h-44 w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" opacity={0.2} /><XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} /><YAxis allowDecimals={false} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ fontSize: 12, borderRadius: 10 }} /><Line type="monotone" dataKey="val" stroke={color} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>;
+}
+function PieView({ data }: { data: { name: string; value: number }[] }) {
+  if (!data.length) return <div className="grid h-44 place-items-center text-xs text-ink-3">No data yet</div>;
+  return <div className="h-44 w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={64} label={(e: { name?: string }) => e.name || ""} labelLine={false}>{data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip contentStyle={{ fontSize: 12, borderRadius: 10 }} /></PieChart></ResponsiveContainer></div>;
+}
+function Loading() { return <div className="flex items-center justify-center py-16 text-sm font-bold text-ink-3"><Loader2 className="mr-2 size-5 animate-spin text-accent" /> Loading…</div>; }

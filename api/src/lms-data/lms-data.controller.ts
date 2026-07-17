@@ -117,31 +117,8 @@ export class LmsDataController {
     return this.service.deleteCourse(id);
   }
 
-  // Assignments
-  @Get('assignments')
-  @ApiOperation({ summary: 'Get all assignments' })
-  getAssignments() {
-    return this.service.getAssignments();
-  }
-
-  @Post('assignments')
-  @ApiOperation({ summary: 'Create an assignment' })
-  createAssignment(@Body() dto: any) {
-    return this.service.createAssignment(dto);
-  }
-
-  @Put('assignments/:id')
-  @ApiOperation({ summary: 'Update an assignment' })
-  updateAssignment(@Param('id') id: string, @Body() dto: any) {
-    return this.service.updateAssignment(id, dto);
-  }
-
-  @Delete('assignments/:id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete an assignment' })
-  deleteAssignment(@Param('id') id: string) {
-    return this.service.deleteAssignment(id);
-  }
+  // Assignments — retired: superseded by the unified AssignmentsModule
+  // (/assignments). The LmsAssignment catalog CRUD lived here previously.
 
   // Assessments
   @Get('assessments')

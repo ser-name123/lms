@@ -16,6 +16,8 @@ import {
   CreateRegistrationDto,
   ListRegistrationsDto,
   ReviewRegistrationDto,
+  UpdateStudentRegistrationDto,
+  VerifyRegistrationOtpDto,
 } from './dto';
 
 @ApiTags('registrations')
@@ -27,9 +29,16 @@ export class RegistrationsController {
 
   @Post()
   @Public()
-  @ApiOperation({ summary: 'Public: submit a student registration application' })
+  @ApiOperation({ summary: 'Public: submit application, receive an email OTP' })
   create(@Body() dto: CreateRegistrationDto) {
-    return this.service.create(dto);
+    return this.service.requestOtp(dto);
+  }
+
+  @Post('verify-otp')
+  @Public()
+  @ApiOperation({ summary: 'Public: verify the OTP to finalise the application' })
+  verifyOtp(@Body() dto: VerifyRegistrationOtpDto) {
+    return this.service.verifyOtp(dto.email, dto.otp);
   }
 
   @Get()
@@ -42,6 +51,21 @@ export class RegistrationsController {
   @ApiOperation({ summary: 'Registration counts by status' })
   stats() {
     return this.service.getStats();
+  }
+
+  @Get('by-student/:profileId')
+  @ApiOperation({ summary: 'Get the full application linked to a student profile' })
+  getByStudent(@Param('profileId') profileId: string) {
+    return this.service.getByStudent(profileId);
+  }
+
+  @Patch('by-student/:profileId')
+  @ApiOperation({ summary: 'Edit the full application linked to a student profile' })
+  updateByStudent(
+    @Param('profileId') profileId: string,
+    @Body() dto: UpdateStudentRegistrationDto,
+  ) {
+    return this.service.updateByStudent(profileId, dto);
   }
 
   @Get(':id')

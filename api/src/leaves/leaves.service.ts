@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LeaveRequestStatus, LeaveType, Role } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
 import type { CreateLeaveDto, ListLeavesDto, UpdateLeaveDto } from './dto';
+import { TeacherManagementService } from '../teacher-management/teacher-management.service';
 
 const LEAVE_SELECT = {
   id: true,
@@ -28,7 +29,10 @@ const LEAVE_SELECT = {
 
 @Injectable()
 export class LeavesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly teacherMgmt: TeacherManagementService,
+  ) {}
 
   async list(dto: ListLeavesDto) {
     const { page, limit, search, status, sortBy } = dto;
@@ -94,8 +98,8 @@ export class LeavesService {
   }
 
   async update(id: string, dto: UpdateLeaveDto) {
-    await this.findOne(id);
-    return this.prisma.leaveRequest.update({
+    const existing = await this.findOne(id);
+    const updated = await this.prisma.leaveRequest.update({
       where: { id },
       data: {
         ...(dto.status ? { status: dto.status } : {}),
@@ -103,6 +107,20 @@ export class LeavesService {
       },
       select: LEAVE_SELECT,
     });
+
+    // When a TEACHER's leave is newly approved, cancel their classes in the
+    // leave window and notify the affected students/parents.
+    if (
+      dto.status === LeaveRequestStatus.APPROVED &&
+      existing.status !== LeaveRequestStatus.APPROVED &&
+      updated.user.role === Role.TEACHER
+    ) {
+      this.teacherMgmt
+        .cancelClassesForLeave(updated.userId, updated.startDate, updated.endDate, updated.reason)
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async remove(id: string) {

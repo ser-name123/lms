@@ -54,10 +54,44 @@ enum ClassStatus {
   CANCELLED
 }
 
+enum BatchStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+// Per-session student attendance (attendance is session-based, not date-based).
+enum StudentAttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+  LEAVE_APPROVED
+  NO_SHOW
+}
+
+enum TeacherAttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  CLASS_CANCELLED
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum SubmissionStatus {
   ASSIGNED
+  DRAFT
   SUBMITTED
+  LATE_SUBMITTED
+  UNDER_REVIEW
   EVALUATED
+  RETURNED
 }
 
 enum InvoiceStatus {
@@ -101,6 +135,7 @@ model User {
   refreshTokens  RefreshToken[]
   leaveRequests  LeaveRequest[]
   payouts        Payout[]
+  notifications  Notification[]
 
   @@index([role, status])
 }
@@ -135,11 +170,90 @@ model StudentProfile {
   lastPaymentDate DateTime?
   nextPaymentDate DateTime?
 
+  // Profile enrichment (managed from the Student Management hub)
+  nationality        String?
+  address            String?
+  timeZone           String?
+
+  // Academic information
+  currentGrade       String?
+  currentSchool      String?
+  board              String?
+  learningLevel      String?
+  preferredLanguage  String?
+  learningGoal       String?
+
+  // Parent / Guardian (no parent login — admin manages, parent notified by email)
+  parentName         String?
+  parentRelationship String?
+  parentEmail        String?
+  parentMobile       String?
+  parentWhatsapp     String?
+
+  // Assigned Academic Coach (a User with role ACADEMIC_COACH; plain id, resolved in service)
+  coachId            String?
+
+  // Documents: JSON array of { id, type, label, url, uploadedAt, archived }
+  documents          Json?
+
+  // Freeze / On-hold
+  onHoldReason       String?
+  onHoldAt           DateTime?
+
   enrollments Enrollment[]
   submissions Submission[]
   invoices    Invoice[]
   attendance  ClassAttendee[]
   chatMessages ChatMessage[]
+  batches     BatchStudent[]
+  activities  StudentActivity[]
+  transfers   StudentTransfer[]
+  assessmentAttempts AssessmentAttempt[]
+}
+
+// A requested change (teacher / batch / course) that needs approval before it
+// applies. Approve → the change is executed and a TIMELINE + AUDIT row logged.
+model StudentTransfer {
+  id              String         @id @default(uuid())
+  studentId       String
+  student         StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  kind            String         // TEACHER / BATCH / COURSE
+  reason          String
+  payload         Json           // { enrollmentId, toTeacherId } | { batchId } | { courseId, teacherId, status }
+  fromLabel       String?
+  toLabel         String?
+  status          String         @default("PENDING") // PENDING / APPROVED / REJECTED
+  requestedById   String?
+  requestedByName String?
+  decidedById     String?
+  decidedByName   String?
+  decidedAt       DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([studentId, status])
+  @@index([status])
+}
+
+// Immutable log for a student — every meaningful action appends one row.
+// One table powers the Timeline, Audit Log, Private Notes and Communication
+// History tabs (distinguished by `kind`). Nothing is ever deleted.
+model StudentActivity {
+  id          String         @id @default(uuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  kind        String         // TIMELINE / AUDIT / NOTE / COMMUNICATION / STATUS
+  type        String         // CREATED / STATUS_CHANGED / TEACHER_CHANGED / BATCH_CHANGED / COURSE_CHANGED / NOTE / EMAIL / WHATSAPP / SMS / CALL / NOTIFICATION / ...
+  title       String
+  description String?
+  channel     String?        // COMMUNICATION only: EMAIL / WHATSAPP / SMS / NOTIFICATION / CALL / INTERNAL
+  visibility  String         @default("STAFF") // STAFF = admin + coach only
+  meta        Json?
+  actorId     String?
+  actorName   String?
+  createdAt   DateTime       @default(now())
+
+  @@index([studentId, kind])
+  @@index([studentId, createdAt])
 }
 
 model TeacherProfile {
@@ -153,9 +267,45 @@ model TeacherProfile {
   courseId       String?
   course         Course?  @relation(fields: [courseId], references: [id], onDelete: SetNull)
 
+  // ── Teacher Management: teaching assignment ──
+  subjects      String[] @default([]) // e.g. English, Mathematics
+  levels        String[] @default([]) // e.g. Grade 1..5
+  teachingModes String[] @default([]) // One to One / Group Class
+
+  // ── Weekly availability ({ Monday: [{from,to}], ... }); teacher submits,
+  //    admin approves ──
+  availability            Json?
+  availabilityApproved    Boolean   @default(false)
+  availabilitySubmittedAt DateTime?
+
+  // ── Profile enrichment (mirrors TeacherRegistration, editable by admin) ──
+  gender          String?
+  dateOfBirth     DateTime?
+  nationality     String?
+  timeZone        String?
+  address         String?
+  whatsapp        String?
+  qualification   String?
+  experienceYears String?
+  languages       String[] @default([])
+  joiningDate     DateTime?
+
+  // Documents copied from the registration (relative /uploads paths)
+  documents Json?
+
+  // ── System-generated rating (0..5, cached) ──
+  rating      Float?
+  ratingCount Int?
+
+  // Archived teachers are hidden from active management but not deleted.
+  archived Boolean @default(false)
+
   enrollments Enrollment[]
   classes     ClassSession[]
   chatMessages ChatMessage[]
+  batches     Batch[]
+  assignments Assignment[]
+  assessments Assessment[]
 }
 
 // ─── Catalogue ────────────────────────────────────────────────────────────────
@@ -183,7 +333,9 @@ model Course {
   enrollments Enrollment[]
   classes     ClassSession[]
   assignments Assignment[]
+  assessments Assessment[]
   teachers    TeacherProfile[]
+  batches     Batch[]
 
   @@index([status])
 }
@@ -230,6 +382,8 @@ model ClassSession {
   course     Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
   teacherId  String
   teacher    TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  batchId    String?
+  batch      Batch?         @relation(fields: [batchId], references: [id], onDelete: SetNull)
   title      String
   startsAt   DateTime
   endsAt     DateTime
@@ -237,10 +391,32 @@ model ClassSession {
   meetingUrl String?
   createdAt  DateTime       @default(now())
 
-  attendees ClassAttendee[]
+  // ── Lifecycle timestamps (Scheduled → Reminder → Teacher/Student Joined →
+  //    In Progress → Completed → Attendance Locked) ──
+  reminder24hSentAt DateTime?
+  reminder1hSentAt  DateTime?
+  reminder15mSentAt DateTime?
+  teacherJoinedAt   DateTime?
+  actualStartAt     DateTime?
+  actualEndAt       DateTime?
+  meetingId         String?
+  sessionId         String?
+
+  // Teacher attendance for this session
+  teacherStatus      TeacherAttendanceStatus?
+  teacherLateMinutes Int?
+
+  // Locking (no edits once locked, unless an approved correction)
+  attendanceLocked Boolean   @default(false)
+  lockedAt         DateTime?
+
+  attendees   ClassAttendee[]
+  corrections AttendanceCorrection[]
 
   @@index([startsAt])
   @@index([teacherId, startsAt])
+  @@index([batchId, startsAt])
+  @@index([status])
 }
 
 model ClassAttendee {
@@ -249,10 +425,100 @@ model ClassAttendee {
   class     ClassSession   @relation(fields: [classId], references: [id], onDelete: Cascade)
   studentId String
   student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  // Kept for backward-compat; `status` is the source of truth going forward.
   attended  Boolean        @default(false)
-  joinedAt  DateTime?
+
+  // Join / leave tracking
+  joinedAt     DateTime?
+  leftAt       DateTime?
+  durationMins Int?
+  device       String?
+  browser      String?
+  ipAddress    String?
+
+  // Computed / verified attendance
+  status      StudentAttendanceStatus?
+  lateMinutes Int?
+  remarks     String?
 
   @@unique([classId, studentId])
+  @@index([studentId])
+}
+
+// ─── Batches (a scheduled cohort of a course, with one teacher + N students) ───
+model Batch {
+  id        String      @id @default(uuid())
+  code      String      @unique // BATCH-0001
+  name      String
+  courseId  String
+  course    Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId String?
+  teacher   TeacherProfile? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  level     String?
+  status    BatchStatus @default(ACTIVE)
+  startDate DateTime?
+  endDate   DateTime?
+
+  // Default weekly schedule (used to bulk-generate class sessions)
+  daysOfWeek String[] @default([]) // ["Monday","Wednesday"]
+  startTime  String?              // "09:00"
+  endTime    String?              // "10:00"
+  timeZone   String?
+  capacity   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students BatchStudent[]
+  classes  ClassSession[]
+  assignments Assignment[]
+  assessments Assessment[]
+
+  @@index([courseId])
+  @@index([teacherId])
+  @@index([status])
+}
+
+model BatchStudent {
+  id        String         @id @default(uuid())
+  batchId   String
+  batch     Batch          @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentId String
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  addedAt   DateTime       @default(now())
+
+  @@unique([batchId, studentId])
+  @@index([studentId])
+}
+
+// A teacher-raised request to fix a locked/computed attendance value. Admin
+// reviews; the row itself is the immutable audit line (who/what/when/outcome).
+model AttendanceCorrection {
+  id         String       @id @default(uuid())
+  classId    String
+  class      ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)
+  targetType String       // STUDENT / TEACHER
+  studentId  String?      // StudentProfile id when targetType = STUDENT
+  attendeeId String?      // ClassAttendee id when targetType = STUDENT
+
+  fromStatus String?
+  toStatus   String
+  reason     String
+
+  requestedById   String  // requesting user (teacher) id
+  requestedByName String?
+  status          CorrectionStatus @default(PENDING)
+  reviewedById    String?
+  reviewedByName  String?
+  reviewNotes     String?
+  reviewedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classId])
+  @@index([status])
 }
 
 model Assignment {
@@ -264,7 +530,38 @@ model Assignment {
   dueAt       DateTime?
   createdAt   DateTime @default(now())
 
+  // ── Advanced Assignment Management ──
+  batchId       String?
+  batch         Batch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  teacherId     String?
+  teacher       TeacherProfile? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  createdById   String?         // User id of the author (admin/teacher)
+  subject       String?
+  chapter       String?
+  topic         String?
+  difficulty    String?         // EASY / MEDIUM / HARD
+  type          String?         // HOMEWORK / WORKSHEET / ESSAY / PROJECT / MCQ / CODING / ...
+  instructions  String?
+  maxMarks      Int             @default(100)
+  passingMarks  Int             @default(40)
+  lateAllowed   Boolean         @default(true)
+  latePenaltyPct Int            @default(0)
+  publishAt     DateTime?       // for SCHEDULED assignments
+  status        String          @default("DRAFT") // DRAFT/SCHEDULED/PUBLISHED/CLOSED/ARCHIVED
+  locked        Boolean         @default(false)
+  targetType    String          @default("BATCH") // BATCH / SELECTED
+  targetStudentIds String[]     @default([])
+  allowedFileTypes String[]     @default([]) // e.g. ["pdf","docx"] — empty = any
+  maxFileSizeMb Int?            // per-file ceiling shown to students
+  attachments   Json?           // [{ url, name }]
+  rubric        Json?           // [{ name, max }]
+  updatedAt     DateTime        @updatedAt
+
   submissions Submission[]
+
+  @@index([status])
+  @@index([teacherId])
+  @@index([batchId])
 }
 
 model Submission {
@@ -276,12 +573,202 @@ model Submission {
   status       SubmissionStatus @default(ASSIGNED)
   content      String?
   fileUrl      String?
+  attachments  Json?            // [{ url, name }]
+  isLate       Boolean          @default(false)
+  penaltyApplied Int?           // percentage points deducted
   grade        Int?
+  rubricScores Json?            // { rubricName: score }
   feedback     String?
+  feedbackFileUrl String?       // voice/video/attachment feedback
+  similarityPct Int?            // plagiarism: % word-overlap with peers
+  returnedReason String?
+  draftSavedAt DateTime?
   submittedAt  DateTime?
   evaluatedAt  DateTime?
 
   @@unique([assignmentId, studentId])
+  @@index([status])
+}
+
+// ─── Assessments (online tests: Question Bank → Assessment → Attempt → Result) ─
+
+// Reusable Question Bank entry. Objective types (MCQ/TRUE_FALSE/FILL_BLANK/MATCH)
+// are auto-graded; subjective types (SHORT/LONG/ESSAY/CODING/AUDIO/SPEAKING/
+// FILE_UPLOAD) are teacher-graded against `rubric`.
+model Question {
+  id            String   @id @default(uuid())
+  subject       String
+  chapter       String?
+  topic         String?
+  category      String?
+  difficulty    String   @default("MEDIUM") // EASY / MEDIUM / HARD
+  type          String   // MCQ / TRUE_FALSE / FILL_BLANK / MATCH / SHORT_ANSWER / LONG_ANSWER / ESSAY / CODING / AUDIO / SPEAKING / FILE_UPLOAD
+  text          String
+  options       Json?    // MCQ: [{ id, text, correct }]; MATCH: [{ left, right }]
+  correctAnswer String?  // TRUE_FALSE / FILL_BLANK canonical answer
+  marks         Int      @default(1)
+  negativeMarks Float    @default(0)
+  estimatedTime Int      @default(60) // seconds
+  explanation   String?
+  media         Json?    // [{ url, name, kind }]
+  rubric        Json?    // subjective grading: [{ name, max }]
+  language      String?  // CODING: default language (javascript/python/...)
+  testCases     Json?    // CODING: [{ input, expected, sample }]
+  createdById   String?
+  version       Int      @default(1)
+  archived      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  assessmentQuestions AssessmentQuestion[]
+  answers             AssessmentAnswer[]
+
+  @@index([subject])
+  @@index([type])
+  @@index([difficulty])
+  @@index([archived])
+}
+
+model Assessment {
+  id            String          @id @default(uuid())
+  title         String
+  courseId      String?
+  course        Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  batchId       String?
+  batch         Batch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  teacherId     String?
+  teacher       TeacherProfile? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  createdById   String?
+  subject       String?
+  chapter       String?
+  topic         String?
+  category      String?
+  type          String          @default("QUIZ") // QUIZ/WEEKLY_TEST/MONTHLY_TEST/UNIT_TEST/MID_TERM/FINAL_EXAM/ORAL_TEST/PRACTICE_TEST/MOCK_TEST
+  instructions  String?
+
+  // Rules
+  durationMin           Int     @default(60)
+  totalMarks            Int     @default(100)
+  passingMarks          Int     @default(40)
+  attemptsAllowed       Int     @default(1) // 0 = unlimited
+  questionOrder         String  @default("FIXED") // FIXED / RANDOM
+  allowBack             Boolean @default(true)
+  showResultImmediately Boolean @default(false)
+  negativeMarking       Boolean @default(false)
+
+  // Question selection
+  selectionMode String   @default("MANUAL") // MANUAL / RANDOM
+  randomRules   Json?    // { subject, easy, medium, hard }
+
+  // Scheduling window
+  startAt   DateTime?
+  endAt     DateTime?
+  publishAt DateTime?
+  status    String   @default("DRAFT") // DRAFT/SCHEDULED/PUBLISHED/LIVE/CLOSED/ARCHIVED
+  locked    Boolean  @default(false)
+
+  // Targeting
+  targetType       String   @default("BATCH") // BATCH / SELECTED
+  targetStudentIds String[] @default([])
+
+  // Certificate
+  certificateEnabled   Boolean @default(false)
+  certificateThreshold Int     @default(70)
+
+  // Proctoring (client-side tab-switch / copy detection)
+  proctored Boolean @default(false)
+
+  attachments Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions AssessmentQuestion[]
+  attempts  AssessmentAttempt[]
+
+  @@index([status])
+  @@index([teacherId])
+  @@index([batchId])
+  @@index([courseId])
+}
+
+// Ordered link between an Assessment and a bank Question (with optional per-
+// assessment marks override).
+model AssessmentQuestion {
+  id           String     @id @default(uuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  order        Int        @default(0)
+  marks        Int?       // overrides Question.marks for this assessment
+
+  @@unique([assessmentId, questionId])
+  @@index([assessmentId])
+}
+
+// A single student sitting of an assessment. Objective marks land in autoScore
+// on submit; subjective marks accumulate in manualScore during teacher review.
+model AssessmentAttempt {
+  id           String         @id @default(uuid())
+  assessmentId String
+  assessment   Assessment     @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  attemptNo    Int            @default(1)
+  status       String         @default("IN_PROGRESS") // IN_PROGRESS/SUBMITTED/UNDER_EVALUATION/EVALUATED/PUBLISHED
+
+  startedAt     DateTime  @default(now())
+  submittedAt   DateTime?
+  evaluatedAt   DateTime?
+  publishedAt   DateTime?
+  autoSubmitted Boolean   @default(false)
+  timeSpentSec  Int?
+
+  autoScore    Float   @default(0) // objective portion
+  manualScore  Float   @default(0) // subjective portion
+  score        Float   @default(0) // total after negative marking
+  totalMarks   Int     @default(0)
+  percentage   Float   @default(0)
+  passed       Boolean @default(false)
+  rank         Int?
+  correctCount Int     @default(0)
+  wrongCount   Int     @default(0)
+  skippedCount Int     @default(0)
+
+  teacherFeedback String?
+  certificateUrl  String?
+  certificateNo   String? // issued certificate number (set when eligible + published)
+
+  // Proctoring
+  violations Int   @default(0)
+  proctorLog Json? // [{ type, at }]
+
+  answers AssessmentAnswer[]
+
+  @@unique([assessmentId, studentId, attemptNo])
+  @@index([assessmentId])
+  @@index([studentId])
+  @@index([status])
+}
+
+model AssessmentAnswer {
+  id              String            @id @default(uuid())
+  attemptId       String
+  attempt         AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId      String
+  question        Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  response        Json?             // selected option ids / text / fileUrl
+  markedForReview Boolean           @default(false)
+  isCorrect       Boolean?          // null until graded (subjective)
+  awardedMarks    Float?
+  maxMarks        Int               @default(1)
+  rubricScores    Json?             // { rubricName: score }
+  feedback        String?
+  autoGraded      Boolean           @default(false)
+  timeSpentSec    Int?
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
 }
 
 // ─── Billing ──────────────────────────────────────────────────────────────────
@@ -693,6 +1180,307 @@ model StudentRegistration {
   updatedAt      DateTime           @updatedAt
 
   @@index([status])
+}
+
+// ─── Public teacher self-registration ────────────────────────────────────────
+
+// The teacher hiring pipeline. An application walks through these stages; the
+// admin advances it stage-by-stage. ACTIVATED is the terminal success state and
+// triggers creation of a real User + TeacherProfile with a generated code.
+enum TeacherRegistrationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  DEMO_CLASS
+  APPROVAL
+  TRAINING
+  ACTIVATED
+  REJECTED
+  NEEDS_INFO
+}
+
+model TeacherRegistration {
+  id             String                    @id @default(uuid())
+
+  // Personal information
+  firstName      String
+  middleName     String?
+  lastName       String
+  gender         String?
+  dateOfBirth    DateTime?
+  nationality    String?
+  country        String?
+  state          String?
+  city           String?
+  address        String?
+
+  // Contact
+  email          String
+  mobile         String?
+  whatsappNumber String?
+
+  // Professional details
+  highestQualification String?
+  university           String?
+  passingYear          String?
+  experienceYears      String?
+  currentEmployer      String?
+  expectedSalary       String?
+  subjects             String?  // comma-separated subjects taught
+  languages            String?  // comma-separated languages
+  teachingMode         String?  // ONLINE / OFFLINE / HYBRID
+
+  // Availability (Mon..Sun days + Morning/Afternoon/Evening slots)
+  availabilityDays  String[] @default([])
+  availabilitySlots String[] @default([])
+
+  // Technical skills (Zoom, Google Meet, Teams, Whiteboard, LMS, ...)
+  technicalSkills   String[] @default([])
+
+  // Bank / payout details
+  accountNumber  String?
+  ifsc           String?
+  bankName       String?
+  upi            String?
+  taxNumber      String?
+
+  // Documents (relative /uploads paths, filled via the upload endpoint)
+  resumeUrl             String?
+  degreeUrl             String?
+  certificatesUrl       String?
+  govIdUrl              String?
+  photoUrl              String?
+  experienceLetterUrl   String?
+  policeVerificationUrl String?
+
+  // Account credentials chosen by the applicant
+  username       String?
+  passwordHash   String
+
+  // Hiring pipeline
+  status         TeacherRegistrationStatus @default(APPLIED)
+  reviewNotes    String?
+  interviewDate  DateTime?
+  interviewNotes String?
+  demoDate       DateTime?
+  demoNotes      String?
+  reviewedAt     DateTime?
+  reviewedById   String?
+
+  // Filled in on activation
+  teacherProfileId    String?
+  approvedTeacherCode String?
+
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@index([status])
+}
+
+// ─── Lead management (website inquiry → evaluation → trial → conversion) ──────
+
+enum LeadStatus {
+  NEW
+  CONTACT_PENDING
+  CONTACTED
+  EVALUATION_SCHEDULED
+  EVALUATION_COMPLETED
+  TEACHER_ASSIGNED
+  TRIAL_SCHEDULED
+  TRIAL_COMPLETED
+  WAITING_PARENT_DECISION
+  CONVERTED
+  REJECTED
+  CLOSED
+}
+
+enum LeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Lifecycle of a single trial (demo) class booked for a lead.
+enum LeadTrialStatus {
+  SCHEDULED
+  RESCHEDULED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+// A prospective-student inquiry captured from the public website lead form.
+// Walks the sales/academic pipeline via LeadStatus until CONVERTED (a real
+// StudentProfile is created, mirroring the registration approval flow) or
+// REJECTED/CLOSED.
+model Lead {
+  id           String       @id @default(uuid())
+  leadNumber   String       @unique // e.g. LD-2026-000001
+
+  // Section 1 — Student details
+  studentFirstName String
+  studentLastName  String
+  gender           String?
+  dateOfBirth      DateTime?
+  currentGrade     String?
+  currentSchool    String?
+  country          String?
+  timeZone         String?
+
+  // Section 2 — Parent details
+  parentName     String?
+  relationship   String?
+  email          String
+  mobile         String
+  whatsappNumber String?
+
+  // Section 3 — Learning requirements
+  interestedSubject     String?
+  currentLevel          String?  // Beginner / Intermediate / Advanced
+  preferredLanguage     String?
+  preferredTeacherGender String? // optional
+  preferredDays         String[] @default([])
+  preferredTimeSlots    String[] @default([])
+
+  // Section 4 — Additional questions
+  learningGoal        String?
+  previousCoaching    String?
+  specialRequirements String?
+  medicalDisability   String?
+
+  // Section 5 — Security / consent
+  acceptPrivacy  Boolean @default(false)
+  acceptTerms    Boolean @default(false)
+  recaptchaToken String? // captured but not verified yet (stub)
+
+  // Step 3 — Marketing / tracking (very useful for the marketing team)
+  leadSource  String  @default("Website")
+  ipAddress   String?
+  browser     String?
+  device      String?
+  referralUrl String?
+  utmSource   String?
+  utmCampaign String?
+  utmMedium   String?
+
+  // Pipeline
+  status   LeadStatus   @default(NEW)
+  priority LeadPriority @default(MEDIUM)
+
+  // Assignment (plain ids, resolved to names in queries — mirrors TrialClass)
+  assignedCoachId String?
+  assignedCoachAt DateTime?
+
+  // Step 6 — Evaluation (scores stored as { key: 1..10 } JSON + overall %)
+  evaluationScores Json?
+  overallScore     Float?
+  evaluationNotes  String?
+  evaluatedAt      DateTime?
+  evaluatedById    String?
+
+  // Step 7 — Recommendation engine output
+  recommendedLevel    String?
+  recommendedBatch    String?
+  recommendedTeacherId String?
+
+  // Step 8 — Teacher assignment
+  assignedTeacherId String?
+  assignedTeacherAt DateTime?
+
+  // Step 13 — Coach decision after the trial
+  coachDecision      String?   // ENROLL / REJECT / FOLLOW_UP
+  coachDecisionNotes String?
+  coachDecisionAt    DateTime?
+
+  // Conversion (Phase 4) — a real StudentProfile is created on ENROLL
+  convertedStudentId   String?
+  convertedStudentCode String?
+  convertedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities LeadActivity[]
+  trials     LeadTrial[]
+
+  @@index([status])
+  @@index([assignedCoachId])
+  @@index([email])
+}
+
+// Step 9–12 — a scheduled trial/demo class for a lead, its meeting link,
+// reminder state, attendance, and the teacher + parent feedback captured after.
+model LeadTrial {
+  id     String @id @default(uuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // Assignment (TeacherProfile id, resolved to a name in queries)
+  teacherId String?
+
+  // Schedule (Step 9)
+  scheduledAt     DateTime
+  durationMins    Int      @default(30)
+  timeZone        String?
+  meetingProvider String?  // Zoom / Google Meet
+  meetingLink     String?
+  status          LeadTrialStatus @default(SCHEDULED)
+
+  // Reminders (Step 10) — the sweep stamps these when a reminder is dispatched
+  reminder24hSentAt DateTime?
+  reminder1hSentAt  DateTime?
+
+  // Attendance (Step 11)
+  attendance String?   // PRESENT / ABSENT
+  attendedAt DateTime?
+
+  // Feedback (Step 12)
+  teacherRating           Int?     // 1–5
+  teacherFeedback         String?
+  teacherRecommendsEnroll Boolean?
+  parentRating            Int?
+  parentFeedback          String?
+  parentInterested        Boolean?
+
+  notes       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([leadId])
+  @@index([teacherId])
+  @@index([scheduledAt])
+}
+
+// Immutable audit line for a lead — every meaningful action appends one row,
+// powering the "Activity Timeline" tab.
+model LeadActivity {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String   // CREATED / STATUS_CHANGED / ASSIGNED / EVALUATED / NOTE / ...
+  message   String
+  actorId   String?
+  actorName String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+// In-app notification delivered to a specific user (the topbar bell reads these).
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // LEAD_NEW / LEAD_ASSIGNED / ...
+  title     String
+  body      String?
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
 }
 
 

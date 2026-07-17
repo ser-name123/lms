@@ -11,11 +11,13 @@ import {
   ChevronDown,
   ChevronRight,
   LayoutDashboard,
+  Sparkles,
   CalendarDays,
   ClipboardList,
   Users,
   MessageCircle,
   HelpCircle,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -174,7 +176,7 @@ export function Sidebar() {
 
   const coachNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Trial Management", href: "/evaluation", icon: ClipboardList },
+    { label: "Trial Classes", href: "/leads", icon: Sparkles },
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
     {
@@ -183,6 +185,7 @@ export function Sidebar() {
       children: [
         { label: "Classes", href: "/classes", icon: CalendarDays },
         { label: "Meetings", href: "/meetings", icon: Users },
+        { label: "Attendance", href: "/attendance", icon: ClipboardCheck },
       ],
     },
     { label: "Messages", href: "/chat", icon: MessageCircle },
@@ -191,7 +194,7 @@ export function Sidebar() {
 
   const supervisorNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Recruitment", href: "/teachers?tab=recruitment", icon: Users },
+    { label: "Recruitment", href: "/recruitment", icon: Users },
     { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },
     { label: "Messages", href: "/chat", icon: MessageCircle },

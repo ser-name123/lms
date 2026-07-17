@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEmail,
@@ -202,6 +207,22 @@ export class CreateRegistrationDto {
   @IsString()
   @MinLength(8)
   password!: string;
+}
+
+// Admin edits every registration field except the password (login stays put).
+export class UpdateStudentRegistrationDto extends PartialType(
+  OmitType(CreateRegistrationDto, ['password'] as const),
+) {}
+
+export class VerifyRegistrationOtpDto {
+  @ApiProperty()
+  @IsEmail()
+  email!: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  otp!: string;
 }
 
 export class ReviewRegistrationDto {

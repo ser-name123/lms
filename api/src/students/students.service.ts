@@ -24,11 +24,14 @@ const PROFILE_SELECT = {
   phone: true,
   gender: true,
   guardianName: true,
+  parentName: true,
+  coachId: true,
   profession: true,
   fees: true,
   joiningDate: true,
   lastPaymentDate: true,
   nextPaymentDate: true,
+  batches: { select: { batch: { select: { code: true, name: true } } }, take: 1 },
   user: {
     select: {
       id: true,
@@ -72,12 +75,25 @@ export class StudentsService {
       status,
       courseId,
       teacherId,
+      batchId,
+      coachId,
+      trialConverted,
       country,
       joiningDateStart,
       joiningDateEnd,
       nextPaymentDateStart,
       nextPaymentDateEnd,
     } = dto;
+
+    // "Trial converted" = the student profile is referenced by a converted lead.
+    let convertedIds: string[] | undefined;
+    if (trialConverted === 'true' || trialConverted === '1') {
+      const leads = await this.prisma.lead.findMany({
+        where: { convertedStudentId: { not: null } },
+        select: { convertedStudentId: true },
+      });
+      convertedIds = leads.map((l) => l.convertedStudentId!).filter(Boolean);
+    }
 
     const where: Prisma.StudentProfileWhereInput = {
       ...(status ? { user: { status } } : {}),
@@ -86,6 +102,9 @@ export class StudentsService {
         : {}),
       ...(courseId ? { enrollments: { some: { courseId } } } : {}),
       ...(teacherId ? { enrollments: { some: { teacherId } } } : {}),
+      ...(batchId ? { batches: { some: { batchId } } } : {}),
+      ...(coachId ? { coachId } : {}),
+      ...(convertedIds ? { id: { in: convertedIds } } : {}),
       ...(joiningDateStart || joiningDateEnd
         ? {
             joiningDate: {
@@ -132,8 +151,40 @@ export class StudentsService {
       this.prisma.studentProfile.count({ where }),
     ]);
 
+    // Enrich the page with attendance% + coach name (two batched queries, no N+1).
+    const ids = items.map((s) => s.id);
+    const coachIds = [...new Set(items.map((s) => s.coachId).filter(Boolean) as string[])];
+    const [attRows, coaches] = await Promise.all([
+      ids.length
+        ? this.prisma.classAttendee.groupBy({ by: ['studentId', 'status'], where: { studentId: { in: ids } }, _count: true })
+        : Promise.resolve([] as { studentId: string; status: string | null; _count: number }[]),
+      coachIds.length
+        ? this.prisma.user.findMany({ where: { id: { in: coachIds } }, select: { id: true, firstName: true, lastName: true } })
+        : Promise.resolve([] as { id: string; firstName: string; lastName: string }[]),
+    ]);
+    const coachName = new Map(coaches.map((c) => [c.id, `${c.firstName} ${c.lastName}`]));
+    const attAcc = new Map<string, { present: number; denom: number }>();
+    for (const r of attRows) {
+      const s = r.status;
+      if (s === 'EXCUSED' || s === 'LEAVE_APPROVED') continue;
+      const cur = attAcc.get(r.studentId) ?? { present: 0, denom: 0 };
+      cur.denom += r._count;
+      if (s === 'PRESENT' || s === 'LATE') cur.present += r._count;
+      attAcc.set(r.studentId, cur);
+    }
+
+    const enriched = items.map((s) => {
+      const a = attAcc.get(s.id);
+      return {
+        ...s,
+        coachName: s.coachId ? coachName.get(s.coachId) ?? null : null,
+        batchCode: s.batches[0]?.batch.code ?? null,
+        attendanceRate: a && a.denom ? Math.round((a.present / a.denom) * 100) : null,
+      };
+    });
+
     return {
-      items,
+      items: enriched,
       meta: {
         page,
         limit,

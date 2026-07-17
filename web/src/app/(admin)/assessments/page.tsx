@@ -1,1157 +1,378 @@
 "use client";
 
-import { authHeader } from "@/lib/api";
-
-import { useState, useEffect } from "react";
-import { 
-  Plus, 
-  Search, 
-  X, 
-  Users, 
-  Edit2, 
-  Trash2, 
-  Info,
-  Calendar,
-  Filter,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
-  ClipboardList,
-  Sparkles,
-  CheckCircle,
-  Clock,
-  BookOpen,
-  FolderPlus,
-  Timer,
-  FileText
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FileText, CalendarClock, Radio, CheckCircle, ClipboardList, BarChart3, Plus, Search, Edit2, Trash2,
+  Copy, Lock, Unlock, Send, Archive, Eye, Library, ChevronLeft, ChevronRight, Users, Award, Download, Upload,
 } from "lucide-react";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid } from "recharts";
 import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { QuestionFormModal } from "@/components/assessments/question-form-modal";
+import { AssessmentFormModal } from "@/components/assessments/assessment-form-modal";
+import {
+  listAssessments, deleteAssessment, assessmentLifecycle, fetchAssessmentAdminDashboard, fetchAssessmentAnalytics,
+  fetchAssessmentCalendar, fetchAssessmentReport, fetchAssessmentMeta, listQuestions, deleteQuestion,
+  getAssessmentAttempts, createQuestion, type AssessmentListRow, type Question,
+} from "@/lib/api";
 
-// Course List (for linking in dropdowns)
-const AVAILABLE_COURSES = [
-  { code: "QRN-101", title: "Basic Quran Reading", studentsCount: 42 },
-  { code: "TAJ-202", title: "Advanced Tajweed Rules", studentsCount: 28 },
-  { code: "ARB-101", title: "Arabic Grammar Level 1", studentsCount: 35 },
-  { code: "ISL-301", title: "Seerah of Prophet Muhammad", studentsCount: 56 },
-  { code: "QRN-401", title: "Quran Memorization Hifz", studentsCount: 18 },
-  { code: "QRN-099", title: "Noorani Qaida for Kids", studentsCount: 84 },
-  { code: "ARB-201", title: "Arabic Conversational Skills", studentsCount: 22 },
-  { code: "ISL-202", title: "Fiqh of Worship", studentsCount: 40 },
-  { code: "ISL-102", title: "Introduction to Hadith", studentsCount: 30 },
-  { code: "ARB-302", title: "Advanced Arabic Rhetoric", studentsCount: 12 },
-  { code: "ARB-150", title: "Quranic Arabic Vocabulary", studentsCount: 48 },
-  { code: "TAJ-150", title: "Intermediate Tajweed Practice", studentsCount: 32 },
-  { code: "ISL-101", title: "Islamic Creed Aqeedah", studentsCount: 50 },
-  { code: "ISL-050", title: "Pillars of Islam Course", studentsCount: 15 },
-  { code: "QRN-250", title: "Tafseer of Juz Amma", studentsCount: 65 },
-  { code: "ISL-401", title: "Advanced Seerah Analysis", studentsCount: 9 },
-  { code: "ARB-099", title: "Arabic Handwriting Naskh", studentsCount: 19 },
-  { code: "ISL-250", title: "Rulings of Hajj & Umrah", studentsCount: 72 },
-  { code: "QRN-102", title: "Quran Recitation Correction", studentsCount: 60 },
-  { code: "ISL-080", title: "Basic Islamic Manners Akhlaq", studentsCount: 44 },
-  { code: "TAJ-101", title: "Tajweed Rules for Kids", studentsCount: 75 },
-  { code: "ARB-401", title: "Advanced Arabic Syntax", studentsCount: 8 },
-  { code: "ISL-302", title: "Fiqh of Transactions Muamalat", studentsCount: 14 },
-  { code: "ISL-350", title: "History of Islamic Caliphates", studentsCount: 25 },
-  { code: "TAJ-301", title: "Tajweed Masterclass", studentsCount: 16 },
-  { code: "ARB-350", title: "Arabic Media Translation", studentsCount: 11 },
-  { code: "QRN-301", title: "Quranic Reflections", studentsCount: 38 },
-  { code: "QRN-202", title: "Intro to Quran Sciences", studentsCount: 29 },
-  { code: "ISL-220", title: "Islamic History & Heritage", studentsCount: 31 },
-  { code: "TAJ-099", title: "Introduction to Tajweed", studentsCount: 90 }
-];
+const STATUS_TONE: Record<string, Tone> = { DRAFT: "neutral", SCHEDULED: "warning", PUBLISHED: "good", LIVE: "accent", CLOSED: "neutral", ARCHIVED: "neutral" };
+const CHART = ["#59A5D8", "#7BC950", "#F5A623", "#B07BE0", "#f85a6b", "#4FD1C5"];
+const swalBg = () => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff");
 
-// Initial Mock Assessments Data (30 items)
-const INITIAL_ASSESSMENTS: any[] = [];
-
-const INITIAL_CATEGORIES: string[] = [];
-const STATUSES = ["All", "Active", "Draft", "Closed"] as const;
-
-const statusBadgeTone: Record<string, Tone> = {
-  Active: "good",
-  Draft: "warning",
-  Closed: "critical"
-};
+type Tab = "overview" | "list" | "bank" | "calendar" | "reports";
 
 export default function AssessmentsPage() {
-  const [assessments, setAssessments] = useState(INITIAL_ASSESSMENTS);
-  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
-  const [categoryIds, setCategoryIds] = useState<Record<string, string>>({});
-
-  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-
-  // Fetch categories on mount
-  useEffect(() => {
-    fetch(`${apiBase}/categories?type=ASSESSMENT`)
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setCategories(data.map(item => item.name));
-        const ids: Record<string, string> = {};
-        data.forEach(item => {
-          ids[item.name.toLowerCase()] = item.id;
-        });
-        setCategoryIds(ids);
-      })
-      .catch(console.error);
-  }, [apiBase]);
-
-  const [availableCourses, setAvailableCourses] = useState<any[]>([]);
-
-  // Fetch assessments on mount
-  useEffect(() => {
-    fetch(`${apiBase}/lms-data/assessments`, { headers: authHeader() })
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setAssessments(data);
-      })
-      .catch(console.error);
-
-    fetch(`${apiBase}/lms-data/courses`)
-      .then(res => res.json())
-      .then((data: any[]) => {
-        setAvailableCourses(data);
-        if (data.length > 0) {
-          setFormCourseCode(data[0].code);
-        }
-      })
-      .catch(console.error);
-  }, [apiBase]);
-
-  // Filters, sorting, and pagination
-  const [searchQuery, setSearchQuery] = useState("");
-  const [courseFilter, setCourseFilter] = useState("All");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [sortBy, setSortBy] = useState("title-asc");
-
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-
-  // Modals
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedAssessment, setSelectedAssessment] = useState<typeof INITIAL_ASSESSMENTS[0] | null>(null);
-
-  // Add/Edit form fields
-  const [formTitle, setFormTitle] = useState("");
-  const [formCourseCode, setFormCourseCode] = useState("");
-  const [formCategory, setFormCategory] = useState("");
-  const [formQuestions, setFormQuestions] = useState<number>(10);
-  const [formDuration, setFormDuration] = useState<number>(30);
-  const [formAvgScore, setFormAvgScore] = useState<number>(0);
-  const [formStatus, setFormStatus] = useState("Active");
-  const [formDescription, setFormDescription] = useState("");
-
-  // Reset page when filter triggers
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, courseFilter, categoryFilter, statusFilter, pageSize]);
-
-  // Compute Stats
-  const totalAssessmentsCount = assessments.length;
-  const gradedAssessments = assessments.filter(a => a.avgScore > 0);
-  const avgPerformanceScore = gradedAssessments.length > 0 
-    ? Math.round(gradedAssessments.reduce((sum, a) => sum + a.avgScore, 0) / gradedAssessments.length) 
-    : 0;
-  const totalStudentsEvaluated = assessments.reduce((sum, a) => sum + (Number(a.studentsCount) || 0), 0);
-  // Passing rate represents the ratio of assessments with average score >= 80%
-  const passingAssessmentsCount = assessments.filter(a => a.avgScore >= 80).length;
-  const passingRate = totalAssessmentsCount > 0 
-    ? Math.round((passingAssessmentsCount / totalAssessmentsCount) * 100) 
-    : 0;
-
-  // Filter & Sort Logic
-  const filteredAssessments = assessments
-    .filter(asm => {
-      const matchesSearch = 
-        asm.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        asm.courseTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asm.courseCode.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCourse = courseFilter === "All" || asm.courseCode === courseFilter;
-      const matchesCategory = categoryFilter === "All" || asm.category === categoryFilter;
-      const matchesStatus = statusFilter === "All" || asm.status === statusFilter;
-      return matchesSearch && matchesCourse && matchesCategory && matchesStatus;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case "title-asc":
-          return a.title.localeCompare(b.title);
-        case "title-desc":
-          return b.title.localeCompare(a.title);
-        case "score-desc":
-          return b.avgScore - a.avgScore;
-        case "questions-desc":
-          return b.questionsCount - a.questionsCount;
-        case "duration-desc":
-          return b.duration - a.duration;
-        case "students-desc":
-          return b.studentsCount - a.studentsCount;
-        default:
-          return 0;
-      }
-    });
-
-  // Pagination Bounds
-  const totalItems = filteredAssessments.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedAssessments = filteredAssessments.slice(startIndex, startIndex + pageSize);
-
-  // CRUD handlers
-  const handleDelete = (id: string, name: string) => {
-    Swal.fire({
-      title: "Delete Assessment?",
-      text: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, Delete",
-      cancelButtonText: "Cancel",
-      confirmButtonColor: "#f85a6b",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e"
-    }).then((result) => {
-      if (result.isConfirmed) {
-        fetch(`${apiBase}/lms-data/assessments/${id}`, { method: "DELETE", headers: authHeader() })
-          .then(() => {
-            setAssessments(prev => prev.filter(a => a.id !== id));
-            Swal.fire({
-              title: "Deleted!",
-              text: "The assessment has been deleted.",
-              icon: "success",
-              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-            });
-          })
-          .catch(err => {
-            Swal.fire({ title: "Error", text: "Could not delete assessment.", icon: "error" });
-          });
-      }
-    });
-  };
-
-  const handleOpenAddModal = () => {
-    setFormTitle("");
-    setFormCourseCode(availableCourses[0]?.code || "");
-    setFormCategory(categories[0] || "");
-    setFormQuestions(15);
-    setFormDuration(30);
-    setFormAvgScore(0);
-    setFormStatus("Active");
-    setFormDescription("");
-    setShowAddModal(true);
-  };
-
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formTitle) {
-      Swal.fire({ title: "Fields Required", text: "Please enter an assessment title.", icon: "error" });
-      return;
-    }
-    if (!formCategory) {
-      Swal.fire({ title: "Category Required", text: "Please select or add a category first using 'Manage Categories'.", icon: "error" });
-      return;
-    }
-
-    const courseObj = availableCourses.find(c => c.code === formCourseCode) || {
-      code: formCourseCode,
-      title: "Unknown Course",
-      studentsCount: 0
-    };
-
-    const newAssessment = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      questionsCount: Number(formQuestions) || 10,
-      duration: Number(formDuration) || 30,
-      category: formCategory,
-      avgScore: Number(formAvgScore) || 0,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
-
-    fetch(`${apiBase}/lms-data/assessments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify(newAssessment),
-    })
-      .then(res => res.json())
-      .then(savedAssessment => {
-        setAssessments([savedAssessment, ...assessments]);
-        setShowAddModal(false);
-        Swal.fire({
-          title: "Created",
-          text: "New assessment successfully published!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not save assessment.", icon: "error" });
-      });
-  };
-
-  const handleOpenEditModal = (asm: typeof INITIAL_ASSESSMENTS[0]) => {
-    setSelectedAssessment(asm);
-    setFormTitle(asm.title);
-    setFormCourseCode(asm.courseCode);
-    setFormCategory(asm.category || categories[0] || "");
-    setFormQuestions(asm.questionsCount);
-    setFormDuration(asm.duration);
-    setFormAvgScore(asm.avgScore);
-    setFormStatus(asm.status);
-    setFormDescription(asm.description);
-    setShowEditModal(true);
-  };
-
-  const handleEditSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAssessment) return;
-    if (!formTitle) {
-      Swal.fire({ title: "Fields Required", text: "Please enter an assessment title.", icon: "error" });
-      return;
-    }
-
-    const courseObj = availableCourses.find(c => c.code === formCourseCode) || {
-      code: formCourseCode,
-      title: "Unknown Course",
-      studentsCount: 0
-    };
-
-    const updatedPayload = {
-      title: formTitle,
-      courseCode: courseObj.code,
-      courseTitle: courseObj.title,
-      questionsCount: Number(formQuestions) || 10,
-      duration: Number(formDuration) || 30,
-      category: formCategory,
-      avgScore: Number(formAvgScore) || 0,
-      status: formStatus,
-      description: formDescription || "No description provided."
-    };
-
-    fetch(`${apiBase}/lms-data/assessments/${selectedAssessment.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify(updatedPayload),
-    })
-      .then(res => res.json())
-      .then(updatedAssessment => {
-        setAssessments(prev => prev.map(a => a.id === updatedAssessment.id ? updatedAssessment : a));
-        setShowEditModal(false);
-        Swal.fire({
-          title: "Updated",
-          text: "Assessment details saved successfully!",
-          icon: "success",
-          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-        });
-      })
-      .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not update assessment.", icon: "error" });
-      });
-  };
-
-
-  const handleOpenViewDetails = (asm: typeof INITIAL_ASSESSMENTS[0]) => {
-    setSelectedAssessment(asm);
-    Swal.fire({
-      title: `<span class="text-lg font-bold">${asm.title}</span>`,
-      html: `
-        <div class="text-left mt-3 text-sm space-y-2">
-          <p><strong>Category:</strong> ${asm.category || "General"}</p>
-          <p><strong>Course:</strong> ${asm.courseTitle} (${asm.courseCode})</p>
-          <p><strong>Total Students in Course:</strong> ${asm.studentsCount} Students</p>
-          <p><strong>Questions Count:</strong> ${asm.questionsCount} Questions</p>
-          <p><strong>Time Duration:</strong> ${asm.duration} Minutes</p>
-          <p><strong>Average Class Score:</strong> ${asm.avgScore > 0 ? `${asm.avgScore}%` : "Not Graded Yet"}</p>
-          <p><strong>Status:</strong> ${asm.status}</p>
-          <p class="mt-4 border-t pt-2 text-ink-2"><strong>Instructions:</strong></p>
-          <p class="text-xs text-ink-3 italic bg-surface-2 p-2.5 rounded-lg border">${asm.description}</p>
-        </div>
-      `,
-      icon: "info",
-      showCloseButton: true,
-      confirmButtonText: "Close",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-      color: document.documentElement.classList.contains("dark") ? "#f4f4f5" : "#13222e",
-      confirmButtonColor: "#59A5D8"
-    });
-  };
-
+  const [tab, setTab] = useState<Tab>("overview");
   return (
     <>
-      <Topbar title="Assessments Console" subtitle="Build tests, manage academic evaluations, and review student scorecards" />
-      
+      <Topbar title="Assessments Console" subtitle="Online tests, question bank, evaluation & analytics" />
       <div className="animate-fade-up p-4 sm:p-6 space-y-6">
-        
-        {/* Statistics section */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-accent/10 text-accent">
-                <FileText className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{totalAssessmentsCount}</p>
-                <p className="text-xs font-semibold text-ink-3">Total Assessments</p>
-              </div>
-            </CardBody>
-          </Card>
-          
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-emerald-500/10 text-emerald-500">
-                <CheckCircle className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{avgPerformanceScore}%</p>
-                <p className="text-xs font-semibold text-ink-3">Average Score</p>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-amber-500/10 text-amber-500">
-                <Users className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{totalStudentsEvaluated}</p>
-                <p className="text-xs font-semibold text-ink-3">Students Evaluated</p>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card className="hover:scale-[1.01] transition-transform duration-200">
-            <CardBody className="flex items-center gap-4 py-5">
-              <span className="grid size-12 place-items-center rounded-xl bg-violet-500/10 text-violet-500">
-                <Sparkles className="size-6" />
-              </span>
-              <div>
-                <p className="text-2xl font-bold tracking-tight text-ink">{passingRate}%</p>
-                <p className="text-xs font-semibold text-ink-3">High Pass Rate (≥80%)</p>
-              </div>
-            </CardBody>
-          </Card>
+        <div className="flex flex-wrap gap-1 rounded-xl border border-hairline bg-surface p-1 w-fit">
+          {([["overview", "Overview", BarChart3], ["list", "Assessments", ClipboardList], ["bank", "Question Bank", Library], ["calendar", "Calendar", CalendarClock], ["reports", "Reports", FileText]] as const).map(([k, lbl, Icon]) => (
+            <button key={k} onClick={() => setTab(k)} className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${tab === k ? "bg-accent text-accent-ink" : "text-ink-3 hover:text-ink"}`}>
+              <Icon className="size-4" /> {lbl}
+            </button>
+          ))}
         </div>
-
-        {/* Filters and Actions */}
-        <Card>
-          <CardBody className="pt-5 space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              
-              {/* Search field */}
-              <div className="relative flex-1 max-w-sm">
-                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-                <input
-                  type="text"
-                  placeholder="Search assessments or courses..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 pr-4 pl-10 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-accent focus:bg-surface-3 transition-all"
-                />
-              </div>
-
-              {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2">
-                
-                {/* Course Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><Filter className="size-3" /> Course:</span>
-                  <select
-                    value={courseFilter}
-                    onChange={(e) => setCourseFilter(e.target.value)}
-                    className="h-9 max-w-[140px] rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="All">All Courses</option>
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>{c.code}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Category Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><Filter className="size-3" /> Cat:</span>
-                  <select
-                    value={categoryFilter}
-                    onChange={(e) => setCategoryFilter(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {["All", ...categories].map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Status Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {STATUSES.map(st => (
-                      <option key={st} value={st}>{st}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Sort selector */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink-3 flex items-center gap-1"><ArrowUpDown className="size-3" /> Sort:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="title-asc">Title (A-Z)</option>
-                    <option value="title-desc">Title (Z-A)</option>
-                    <option value="score-desc">Average Score (High to Low)</option>
-                    <option value="questions-desc">Questions count (High to Low)</option>
-                    <option value="duration-desc">Duration (High to Low)</option>
-                    <option value="students-desc">Students Count (High to Low)</option>
-                  </select>
-                </div>
-
-                {/* Manage Categories Button */}
-                <Button 
-                  variant="outline" 
-                  size="md" 
-                  onClick={() => setShowCategoriesModal(true)} 
-                  className="rounded-xl flex items-center gap-2 border border-hairline hover:bg-surface-2"
-                >
-                  <FolderPlus className="size-4" />
-                  <span>Manage Categories</span>
-                </Button>
-
-                {/* Add assessment button */}
-                <Button 
-                  variant="primary" 
-                  size="md" 
-                  onClick={handleOpenAddModal} 
-                  className="rounded-xl flex items-center gap-2"
-                >
-                  <Plus className="size-4" />
-                  <span>Add Assessment</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Table Grid */}
-            <div className="overflow-x-auto border border-hairline rounded-xl">
-              <table className="w-full border-collapse text-left text-sm text-ink-2">
-                <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
-                  <tr>
-                    <th scope="col" className="px-6 py-4">Assessment Detail</th>
-                    <th scope="col" className="px-6 py-4">Course Name (Code) & Students Count</th>
-                    <th scope="col" className="px-6 py-4">Questions & Duration</th>
-                    <th scope="col" className="px-6 py-4">Performance Score</th>
-                    <th scope="col" className="px-6 py-4">Status</th>
-                    <th scope="col" className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline bg-surface">
-                  {paginatedAssessments.length > 0 ? (
-                    paginatedAssessments.map((asm) => {
-                      return (
-                        <tr 
-                          key={asm.id} 
-                          className="hover:bg-surface-2/60 transition-colors"
-                        >
-                          <td className="px-6 py-4 max-w-xs">
-                            <div className="font-semibold text-ink">{asm.title}</div>
-                            <div className="mt-1">
-                              <Badge tone="neutral" className="text-[10px] py-0 px-1.5 font-bold uppercase tracking-wider">
-                                {asm.category || "General"}
-                              </Badge>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-semibold text-ink flex items-center gap-1.5">
-                              <BookOpen className="size-3.5 text-accent" />
-                              {asm.courseTitle}
-                            </div>
-                            <div className="text-xs text-ink-3 font-semibold mt-1 flex items-center gap-2">
-                              <span className="font-mono bg-surface-3 px-1 py-0.5 rounded text-[10px] border border-hairline">{asm.courseCode}</span>
-                              <span className="flex items-center gap-1 text-[11px]"><Users className="size-3 text-emerald-500/80" /> {asm.studentsCount} Students in Course</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="text-xs font-bold text-ink">
-                              {asm.questionsCount} Questions
-                            </div>
-                            <div className="text-xs text-ink-3 flex items-center gap-1 mt-1 font-semibold">
-                              <Timer className="size-3 text-accent" /> {asm.duration} Mins
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            {asm.avgScore > 0 ? (
-                              <div>
-                                <div className="flex items-center justify-between text-xs font-bold mb-1">
-                                  <span className="text-ink">{asm.avgScore}% Class Avg</span>
-                                </div>
-                                <div className="h-1.5 w-24 bg-surface-3 rounded-full overflow-hidden border border-hairline">
-                                  <div 
-                                    className={cn(
-                                      "h-full rounded-full transition-all duration-300",
-                                      asm.avgScore >= 85 ? "bg-emerald-500" : asm.avgScore >= 75 ? "bg-accent" : "bg-amber-500"
-                                    )}
-                                    style={{ width: `${asm.avgScore}%` }}
-                                  />
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-ink-3 italic font-semibold">No grades published</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4">
-                            <Badge tone={statusBadgeTone[asm.status] || "neutral"}>
-                              {asm.status}
-                            </Badge>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex justify-end gap-1.5">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleOpenViewDetails(asm)}
-                                className="rounded-lg text-ink-3 hover:text-ink hover:bg-surface-3 size-8"
-                                title="View Details"
-                              >
-                                <Info className="size-4.5" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleOpenEditModal(asm)}
-                                className="rounded-lg text-ink-3 hover:text-accent hover:bg-surface-3 size-8"
-                                title="Edit Assessment"
-                              >
-                                <Edit2 className="size-4" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                onClick={() => handleDelete(asm.id, asm.title)}
-                                className="rounded-lg text-ink-3 hover:text-critical hover:bg-surface-3 size-8"
-                                title="Delete Assessment"
-                              >
-                                <Trash2 className="size-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-ink-3">
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <ClipboardList className="size-8 text-ink-3/60" />
-                          <p className="font-semibold text-sm">No assessments matched the search parameters.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination controls */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-hairline text-xs font-semibold text-ink-3">
-              
-              {/* Page Size selector */}
-              <div className="flex items-center gap-2">
-                <span>Show:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value={5}>5 per page</option>
-                  <option value={10}>10 per page</option>
-                  <option value={20}>20 per page</option>
-                  <option value={50}>50 per page</option>
-                  <option value={100}>100 per page</option>
-                </select>
-                <span>of {totalItems} filtered assessments</span>
-              </div>
-
-              {/* Showing stats */}
-              <div>
-                Showing {totalItems > 0 ? startIndex + 1 : 0} to {Math.min(startIndex + pageSize, totalItems)} of {totalItems} items
-              </div>
-
-              {/* Pages selectors */}
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="rounded-lg p-1.5 h-8 size-8 justify-center disabled:opacity-40"
-                >
-                  <ChevronLeft className="size-4" />
-                </Button>
-                
-                {Array.from({ length: totalPages }).map((_, idx) => {
-                  const pNum = idx + 1;
-                  const isCurrent = currentPage === pNum;
-                  return (
-                    <Button
-                      key={pNum}
-                      variant={isCurrent ? "primary" : "outline"}
-                      size="sm"
-                      onClick={() => setCurrentPage(pNum)}
-                      className={cn(
-                        "rounded-lg text-xs size-8 justify-center h-8 font-bold",
-                        isCurrent ? "bg-accent text-accent-ink" : "text-ink hover:bg-surface-2"
-                      )}
-                    >
-                      {pNum}
-                    </Button>
-                  );
-                })}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                  className="rounded-lg p-1.5 h-8 size-8 justify-center disabled:opacity-40"
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
+        {tab === "overview" && <Overview />}
+        {tab === "list" && <AssessmentList />}
+        {tab === "bank" && <QuestionBank />}
+        {tab === "calendar" && <CalendarTab />}
+        {tab === "reports" && <ReportsTab />}
       </div>
-
-      {/* Add Assessment Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Add New Assessment</h3>
-              <button 
-                onClick={() => setShowAddModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Assessment Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Midterm Examination"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Link to Course</label>
-                  <select
-                    value={formCourseCode}
-                    onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Status</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Closed">Closed</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Questions Count</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formQuestions}
-                    onChange={(e) => setFormQuestions(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Duration (Mins)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formDuration}
-                    onChange={(e) => setFormDuration(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Avg Score (%)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={formAvgScore}
-                    onChange={(e) => setFormAvgScore(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Instructions / Description</label>
-                <textarea
-                  placeholder="Enter details on what students need to prepare..."
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-                />
-              </div>
-
-              <footer className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowAddModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary">
-                  Publish Assessment
-                </Button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Assessment Modal */}
-      {showEditModal && selectedAssessment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-lg rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Edit Assessment</h3>
-              <button 
-                onClick={() => setShowEditModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Assessment Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Midterm Examination"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Linked Course</label>
-                  <select
-                    value={formCourseCode}
-                    onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {availableCourses.map(c => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Status</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Closed">Closed</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Questions Count</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formQuestions}
-                    onChange={(e) => setFormQuestions(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Duration (Mins)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={formDuration}
-                    onChange={(e) => setFormDuration(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Avg Score (%)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={formAvgScore}
-                    onChange={(e) => setFormAvgScore(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Instructions / Description</label>
-                <textarea
-                  placeholder="Enter details on what students need to prepare..."
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-hairline bg-surface-2 p-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-                />
-              </div>
-
-              <footer className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setShowEditModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary">
-                  Save Changes
-                </Button>
-              </footer>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Manage Categories Modal */}
-      {showCategoriesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-          <div className="relative w-full max-w-md rounded-2xl border border-hairline bg-surface shadow-2xl overflow-hidden animate-fade-in text-ink">
-            <header className="flex items-center justify-between border-b border-hairline px-6 py-4">
-              <h3 className="text-base font-bold text-ink">Manage Categories</h3>
-              <button 
-                onClick={() => setShowCategoriesModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-            
-            <div className="p-6 space-y-4">
-              {/* Add category input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter new category name..."
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="h-10 flex-1 rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    const trimmed = newCategoryName.trim();
-                    if (!trimmed) return;
-                    if (categories.some(cat => cat.toLowerCase() === trimmed.toLowerCase())) {
-                      Swal.fire({
-                        title: "Category Exists",
-                        text: `The category "${trimmed}" already exists.`,
-                        icon: "warning",
-                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                      });
-                      return;
-                    }
-                    fetch(`${apiBase}/categories`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", ...authHeader() },
-                      body: JSON.stringify({ name: trimmed, type: "ASSESSMENT" }),
-                    })
-                      .then(res => res.json())
-                      .then(item => {
-                        setCategories([...categories, item.name]);
-                        setCategoryIds({ ...categoryIds, [item.name.toLowerCase()]: item.id });
-                        setNewCategoryName("");
-                        Swal.fire({
-                          title: "Success",
-                          text: `Category "${trimmed}" has been added.`,
-                          icon: "success",
-                          toast: true,
-                          position: "top-end",
-                          showConfirmButton: false,
-                          timer: 2000,
-                          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                        });
-                      })
-                      .catch(err => {
-                        Swal.fire({
-                          title: "Error",
-                          text: "Could not add category.",
-                          icon: "error",
-                          background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                        });
-                      });
-                  }}
-                >
-                  Add
-                </Button>
-              </div>
-
-              {/* Categories list */}
-              <div>
-                <label className="block text-xs font-bold text-ink-3 uppercase mb-2">Current Categories</label>
-                <div className="border border-hairline rounded-xl divide-y divide-hairline bg-surface max-h-60 overflow-y-auto">
-                  {categories.map(cat => {
-                    const usageCount = assessments.filter(a => a.category === cat).length;
-
-                    return (
-                      <div key={cat} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                        <span className="font-semibold text-ink flex items-center gap-2">
-                          <span className="size-2 rounded-full bg-accent" />
-                          {cat}
-                          <span className="text-[10px] text-ink-3 font-bold bg-surface-2 px-1.5 py-0.5 rounded-md border border-hairline">
-                            {usageCount} {usageCount === 1 ? "assessment" : "assessments"}
-                          </span>
-                        </span>
-                        
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            if (usageCount > 0) {
-                              Swal.fire({
-                                title: "Cannot Delete",
-                                text: `Category "${cat}" is in use by ${usageCount} assessment(s). Please delete or reassign those first.`,
-                                icon: "error",
-                                background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                              });
-                              return;
-                            }
-
-                            Swal.fire({
-                              title: "Delete Category?",
-                              text: `Are you sure you want to delete category "${cat}"?`,
-                              icon: "question",
-                              showCancelButton: true,
-                              confirmButtonText: "Yes, Delete",
-                              cancelButtonText: "Cancel",
-                              confirmButtonColor: "#f85a6b",
-                              background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                            }).then((result) => {
-                              if (result.isConfirmed) {
-                                const categoryId = categoryIds[cat.toLowerCase()];
-                                if (categoryId) {
-                                  fetch(`${apiBase}/categories/${categoryId}`, {
-                                    method: "DELETE", headers: authHeader(),
-                                  })
-                                    .then(() => {
-                                      setCategories(categories.filter(c => c !== cat));
-                                      const updatedIds = { ...categoryIds };
-                                      delete updatedIds[cat.toLowerCase()];
-                                      setCategoryIds(updatedIds);
-                                      Swal.fire({
-                                        title: "Deleted!",
-                                        text: `Category "${cat}" has been deleted.`,
-                                        icon: "success",
-                                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                                      });
-                                    })
-                                    .catch(err => {
-                                      Swal.fire({
-                                        title: "Error",
-                                        text: "Could not delete category.",
-                                        icon: "error",
-                                        background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff",
-                                      });
-                                    });
-                                } else {
-                                  setCategories(categories.filter(c => c !== cat));
-                                }
-                              }
-                            });
-                          }}
-                          className="text-ink-3 hover:text-critical size-7 rounded-lg"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
+
+// ── Overview ──────────────────────────────────────────────────────────────────
+function Overview() {
+  const [cards, setCards] = useState<Record<string, number>>({});
+  const [an, setAn] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    fetchAssessmentAdminDashboard().then((d) => setCards(d.cards)).catch(() => {});
+    fetchAssessmentAnalytics().then((d) => setAn(d)).catch(() => {});
+  }, []);
+  const kpis = [
+    { label: "Total", value: cards.total ?? 0, icon: FileText, color: "text-accent bg-accent/10" },
+    { label: "Scheduled", value: cards.scheduled ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10" },
+    { label: "Live", value: cards.live ?? 0, icon: Radio, color: "text-emerald-500 bg-emerald-500/10" },
+    { label: "Completed", value: cards.completed ?? 0, icon: CheckCircle, color: "text-violet-500 bg-violet-500/10" },
+    { label: "Pending Eval", value: cards.pendingEvaluation ?? 0, icon: ClipboardList, color: "text-rose-500 bg-rose-500/10" },
+    { label: "Published Results", value: cards.publishedResults ?? 0, icon: Award, color: "text-sky-500 bg-sky-500/10" },
+  ];
+  const a = (an ?? {}) as Record<string, { name: string; value: number }[] | { range: string; value: number }[] | { month: string; score: number }[] | Record<string, number>>;
+  const distribution = (a.scoreDistribution as { range: string; value: number }[]) ?? [];
+  const subjectWise = (a.subjectWise as { name: string; value: number }[]) ?? [];
+  const trend = (a.monthlyTrend as { month: string; score: number }[]) ?? [];
+  const anCards = (a.cards as Record<string, number>) ?? {};
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
+        {kpis.map((k) => (
+          <Card key={k.label}><CardBody className="flex items-center gap-3 py-4">
+            <span className={`grid size-10 place-items-center rounded-xl ${k.color}`}><k.icon className="size-5" /></span>
+            <div><p className="text-xl font-bold text-ink">{k.value}</p><p className="text-[11px] font-semibold text-ink-3">{k.label}</p></div>
+          </CardBody></Card>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-1"><CardBody>
+          <p className="mb-3 text-sm font-bold text-ink">Score Distribution</p>
+          {distribution.some((d) => d.value) ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={distribution}><CartesianGrid strokeDasharray="3 3" opacity={0.15} /><XAxis dataKey="range" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} allowDecimals={false} /><Tooltip /><Bar dataKey="value" radius={[6, 6, 0, 0]}>{distribution.map((_, i) => <Cell key={i} fill={CHART[i % CHART.length]} />)}</Bar></BarChart>
+            </ResponsiveContainer>
+          ) : <Empty />}
+        </CardBody></Card>
+        <Card><CardBody>
+          <p className="mb-3 text-sm font-bold text-ink">Subject-wise Avg %</p>
+          {subjectWise.length ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={subjectWise} layout="vertical"><XAxis type="number" tick={{ fontSize: 11 }} domain={[0, 100]} /><YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#7BC950" /></BarChart>
+            </ResponsiveContainer>
+          ) : <Empty />}
+        </CardBody></Card>
+        <Card><CardBody>
+          <p className="mb-3 text-sm font-bold text-ink">Monthly Trend</p>
+          {trend.length ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={trend}><CartesianGrid strokeDasharray="3 3" opacity={0.15} /><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} domain={[0, 100]} /><Tooltip /><Line type="monotone" dataKey="score" stroke="#59A5D8" strokeWidth={2} /></LineChart>
+            </ResponsiveContainer>
+          ) : <Empty />}
+        </CardBody></Card>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {[["Avg Score", `${anCards.avgScore ?? 0}%`], ["Highest", `${anCards.highest ?? 0}%`], ["Lowest", `${anCards.lowest ?? 0}%`], ["Pass %", `${anCards.passPct ?? 0}%`], ["Fail %", `${anCards.failPct ?? 0}%`], ["Pending", anCards.pendingEvaluation ?? 0]].map(([l, v]) => (
+          <Card key={l}><CardBody className="py-3 text-center"><p className="text-lg font-bold text-ink">{v}</p><p className="text-[11px] font-semibold text-ink-3">{l}</p></CardBody></Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Assessment list ───────────────────────────────────────────────────────────
+function AssessmentList() {
+  const [rows, setRows] = useState<AssessmentListRow[]>([]);
+  const [meta, setMeta] = useState<{ courses: { id: string; title: string }[]; batches: { id: string; code: string; name: string }[]; teachers?: { id: string; name: string }[] }>({ courses: [], batches: [] });
+  const [filters, setFilters] = useState({ search: "", courseId: "", batchId: "", teacherId: "", status: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [rosterFor, setRosterFor] = useState<AssessmentListRow | null>(null);
+
+  const load = useCallback(() => {
+    const q: Record<string, string> = {};
+    Object.entries(filters).forEach(([k, v]) => { if (v) q[k] = v; });
+    listAssessments(q).then((r) => setRows(r.items)).catch(() => {});
+  }, [filters]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { fetchAssessmentMeta().then(setMeta).catch(() => {}); }, []);
+
+  const act = async (id: string, action: Parameters<typeof assessmentLifecycle>[1], confirm?: string) => {
+    if (confirm) { const r = await Swal.fire({ title: confirm, icon: "question", showCancelButton: true, background: swalBg() }); if (!r.isConfirmed) return; }
+    try { await assessmentLifecycle(id, action); load(); } catch (e) { Swal.fire({ title: "Action failed", text: (e as Error).message, icon: "error", background: swalBg() }); }
+  };
+  const del = async (id: string, title: string) => {
+    const r = await Swal.fire({ title: "Delete assessment?", text: title, icon: "warning", showCancelButton: true, confirmButtonColor: "#f85a6b", background: swalBg() });
+    if (r.isConfirmed) { await deleteAssessment(id); load(); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card><CardBody className="space-y-3 pt-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
+            <input className="h-10 w-full rounded-xl border border-hairline bg-surface-2 pl-10 pr-4 text-sm" placeholder="Search assessments…" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.courseId} onChange={(e) => setFilters((f) => ({ ...f, courseId: e.target.value }))}><option value="">All courses</option>{meta.courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select>
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.batchId} onChange={(e) => setFilters((f) => ({ ...f, batchId: e.target.value }))}><option value="">All batches</option>{meta.batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select>
+            {meta.teachers && <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.teacherId} onChange={(e) => setFilters((f) => ({ ...f, teacherId: e.target.value }))}><option value="">All teachers</option>{meta.teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}><option value="">All status</option>{["DRAFT", "SCHEDULED", "PUBLISHED", "LIVE", "CLOSED", "ARCHIVED"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            <Button variant="primary" onClick={() => { setEditId(null); setShowForm(true); }}><Plus className="size-4" /> New</Button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-hairline">
+          <table className="w-full text-left text-sm text-ink-2">
+            <thead className="bg-surface-2 text-xs font-bold uppercase text-ink-3">
+              <tr><th className="px-4 py-3">Assessment</th><th className="px-4 py-3">Course / Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Qs · Marks</th><th className="px-4 py-3">Progress</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr>
+            </thead>
+            <tbody className="divide-y divide-hairline bg-surface">
+              {rows.length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center text-ink-3"><ClipboardList className="mx-auto mb-2 size-8 opacity-60" />No assessments yet.</td></tr>}
+              {rows.map((a) => (
+                <tr key={a.id} className="hover:bg-surface-2/60">
+                  <td className="px-4 py-3"><div className="font-semibold text-ink">{a.title}</div><div className="mt-0.5 flex gap-1.5 text-[10px]"><Badge tone="neutral">{a.type}</Badge>{a.subject && <span className="text-ink-3">{a.subject}</span>}</div></td>
+                  <td className="px-4 py-3 text-xs">{a.course ?? "—"}{a.batch && <div className="text-ink-3">{a.batch}</div>}</td>
+                  <td className="px-4 py-3 text-xs">{a.teacher ?? "—"}</td>
+                  <td className="px-4 py-3 text-xs">{a.startAt ? new Date(a.startAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—"}<div className="text-ink-3">{a.durationMin}m</div></td>
+                  <td className="px-4 py-3 text-xs">{a.questions} · {a.totalMarks}</td>
+                  <td className="px-4 py-3 text-xs"><button className="underline decoration-dotted hover:text-accent" onClick={() => setRosterFor(a)}>{a.submitted}/{a.targetCount} done</button>{a.pendingEval > 0 && <div className="text-amber-500">{a.pendingEval} to grade</div>}</td>
+                  <td className="px-4 py-3"><Badge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</Badge>{a.locked && <Lock className="ml-1 inline size-3 text-ink-3" />}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1">
+                      <IconBtn title="Roster" onClick={() => setRosterFor(a)}><Eye className="size-4" /></IconBtn>
+                      <IconBtn title="Edit" onClick={() => { setEditId(a.id); setShowForm(true); }}><Edit2 className="size-4" /></IconBtn>
+                      {a.status === "DRAFT" || a.status === "SCHEDULED" ? <IconBtn title="Publish" onClick={() => act(a.id, "publish")}><Send className="size-4" /></IconBtn> : null}
+                      {a.status === "PUBLISHED" && <IconBtn title="Publish results" onClick={() => act(a.id, "publish-results", "Rank & publish all evaluated results?")}><Award className="size-4" /></IconBtn>}
+                      {a.status === "PUBLISHED" && <IconBtn title="Close" onClick={() => act(a.id, "close")}><Archive className="size-4" /></IconBtn>}
+                      {a.locked ? <IconBtn title="Unlock" onClick={() => act(a.id, "unlock")}><Unlock className="size-4" /></IconBtn> : <IconBtn title="Lock" onClick={() => act(a.id, "lock")}><Lock className="size-4" /></IconBtn>}
+                      <IconBtn title="Clone" onClick={() => act(a.id, "clone")}><Copy className="size-4" /></IconBtn>
+                      <IconBtn title="Delete" onClick={() => del(a.id, a.title)}><Trash2 className="size-4" /></IconBtn>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardBody></Card>
+
+      <AssessmentFormModal open={showForm} onClose={() => setShowForm(false)} onSaved={load} assessmentId={editId} forRole="admin" />
+      {rosterFor && <RosterModal assessment={rosterFor} onClose={() => setRosterFor(null)} />}
+    </div>
+  );
+}
+
+function RosterModal({ assessment, onClose }: { assessment: AssessmentListRow; onClose: () => void }) {
+  const [roster, setRoster] = useState<Awaited<ReturnType<typeof getAssessmentAttempts>>>([]);
+  useEffect(() => { getAssessmentAttempts(assessment.id).then(setRoster).catch(() => {}); }, [assessment.id]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
+      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-hairline bg-surface shadow-2xl">
+        <header className="sticky top-0 flex items-center justify-between border-b border-hairline bg-surface px-6 py-4"><div><h3 className="font-bold text-ink">{assessment.title}</h3><p className="text-xs text-ink-3">Attempt roster</p></div><Button variant="ghost" size="icon" onClick={onClose}>✕</Button></header>
+        <table className="w-full text-left text-sm text-ink-2">
+          <thead className="bg-surface-2 text-xs font-bold uppercase text-ink-3"><tr><th className="px-4 py-2">Student</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Rank</th></tr></thead>
+          <tbody className="divide-y divide-hairline">
+            {roster.map((r) => (
+              <tr key={r.studentId}><td className="px-4 py-2"><span className="font-mono text-xs text-ink-3">{r.studentCode}</span> {r.name}{r.violations > 0 && <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-critical/15 px-1.5 py-0.5 text-[10px] font-bold text-critical" title="Proctoring violations">⚠ {r.violations}</span>}</td><td className="px-4 py-2"><Badge tone={r.status === "PUBLISHED" ? "good" : r.status === "NOT_STARTED" ? "neutral" : "warning"}>{r.status}</Badge></td><td className="px-4 py-2">{r.score != null ? `${Math.round(r.score)}/${r.totalMarks} (${r.percentage}%)` : "—"}</td><td className="px-4 py-2">{r.rank ?? "—"}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Question Bank ─────────────────────────────────────────────────────────────
+function QuestionBank() {
+  const [items, setItems] = useState<Question[]>([]);
+  const [meta, setMeta] = useState<{ page: number; pages: number; total: number }>({ page: 1, pages: 1, total: 0 });
+  const [filters, setFilters] = useState({ search: "", subject: "", type: "", difficulty: "", page: 1 });
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [edit, setEdit] = useState<Question | null>(null);
+
+  const load = useCallback(() => {
+    const q: Record<string, string> = { page: String(filters.page), limit: "24" };
+    if (filters.search) q.search = filters.search; if (filters.subject) q.subject = filters.subject;
+    if (filters.type) q.type = filters.type; if (filters.difficulty) q.difficulty = filters.difficulty;
+    listQuestions(q).then((r) => { setItems(r.items); setMeta({ page: r.meta.page, pages: r.meta.pages, total: r.meta.total }); setSubjects((s) => [...new Set([...s, ...r.items.map((i) => i.subject)])]); }).catch(() => {});
+  }, [filters]);
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (q: Question) => {
+    const r = await Swal.fire({ title: "Delete question?", text: q.text.slice(0, 80), icon: "warning", showCancelButton: true, confirmButtonColor: "#f85a6b", background: swalBg() });
+    if (r.isConfirmed) { const res = await deleteQuestion(q.id); if (res.archived) Swal.fire({ title: "Archived", text: "In use by an assessment, so archived instead.", icon: "info", background: swalBg() }); load(); }
+  };
+
+  // Bulk import. CSV header: subject,type,difficulty,text,marks,options,correct,correctAnswer
+  //  · MCQ: options pipe-separated ("3|4|5"), correct = 1-based index/es (";" for multi)
+  //  · TRUE_FALSE / FILL_BLANK: correctAnswer column ("|" for FILL alternatives)
+  const importCsv = async (file: File) => {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) { Swal.fire({ title: "Empty CSV", icon: "error", background: swalBg() }); return; }
+    const split = (l: string) => { const out: string[] = []; let cur = "", inQ = false; for (const c of l) { if (c === '"') inQ = !inQ; else if (c === "," && !inQ) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out.map((s) => s.trim()); };
+    const header = split(lines[0]).map((h) => h.toLowerCase());
+    const col = (row: string[], name: string) => row[header.indexOf(name)] ?? "";
+    let ok = 0, failed = 0;
+    for (const line of lines.slice(1)) {
+      try {
+        const row = split(line);
+        const type = (col(row, "type") || "MCQ").toUpperCase();
+        const dto: Record<string, unknown> = { subject: col(row, "subject") || "General", type, difficulty: (col(row, "difficulty") || "MEDIUM").toUpperCase(), text: col(row, "text"), marks: Number(col(row, "marks")) || 1 };
+        if (!dto.text) { failed++; continue; }
+        if (type === "MCQ") {
+          const opts = col(row, "options").split("|").map((t, i) => ({ id: String.fromCharCode(97 + i), text: t.trim() })).filter((o) => o.text);
+          const correctIdx = col(row, "correct").split(";").map((n) => Number(n.trim()) - 1);
+          dto.options = opts.map((o, i) => ({ ...o, correct: correctIdx.includes(i) }));
+        } else if (type === "TRUE_FALSE" || type === "FILL_BLANK") dto.correctAnswer = col(row, "correctanswer");
+        await createQuestion(dto); ok++;
+      } catch { failed++; }
+    }
+    Swal.fire({ title: "Import complete", text: `${ok} added${failed ? `, ${failed} skipped` : ""}.`, icon: ok ? "success" : "error", background: swalBg() });
+    load();
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card><CardBody className="space-y-3 pt-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="relative flex-1 max-w-sm"><Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" /><input className="h-10 w-full rounded-xl border border-hairline bg-surface-2 pl-10 pr-4 text-sm" placeholder="Search questions…" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))} /></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.subject} onChange={(e) => setFilters((f) => ({ ...f, subject: e.target.value, page: 1 }))}><option value="">All subjects</option>{subjects.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.type} onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value, page: 1 }))}><option value="">All types</option>{["MCQ", "TRUE_FALSE", "FILL_BLANK", "MATCH", "SHORT_ANSWER", "LONG_ANSWER", "ESSAY", "CODING"].map((t) => <option key={t} value={t}>{t}</option>)}</select>
+            <select className="h-9 rounded-xl border border-hairline bg-surface px-2.5 text-xs" value={filters.difficulty} onChange={(e) => setFilters((f) => ({ ...f, difficulty: e.target.value, page: 1 }))}><option value="">All levels</option>{["EASY", "MEDIUM", "HARD"].map((d) => <option key={d} value={d}>{d}</option>)}</select>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-hairline bg-surface px-3 py-2 text-xs font-semibold text-ink-2 hover:bg-surface-2" title="CSV header: subject,type,difficulty,text,marks,options,correct,correctAnswer"><Upload className="size-3.5" /> Import CSV<input type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv(f); e.target.value = ""; }} /></label>
+            <Button variant="primary" onClick={() => { setEdit(null); setShowForm(true); }}><Plus className="size-4" /> New Question</Button>
+          </div>
+        </div>
+        <p className="text-xs text-ink-3">{meta.total} questions in the bank</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {items.map((q) => (
+            <div key={q.id} className="rounded-xl border border-hairline bg-surface-2 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <p className="line-clamp-2 text-sm font-semibold text-ink">{q.text}</p>
+                <div className="flex shrink-0 gap-1"><IconBtn title="Edit" onClick={() => { setEdit(q); setShowForm(true); }}><Edit2 className="size-3.5" /></IconBtn><IconBtn title="Delete" onClick={() => del(q)}><Trash2 className="size-3.5" /></IconBtn></div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><Badge tone="accent">{q.type}</Badge><Badge tone={q.difficulty === "HARD" ? "critical" : q.difficulty === "EASY" ? "good" : "warning"}>{q.difficulty}</Badge><span className="text-ink-3">{q.subject}{q.topic ? ` · ${q.topic}` : ""} · {q.marks}m</span></div>
+            </div>
+          ))}
+        </div>
+        {meta.pages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button variant="outline" size="sm" disabled={meta.page <= 1} onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}><ChevronLeft className="size-4" /></Button>
+            <span className="text-xs font-semibold text-ink-3">Page {meta.page} / {meta.pages}</span>
+            <Button variant="outline" size="sm" disabled={meta.page >= meta.pages} onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}><ChevronRight className="size-4" /></Button>
+          </div>
+        )}
+      </CardBody></Card>
+      <QuestionFormModal open={showForm} onClose={() => setShowForm(false)} onSaved={load} question={edit} subjects={subjects} />
+    </div>
+  );
+}
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+function CalendarTab() {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [items, setItems] = useState<Awaited<ReturnType<typeof fetchAssessmentCalendar>>>([]);
+  useEffect(() => { fetchAssessmentCalendar(month).then(setItems).catch(() => {}); }, [month]);
+  const [y, m] = month.split("-").map(Number);
+  const first = new Date(y, m - 1, 1).getDay();
+  const days = new Date(y, m, 0).getDate();
+  const byDay = new Map<number, typeof items>();
+  for (const it of items) if (it.day) { const arr = byDay.get(it.day) ?? []; arr.push(it); byDay.set(it.day, arr); }
+  return (
+    <Card><CardBody>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-sm font-bold text-ink">Assessment Calendar</p>
+        <input type="month" className="h-9 rounded-lg border border-hairline bg-surface-2 px-2 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-ink-3">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-1">{d}</div>)}</div>
+      <div className="grid grid-cols-7 gap-1">
+        {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
+        {Array.from({ length: days }).map((_, i) => {
+          const day = i + 1; const list = byDay.get(day) ?? [];
+          return <div key={day} className="min-h-16 rounded-lg border border-hairline bg-surface-2 p-1 text-left"><span className="text-[11px] font-bold text-ink-3">{day}</span>{list.map((it) => <div key={it.id} className="mt-0.5 truncate rounded bg-accent/15 px-1 py-0.5 text-[10px] font-semibold text-accent" title={it.title}>{it.title}</div>)}</div>;
+        })}
+      </div>
+    </CardBody></Card>
+  );
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+function ReportsTab() {
+  const [type, setType] = useState("assessment");
+  const [data, setData] = useState<Record<string, unknown>[]>([]);
+  const [passFail, setPassFail] = useState<{ passed: number; failed: number } | null>(null);
+  useEffect(() => {
+    setPassFail(null); setData([]);
+    fetchAssessmentReport(type).then((d) => { if (type === "pass-fail") setPassFail(d as { passed: number; failed: number }); else setData(d as Record<string, unknown>[]); }).catch(() => {});
+  }, [type]);
+  const cols = data[0] ? Object.keys(data[0]) : [];
+  const csv = () => {
+    if (!data.length) return;
+    const rows = [cols.join(","), ...data.map((r) => cols.map((c) => `"${String(r[c] ?? "")}"`).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = `assessment-${type}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+  const REPORTS = [["assessment", "Assessment"], ["teacher", "Teacher"], ["top-performers", "Top Performers"], ["weak-students", "Weak Students"], ["pass-fail", "Pass / Fail"], ["question-analysis", "Question Analysis"], ["difficulty", "Difficulty"]];
+  return (
+    <Card><CardBody className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">{REPORTS.map(([k, l]) => <button key={k} onClick={() => setType(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${type === k ? "bg-accent text-accent-ink" : "bg-surface-2 text-ink-3"}`}>{l}</button>)}</div>
+        {data.length > 0 && <Button variant="outline" size="sm" onClick={csv}><Download className="size-3.5" /> CSV</Button>}
+      </div>
+      {passFail ? (
+        <div className="mx-auto max-w-xs"><ResponsiveContainer width="100%" height={240}><PieChart><Pie data={[{ name: "Passed", value: passFail.passed }, { name: "Failed", value: passFail.failed }]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label><Cell fill="#7BC950" /><Cell fill="#f85a6b" /></Pie><Tooltip /></PieChart></ResponsiveContainer><p className="text-center text-sm font-semibold text-ink-2">Passed {passFail.passed} · Failed {passFail.failed}</p></div>
+      ) : data.length === 0 ? <Empty /> : (
+        <div className="overflow-x-auto rounded-xl border border-hairline">
+          <table className="w-full text-left text-sm text-ink-2"><thead className="bg-surface-2 text-xs font-bold uppercase text-ink-3"><tr>{cols.map((c) => <th key={c} className="px-4 py-2">{c}</th>)}</tr></thead>
+            <tbody className="divide-y divide-hairline">{data.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c} className="px-4 py-2">{String(r[c] ?? "—")}</td>)}</tr>)}</tbody></table>
+        </div>
+      )}
+    </CardBody></Card>
+  );
+}
+
+// ── Small helpers ─────────────────────────────────────────────────────────────
+function IconBtn({ children, title, onClick }: { children: React.ReactNode; title: string; onClick: () => void }) {
+  return <button title={title} onClick={onClick} className="grid size-8 place-items-center rounded-lg text-ink-3 hover:bg-surface-3 hover:text-ink">{children}</button>;
+}
+function Empty() { return <div className="grid h-40 place-items-center text-sm text-ink-3"><div className="text-center"><BarChart3 className="mx-auto mb-2 size-8 opacity-50" />No data yet</div></div>; }

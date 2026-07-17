@@ -1,10 +1,11 @@
 "use client";
 
-import { Bell, Menu, Moon, Search, Sun } from "lucide-react";
+import { Menu, Moon, Search, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/store/ui";
 import { UserMenu } from "./user-menu";
+import { NotificationBell } from "./notification-bell";
 
 export function Topbar({ title, subtitle }: { title: string; subtitle?: string }) {
   const { theme, toggleTheme, setMobileNav } = useUI();
@@ -47,15 +48,7 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
           {theme === "light" ? <Moon className="size-4.5 text-ink-2" /> : <Sun className="size-4.5 text-ink-2" />}
         </Button>
 
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          aria-label="Notifications" 
-          className="relative rounded-xl hover:bg-surface-2 transition-all duration-200"
-        >
-          <Bell className="size-4.5 text-ink-2" />
-          <span className="absolute top-2.5 right-2.5 size-1.5 rounded-full bg-critical ring-2 ring-surface animate-pulse" />
-        </Button>
+        <NotificationBell />
 
         <UserMenu />
       </div>

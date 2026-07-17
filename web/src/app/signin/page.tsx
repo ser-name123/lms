@@ -370,8 +370,14 @@ export default function SignInPage() {
         {/* Footer */}
         <div className="mt-6 text-center text-xs text-ink-3 font-semibold">
           Don't have an account?{" "}
-          <a href="#" className="text-accent hover:underline ml-0.5">
+          <a href="/signup" className="text-accent hover:underline ml-0.5">
             Sign up
+          </a>
+        </div>
+        <div className="mt-2 text-center text-xs text-ink-3 font-semibold">
+          Want to try first?{" "}
+          <a href="/get-started" className="text-accent hover:underline ml-0.5">
+            Book a free trial class
           </a>
         </div>
       </div>
