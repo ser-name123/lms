@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Bell,
+  BellRing,
   PanelLeftClose,
   PanelLeftOpen,
   GraduationCap,
@@ -16,6 +18,7 @@ import {
   ClipboardList,
   Users,
   MessageCircle,
+  Megaphone,
   HelpCircle,
   ClipboardCheck,
   TrendingUp,
@@ -177,6 +180,9 @@ export function Sidebar() {
 
   const coachNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    // /notifications lives in its own route group, so the admin prefix
+    // allowlists above do not gate it — every role reaches its own inbox.
+    { label: "Notifications", href: "/notifications", icon: Bell },
     { label: "Trial Classes", href: "/leads", icon: Sparkles },
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
@@ -196,6 +202,9 @@ export function Sidebar() {
 
   const supervisorNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Announcements", href: "/announcements", icon: Megaphone },
+    { label: "Notifications", href: "/notifications", icon: Bell },
+    { label: "Notification Management", href: "/notification-management", icon: BellRing },
     { label: "Recruitment", href: "/recruitment", icon: Users },
     { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },

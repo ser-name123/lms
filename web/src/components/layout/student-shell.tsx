@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Bell,
   PanelLeftClose,
   PanelLeftOpen,
   GraduationCap,
@@ -28,6 +29,8 @@ import { cn } from "@/lib/utils";
 
 const studentNavItems = [
   { label: "Dashboard", href: "/student/dashboard", icon: LayoutDashboard },
+  // Shared route group, so it is not under /student.
+  { label: "Notifications", href: "/notifications", icon: Bell },
   { label: "My Courses", href: "/student/courses", icon: BookOpen },
   { label: "My Schedule", href: "/student/classes", icon: CalendarDays },
   { label: "My Attendance", href: "/student/attendance", icon: ClipboardCheck },

@@ -1,16 +1,15 @@
 "use client";
 
 /*
- * Teacher dashboard. The previous version charted a hardcoded six-month array
- * and shipped fixed copy ("+4 this week", "Settled to Bank Transfer"); every
- * figure now comes from /dashboard/teacher for the selected range.
+ * Parent dashboard. Parents are provisioned by an admin from the guardian
+ * details already on the student profile — there is no self-registration.
  */
 
 import { Topbar } from "@/components/layout/topbar";
 import { useAuth } from "@/store/auth";
-import { TeacherPanel } from "@/components/dashboard/panels/teacher-panel";
+import { ParentPanel } from "@/components/dashboard/panels/parent-panel";
 
-export default function TeacherDashboardPage() {
+export default function ParentDashboardPage() {
   const { user } = useAuth();
 
   const today = new Date().toLocaleDateString(undefined, {
@@ -27,7 +26,7 @@ export default function TeacherDashboardPage() {
         subtitle={today}
       />
       <div className="p-4 sm:p-6">
-        <TeacherPanel />
+        <ParentPanel />
       </div>
     </>
   );

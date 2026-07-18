@@ -1,14 +1,36 @@
 "use client";
 
-import { Menu, Moon, Search, Sun } from "lucide-react";
+import { useState } from "react";
+import { Menu, Moon, Search, Sun, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/store/ui";
 import { UserMenu } from "./user-menu";
 import { NotificationBell } from "./notification-bell";
+import { GlobalSearch } from "./global-search";
 
 export function Topbar({ title, subtitle }: { title: string; subtitle?: string }) {
   const { theme, toggleTheme, setMobileNav } = useUI();
+  // The inline search is too wide for a phone, so below `md` it collapses to an
+  // icon that swaps the whole bar for a full-width search row.
+  const [mobileSearch, setMobileSearch] = useState(false);
+
+  if (mobileSearch) {
+    return (
+      <header className="sticky top-0 z-30 flex min-h-[4.5rem] items-center gap-2 border-b border-hairline bg-surface/80 px-4 py-3 backdrop-blur-md md:hidden">
+        <GlobalSearch autoFocus fullWidth />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setMobileSearch(false)}
+          aria-label="Close search"
+          className="rounded-xl hover:bg-surface-2"
+        >
+          <X className="size-4.5 text-ink-2" />
+        </Button>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-30 flex min-h-[4.5rem] py-3 items-center gap-3 border-b border-hairline bg-surface/80 px-4 backdrop-blur-md sm:px-6">
@@ -27,17 +49,20 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
 
       {/* Search */}
       <div className="ml-auto hidden md:block">
-        <label className="relative block">
-          <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-ink-3" />
-          <input
-            type="search"
-            placeholder="Search..."
-            className="h-10 w-64 rounded-full border-0 bg-surface-2 pr-4 pl-10 text-sm text-ink placeholder:text-ink-3 focus:bg-surface-2 focus:w-80 transition-all duration-300 focus:outline-none"
-          />
-        </label>
+        <GlobalSearch />
       </div>
 
       <div className="ml-auto flex items-center gap-1 md:ml-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setMobileSearch(true)}
+          aria-label="Search"
+          className="rounded-xl hover:bg-surface-2 md:hidden"
+        >
+          <Search className="size-4.5 text-ink-2" />
+        </Button>
+
         <Button
           variant="ghost"
           size="icon"

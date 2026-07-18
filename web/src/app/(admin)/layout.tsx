@@ -47,7 +47,18 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
   if (user && user.role === "SUPERVISOR") {
     const allowedSupervisorPrefixes = [
       "/dashboard",
+      // Supervisors publish announcements too; /dashboard-widgets stays ADMIN-only.
+      "/announcements",
+      // Supervisors broadcast and read the notification centre and analytics.
+      // Templates, the failure queue and retries stay ADMIN-only, enforced by
+      // @Roles on the API rather than by hiding tabs.
+      "/notification-management",
       "/teachers",
+      // The sidebar has always offered Recruitment to supervisors but this
+      // list omitted it, so the link 404'd. /recruitment renders the same
+      // TeachersWorkspace as /teachers (different locked tab), which they
+      // already have, so this grants no data they could not already reach.
+      "/recruitment",
       "/meetings",
       "/finance",
       "/chat",

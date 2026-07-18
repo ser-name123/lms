@@ -1,61 +1,46 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/*
+ * Parent portal shell. Mirrors the student shell — parents get a small,
+ * read-only navigation: they monitor a child, they do not administer anything.
+ */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bell,
+  GraduationCap,
+  LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
-  GraduationCap,
+  Wallet,
   X,
-  LayoutDashboard,
-  CalendarDays,
-  ClipboardList,
-  Receipt,
-  User,
-  Users,
-  MessageCircle,
-  Video,
-  Radio,
-  CalendarClock,
-  ClipboardCheck,
-  FileCheck2,
-  TrendingUp,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
 import { useSettingsStore } from "@/store/settings";
 import { cn } from "@/lib/utils";
 
-const teacherNavItems = [
-  { label: "Dashboard", href: "/teacher/dashboard", icon: LayoutDashboard },
-  // Shared route group, so it is not under /teacher.
+/*
+ * Only routes that actually exist are listed. The parent dashboard already
+ * carries attendance, homework, assessments and progress as widgets; dedicated
+ * sub-pages for those are still to be built, and listing them before they exist
+ * would ship links straight into a 404.
+ */
+const parentNavItems = [
+  { label: "Dashboard", href: "/parent/dashboard", icon: LayoutDashboard },
+  // Shared route group, so it is not under /parent.
   { label: "Notifications", href: "/notifications", icon: Bell },
-  { label: "My Schedule", href: "/teacher/classes", icon: CalendarDays },
-  { label: "My Availability", href: "/teacher/availability", icon: CalendarClock },
-  { label: "Attendance", href: "/teacher/attendance", icon: ClipboardCheck },
-  { label: "Trial Classes", href: "/teacher/trials", icon: CalendarClock },
-  { label: "Live Classes", href: "/teacher/live-class", icon: Radio },
-  { label: "Live Meetings", href: "/teacher/meetings", icon: Video },
-  { label: "My Students", href: "/teacher/students", icon: Users },
-  { label: "Student Progress", href: "/teacher/progress", icon: TrendingUp },
-  { label: "Assignments", href: "/teacher/assignments", icon: ClipboardList },
-  { label: "Assessments", href: "/teacher/assessments", icon: FileCheck2 },
-  { label: "Payout History", href: "/teacher/payouts", icon: Receipt },
-  { label: "My Payroll", href: "/teacher/payroll", icon: Receipt },
-  { label: "Support Chat", href: "/teacher/chat", icon: MessageCircle },
-  { label: "My Profile", href: "/teacher/profile", icon: User },
+  { label: "Fees", href: "/parent/fees", icon: Wallet },
 ];
 
-export function TeacherShell({ children }: { children: React.ReactNode }) {
+export function ParentShell({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNav, theme } = useUI();
   const { settings } = useSettingsStore();
   const pathname = usePathname();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-page to-surface-2/20">
-      {/* Mobile scrim */}
       <div
         onClick={() => setMobileNav(false)}
         className={cn(
@@ -73,24 +58,31 @@ export function TeacherShell({ children }: { children: React.ReactNode }) {
           mobileNavOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
-        {/* Brand logo */}
         <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-4">
           {theme === "dark" && settings?.logoDark ? (
-            <img src={settings.logoDark} alt="Logo" className="size-11 object-contain rounded-lg shrink-0 bg-white p-1" />
+            <img
+              src={settings.logoDark}
+              alt="Logo"
+              className="size-11 shrink-0 rounded-lg bg-white object-contain p-1"
+            />
           ) : settings?.logo ? (
-            <img src={settings.logo} alt="Logo" className="size-11 object-contain rounded-lg shrink-0 bg-white p-1" />
+            <img
+              src={settings.logo}
+              alt="Logo"
+              className="size-11 shrink-0 rounded-lg bg-white object-contain p-1"
+            />
           ) : (
-            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent to-[#59A5D8] shadow-md shadow-accent/20 text-white">
+            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent to-[#59A5D8] text-white shadow-md shadow-accent/20">
               <GraduationCap className="size-6" />
             </span>
           )}
           {!sidebarCollapsed && (
-            <div className="min-w-0 flex-1 animate-fade-in">
+            <div className="animate-fade-in min-w-0 flex-1">
               <p className="truncate text-base font-extrabold tracking-widest text-white uppercase">
                 {settings?.websiteName || "AL FURQAN"}
               </p>
-              <p className="truncate text-[10px] font-bold text-sidebar-text/70 uppercase tracking-wider">
-                Teacher Panel
+              <p className="truncate text-[10px] font-bold tracking-wider text-sidebar-text/70 uppercase">
+                Parent Portal
               </p>
             </div>
           )}
@@ -103,10 +95,9 @@ export function TeacherShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        {/* Navigation list */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1.5">
-            {teacherNavItems.map((item) => {
+            {parentNavItems.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
               return (
@@ -118,18 +109,16 @@ export function TeacherShell({ children }: { children: React.ReactNode }) {
                     className={cn(
                       "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       active
-                        ? "bg-sidebar-active text-white shadow-sm border border-white/5"
-                        : "text-sidebar-text hover:bg-sidebar-active/30 hover:text-white hover:translate-x-0.5",
-                      sidebarCollapsed && "justify-center px-0 hover:translate-x-0"
+                        ? "border border-white/5 bg-sidebar-active text-white shadow-sm"
+                        : "text-sidebar-text hover:translate-x-0.5 hover:bg-sidebar-active/30 hover:text-white",
+                      sidebarCollapsed && "justify-center px-0 hover:translate-x-0",
                     )}
                   >
-                    {active && (
-                      <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />
-                    )}
+                    {active && <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />}
                     <Icon
                       className={cn(
                         "size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110",
-                        active ? "text-white" : "text-sidebar-text/80 group-hover:text-white"
+                        active ? "text-white" : "text-sidebar-text/80 group-hover:text-white",
                       )}
                     />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
@@ -140,25 +129,34 @@ export function TeacherShell({ children }: { children: React.ReactNode }) {
           </ul>
         </nav>
 
-        {/* Footer controls */}
-        <div className="border-t border-sidebar-border p-3 flex justify-between">
+        <div className="hidden border-t border-sidebar-border p-3 lg:block">
           <button
             onClick={toggleSidebar}
-            className="hidden lg:grid size-9 place-items-center rounded-xl hover:bg-sidebar-active text-sidebar-text/80 transition"
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium text-sidebar-text transition-colors hover:bg-sidebar-active/30 hover:text-white",
+              sidebarCollapsed && "justify-center px-0",
+            )}
             aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="size-4.5" />
+            ) : (
+              <>
+                <PanelLeftClose className="size-4.5" />
+                <span>Collapse</span>
+              </>
+            )}
           </button>
         </div>
       </aside>
 
       <div
         className={cn(
-          "transition-[padding] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] min-h-screen flex flex-col",
+          "transition-[padding] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
           sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64",
         )}
       >
-        <div className="flex-1 flex flex-col">{children}</div>
+        {children}
       </div>
     </div>
   );

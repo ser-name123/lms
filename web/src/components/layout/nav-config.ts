@@ -1,4 +1,6 @@
 import {
+  Bell,
+  BellRing,
   BookOpen,
   CalendarDays,
   ClipboardList,
@@ -12,6 +14,8 @@ import {
   Library,
   Package,
   MessageCircle,
+  Megaphone,
+  LayoutGrid,
   UserPlus,
   UserCheck,
   Sparkles,
@@ -50,6 +54,10 @@ export const navGroups: NavGroup[] = [
     label: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Announcements", href: "/announcements", icon: Megaphone },
+      { label: "Notifications", href: "/notifications", icon: Bell },
+      { label: "Notification Management", href: "/notification-management", icon: BellRing },
+      { label: "Dashboard Widgets", href: "/dashboard-widgets", icon: LayoutGrid },
       { label: "Live Chat", href: "/chat", icon: MessageCircle },
     ],
   },

@@ -112,6 +112,8 @@ export function UserMenu() {
                   router.push("/student/profile");
                 } else if (user.role === "TEACHER") {
                   router.push("/teacher/profile");
+                } else if (user.role === "PARENT") {
+                  router.push("/parent/dashboard");
                 } else {
                   router.push("/profile");
                 }
@@ -121,10 +123,9 @@ export function UserMenu() {
               <UserIcon className="size-4" />
               Profile
             </button>
-            {user.role !== "STUDENT" &&
-              user.role !== "TEACHER" &&
-              user.role !== "ACADEMIC_COACH" &&
-              user.role !== "SUPERVISOR" && (
+            {/* Allow-list, not a deny-list: a newly added role must be opted
+                in deliberately rather than inheriting admin settings. */}
+            {user.role === "ADMIN" && (
               <button
                 role="menuitem"
                 onClick={() => {
