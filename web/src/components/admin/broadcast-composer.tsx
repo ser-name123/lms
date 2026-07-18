@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CalendarClock, FileText, Loader2, Megaphone, Send, Users } from "lucide-react";
+import Link from "next/link";
 import Swal from "sweetalert2";
 
 import { Card } from "@/components/ui/card";
@@ -281,6 +282,21 @@ export function BroadcastComposer({
           </Badge>
         ) : null}
       </div>
+
+      {/*
+       * Broadcast and Announcements both reach a whole audience, which is a
+       * genuinely confusing choice without this line. The difference is what
+       * survives: a broadcast is a one-off notification, an announcement is a
+       * post that stays on the dashboard until it expires.
+       */}
+      <p className="mb-3 rounded-lg bg-surface-2/60 px-3 py-2 text-xs text-ink-2">
+        A broadcast is a one-off notification. If you want something that stays on
+        everyone&apos;s dashboard until it expires, post an{" "}
+        <Link href="/announcements" className="font-bold text-accent hover:underline">
+          Announcement
+        </Link>{" "}
+        instead.
+      </p>
 
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="space-y-3">

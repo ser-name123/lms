@@ -1,6 +1,5 @@
 import {
   Bell,
-  BellRing,
   BookOpen,
   CalendarDays,
   ClipboardList,
@@ -28,6 +27,7 @@ import {
   Undo2,
   SlidersHorizontal,
   PiggyBank,
+  Radio,
   type LucideIcon,
 } from "lucide-react";
 
@@ -54,10 +54,18 @@ export const navGroups: NavGroup[] = [
     label: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Announcements", href: "/announcements", icon: Megaphone },
-      { label: "Notifications", href: "/notifications", icon: Bell },
-      { label: "Notification Management", href: "/notification-management", icon: BellRing },
+      // The signed-in user's own inbox. Everything that *sends* lives under
+      // Communication — these sat side by side with near-identical bell icons
+      // and read as three versions of one feature.
+      { label: "My Notifications", href: "/notifications", icon: Bell },
       { label: "Dashboard Widgets", href: "/dashboard-widgets", icon: LayoutGrid },
+    ],
+  },
+  {
+    label: "Communication",
+    items: [
+      { label: "Announcements", href: "/announcements", icon: Megaphone },
+      { label: "Notification Centre", href: "/notification-management", icon: Radio },
       { label: "Live Chat", href: "/chat", icon: MessageCircle },
     ],
   },

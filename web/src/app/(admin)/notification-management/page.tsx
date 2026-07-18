@@ -7,7 +7,7 @@ export default function NotificationManagementPage() {
   return (
     <>
       <Topbar
-        title="Notification Management"
+        title="Notification Centre"
         subtitle="Delivery, broadcasts, templates and engagement"
       />
       <div className="p-4 sm:p-6">

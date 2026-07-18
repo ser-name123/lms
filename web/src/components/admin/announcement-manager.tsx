@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Pencil, Pin, Plus, Trash2 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -175,6 +176,19 @@ export function AnnouncementManager() {
         }
       />
       <CardBody>
+        {/* The other half of the pairing explained in broadcast-composer. */}
+        <p className="mb-4 rounded-lg bg-surface-2/60 px-3 py-2 text-xs text-ink-2">
+          An announcement stays on everyone&apos;s dashboard until it expires, and
+          publishing one also sends a notification. For a one-off message that does
+          not stick around, use{" "}
+          <Link
+            href="/notification-management"
+            className="font-bold text-accent hover:underline"
+          >
+            Broadcast
+          </Link>{" "}
+          in the Notification Centre.
+        </p>
         {open ? (
           <form onSubmit={submit} className="mb-5 space-y-3 rounded-lg border border-hairline p-4">
             <div>

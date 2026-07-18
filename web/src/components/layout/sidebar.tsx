@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bell,
-  BellRing,
+  Radio,
   PanelLeftClose,
   PanelLeftOpen,
   GraduationCap,
@@ -200,11 +200,14 @@ export function Sidebar() {
     { label: "Support", href: "/support", icon: HelpCircle },
   ];
 
+  // Flat list, so the grouping the admin sidebar uses is not available here —
+  // the labels and icons have to carry the distinction on their own. "My
+  // Notifications" is this user's inbox; the other two are tools for sending.
   const supervisorNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "My Notifications", href: "/notifications", icon: Bell },
     { label: "Announcements", href: "/announcements", icon: Megaphone },
-    { label: "Notifications", href: "/notifications", icon: Bell },
-    { label: "Notification Management", href: "/notification-management", icon: BellRing },
+    { label: "Notification Centre", href: "/notification-management", icon: Radio },
     { label: "Recruitment", href: "/recruitment", icon: Users },
     { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },
