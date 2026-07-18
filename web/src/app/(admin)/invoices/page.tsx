@@ -44,20 +44,13 @@ import {
   createInvoice, 
   updateInvoice, 
   deleteInvoice,
+  fetchAcademyBilling,
   ApiError
 } from "@/lib/api";
 
 const STATUSES = ["Paid", "Pending", "Overdue", "Refunded"] as const;
 const PAYMENT_METHODS = ["Stripe", "PayPal", "Bank Transfer", "Cash"] as const;
 const BILLING_CYCLES = ["Monthly", "Quarterly", "One-Time"] as const;
-
-const FALLBACK_STUDENTS = [
-  { id: "fallback-1", name: "Ahmad Ali", email: "ahmad@example.com" },
-  { id: "fallback-2", name: "Sara Khan", email: "sara@example.com" },
-  { id: "fallback-3", name: "Zayd Ahmed", email: "zayd@example.com" },
-  { id: "fallback-4", name: "Yusuf Hussain", email: "yusuf@example.com" },
-  { id: "fallback-5", name: "Mariam Omar", email: "mariam@example.com" }
-];
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -73,7 +66,7 @@ export default function InvoicesPage() {
   });
   
   // Database Recipient students
-  const [dbStudents, setDbStudents] = useState<{ id: string; name: string; email: string }[]>(FALLBACK_STUDENTS);
+  const [dbStudents, setDbStudents] = useState<{ id: string; name: string; email: string }[]>([]);
 
   // Brand identity for the invoice header comes from System Settings.
   const settings = useSettingsStore(s => s.settings);
@@ -362,15 +355,16 @@ export default function InvoicesPage() {
       })
       .catch(err => console.warn("Failed to fetch packages", err));
 
-    // Load Academy billing details from localStorage
-    const savedName = localStorage.getItem("academy_billing_name");
-    const savedAddress = localStorage.getItem("academy_billing_address");
-    const savedPhone = localStorage.getItem("academy_billing_phone");
-    const savedEmail = localStorage.getItem("academy_billing_email");
-    if (savedName) setAcademyName(savedName);
-    if (savedAddress) setAcademyAddress(savedAddress);
-    if (savedPhone) setAcademyPhone(savedPhone);
-    if (savedEmail) setAcademyEmail(savedEmail);
+    // Academy billing header comes from the database, so every admin prints
+    // the same invoice header (it used to be per-browser localStorage).
+    fetchAcademyBilling()
+      .then((b) => {
+        setAcademyName(b.academyName);
+        setAcademyAddress(b.academyAddress);
+        setAcademyPhone(b.academyPhone);
+        setAcademyEmail(b.academyEmail);
+      })
+      .catch(() => undefined);
   }, []);
 
   // Reload list when pagination/filters change
@@ -428,7 +422,7 @@ export default function InvoicesPage() {
 
   // Seed Mock Data dynamically in backend if database is empty
   const handleSeedMockDatabase = async () => {
-    if (dbStudents.length === 0 || dbStudents[0].id.startsWith("fallback")) {
+    if (dbStudents.length === 0) {
       Swal.fire({
         title: "Seed Failed",
         text: "Please add at least one registered student in the database before seeding.",
@@ -481,7 +475,7 @@ export default function InvoicesPage() {
       if (!targetStudentId && dbStudents.length > 0) {
         targetStudentId = dbStudents[0].id;
       }
-      if (!targetStudentId || targetStudentId.startsWith("fallback")) {
+      if (!targetStudentId) {
         Swal.fire({ title: "Recipient Required", text: "Please select a registered database student recipient.", icon: "error" });
         return;
       }
@@ -1232,8 +1226,12 @@ export default function InvoicesPage() {
                     <select
                       value={formStudentEmail}
                       onChange={(e) => handleSelectStudentChange(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      disabled={dbStudents.length === 0}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                     >
+                      {dbStudents.length === 0 && (
+                        <option value="">No registered students available</option>
+                      )}
                       {dbStudents.map(student => (
                         <option key={student.email} value={student.email}>
                           {student.name} ({student.email})

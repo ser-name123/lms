@@ -22,6 +22,7 @@ enum Role {
   ACADEMIC_COACH
   TEACHER
   STUDENT
+  PARENT
 }
 
 enum UserStatus {
@@ -140,7 +141,12 @@ model User {
   leaveRequests  LeaveRequest[]
   payouts        Payout[]
   notifications  Notification[]
+  notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
   payrollConfig  PayrollConfig?
+  parentLinks    ParentLink[]
+  widgetLayouts  UserWidgetLayout[]
+  announcementReads AnnouncementRead[]
 
   @@index([role, status])
 }
@@ -188,7 +194,8 @@ model StudentProfile {
   preferredLanguage  String?
   learningGoal       String?
 
-  // Parent / Guardian (no parent login — admin manages, parent notified by email)
+  // Parent / Guardian contact details. A parent may additionally have a login of
+  // their own — see ParentLink / the `parentLinks` relation below.
   parentName         String?
   parentRelationship String?
   parentEmail        String?
@@ -216,6 +223,7 @@ model StudentProfile {
   assessmentAttempts AssessmentAttempt[]
   feeAssignments StudentFeeAssignment[]
   scholarships   Scholarship[]
+  parentLinks    ParentLink[]
 }
 
 // A requested change (teacher / batch / course) that needs approval before it
@@ -1541,19 +1549,206 @@ model LeadActivity {
   @@index([leadId])
 }
 
-// In-app notification delivered to a specific user (the topbar bell reads these).
+// ─── Notification Management ──────────────────────────────────────────────────
+// `type` stays a free-form String: 34 literals are already emitted from 16
+// services, and NOTIFICATION_TYPES (notifications/registry.ts) maps each one to
+// a category, priority and default channel set. An unregistered type still
+// delivers — it just falls back to SYSTEM/MEDIUM/in-app.
+
+enum NotificationCategory {
+  ACADEMIC
+  ATTENDANCE
+  ASSIGNMENT
+  ASSESSMENT
+  FINANCE
+  PROGRESS
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// The row's own lifecycle. Per-channel outcomes live on NotificationDelivery.
+enum NotificationStatus {
+  DRAFT
+  SCHEDULED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  ARCHIVED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  WHATSAPP
+  SMS
+}
+
+enum BroadcastAudience {
+  ALL
+  ROLE
+  COURSE
+  BATCH
+  STUDENTS
+}
+
+// One notification delivered to one user. The topbar bell reads these.
 model Notification {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String   // LEAD_NEW / LEAD_ASSIGNED / ...
+  type      String // LEAD_NEW / LEAD_ASSIGNED / ...
   title     String
   body      String?
   link      String?
+  // `read` predates the module and is what the bell/widget still read; readAt
+  // is the timestamp the reports need. The engine keeps both in step.
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
+  category    NotificationCategory @default(SYSTEM)
+  priority    NotificationPriority @default(MEDIUM)
+  status      NotificationStatus   @default(SENT)
+  readAt      DateTime?
+  archivedAt  DateTime?
+  scheduledAt DateTime?
+  // Who caused it — null for engine/system events.
+  actorId     String?
+  actorName   String?
+  broadcastId String?
+  broadcast   NotificationBroadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
+  templateCode String?
+  meta        Json?
+
+  deliveries NotificationDelivery[]
+
   @@index([userId, read])
+  @@index([userId, archivedAt, createdAt])
+  @@index([category])
+  @@index([status])
+  @@index([createdAt])
+  @@index([broadcastId])
+}
+
+// One attempt to put a notification down one channel. This is the delivery log
+// the admin panel reports on, and what the retry sweep walks.
+model NotificationDelivery {
+  id             String              @id @default(uuid())
+  notificationId String
+  notification   Notification        @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  channel        NotificationChannel
+  status         NotificationStatus  @default(QUEUED)
+  attempts       Int                 @default(0)
+  lastError      String?
+  // Set when the channel was deliberately not used (preference off, provider
+  // not configured). Distinct from a failure so reports do not conflate them.
+  skippedReason  String?
+  target         String? // email address / push endpoint / phone
+  providerRef    String?
+  queuedAt       DateTime            @default(now())
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  failedAt       DateTime?
+
+  @@unique([notificationId, channel])
+  @@index([status, channel])
+  @@index([queuedAt])
+}
+
+// Per-user channel opt-in. Absent row = every channel on (the engine treats a
+// missing row as the defaults below, so no backfill is needed).
+model NotificationPreference {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inApp          Boolean  @default(true)
+  email          Boolean  @default(true)
+  push           Boolean  @default(true)
+  whatsapp       Boolean  @default(false)
+  sms            Boolean  @default(false)
+  // "Mute marketing" in the spec — announcements and other non-essential blasts.
+  muteMarketing  Boolean  @default(false)
+  // Categories this user has switched off entirely. CRITICAL always overrides.
+  mutedCategories NotificationCategory[] @default([])
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+}
+
+// Admin-editable message template. `isSystem` marks the seeded ones — those may
+// be edited but not deleted, because the engine looks them up by code.
+model NotificationTemplate {
+  id          String               @id @default(uuid())
+  code        String               @unique
+  name        String
+  description String?
+  category    NotificationCategory @default(SYSTEM)
+  priority    NotificationPriority @default(MEDIUM)
+  channels    NotificationChannel[] @default([])
+  subject     String
+  bodyText    String
+  bodyHtml    String?
+  link        String?
+  active      Boolean              @default(true)
+  isSystem    Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([category])
+}
+
+// An admin-composed send: broadcast now, or scheduled for later.
+model NotificationBroadcast {
+  id             String                @id @default(uuid())
+  title          String
+  body           String
+  link           String?
+  templateCode   String?
+  category       NotificationCategory  @default(SYSTEM)
+  priority       NotificationPriority  @default(MEDIUM)
+  channels       NotificationChannel[] @default([])
+  audience       BroadcastAudience     @default(ALL)
+  roles          Role[]                @default([])
+  courseId       String?
+  batchId        String?
+  studentIds     String[]              @default([])
+  scheduledAt    DateTime?
+  status         NotificationStatus    @default(DRAFT)
+  recipientCount Int                   @default(0)
+  sentCount      Int                   @default(0)
+  failedCount    Int                   @default(0)
+  sentAt         DateTime?
+  cancelledAt    DateTime?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  notifications Notification[]
+
+  @@index([status, scheduledAt])
+}
+
+// A browser Web Push endpoint. One user may have several (one per device).
+model PushSubscription {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
 }
 
 // ─── Student Progress Tracking ────────────────────────────────────────────────
@@ -1935,3 +2130,103 @@ model PayrollConfig {
 }
 
 
+
+// ---------------------------------------------------------------------------
+// Dashboard Management
+// ---------------------------------------------------------------------------
+
+// A parent login linked to one or more children. A parent may have several
+// children, and a student may have two guardians with separate logins.
+model ParentLink {
+  id           String         @id @default(uuid())
+  parentUserId String
+  parentUser   User           @relation(fields: [parentUserId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  relationship String?
+  isPrimary    Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+
+  @@unique([parentUserId, studentId])
+  @@index([parentUserId])
+  @@index([studentId])
+}
+
+// Registry of every dashboard widget. Seeded by scripts/migrate-dashboard.cjs;
+// `roles` is the set of role dashboards a widget is even eligible for.
+model DashboardWidget {
+  key         String   @id
+  title       String
+  description String?
+  category    String   @default("KPI") // KPI | CHART | TABLE | LIST | ACTION
+  defaultSize String   @default("MD")  // SM | MD | LG | FULL
+  roles       String[] @default([])
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  roleSettings RoleWidgetSetting[]
+  userLayouts  UserWidgetLayout[]
+}
+
+// Admin-controlled enable/disable of a widget for a whole role.
+model RoleWidgetSetting {
+  id        String          @id @default(uuid())
+  role      Role
+  widgetKey String
+  widget    DashboardWidget @relation(fields: [widgetKey], references: [key], onDelete: Cascade)
+  enabled   Boolean         @default(true)
+  order     Int             @default(0)
+  updatedAt DateTime        @updatedAt
+
+  @@unique([role, widgetKey])
+  @@index([role])
+}
+
+// Per-user personalisation on top of the role settings.
+model UserWidgetLayout {
+  id        String          @id @default(uuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  widgetKey String
+  widget    DashboardWidget @relation(fields: [widgetKey], references: [key], onDelete: Cascade)
+  order     Int             @default(0)
+  size      String?
+  hidden    Boolean         @default(false)
+  updatedAt DateTime        @updatedAt
+
+  @@unique([userId, widgetKey])
+  @@index([userId])
+}
+
+model Announcement {
+  id            String    @id @default(uuid())
+  title         String
+  body          String
+  type          String    @default("GENERAL") // HOLIDAY | MAINTENANCE | EXAM | COURSE | GENERAL
+  audience      String[]  @default([])        // Role names; empty = everyone
+  pinned        Boolean   @default(false)
+  active        Boolean   @default(true)
+  link          String?
+  publishedAt   DateTime?
+  expiresAt     DateTime?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  reads AnnouncementRead[]
+
+  @@index([active, publishedAt])
+}
+
+model AnnouncementRead {
+  id             String       @id @default(uuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { authSnapshot, type User } from "@/store/auth";
+import { authSnapshot, type Role, type User } from "@/store/auth";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
@@ -735,61 +735,721 @@ export const deleteInvoice = (id: string) => api<void>(`/invoices/${id}`, {
 // NOTE: the legacy /trials (TrialClass) client was retired — trial classes now
 // run through the Leads module (LeadTrial: scheduleLeadTrial/fetchMyTrials/…).
 
-// ─── Dashboard calls & types ──────────────────────────────────────────────────
+// NOTE: the legacy /dashboard/overview client was retired — every dashboard now
+// reads a role-specific endpoint from the Dashboard Management block below.
 
-export type Trend = { label: string; value: number };
+// ─── Dashboard Management (role dashboards, widgets, announcements) ───────────
 
-export type Kpi = {
-  id: string;
-  label: string;
-  value: string;
-  raw: number;
-  delta: number; // percent vs previous period
-  hint: string;
-  spark: Trend[];
+export type DashboardRange = "7d" | "30d" | "90d" | "12m";
+
+/** Every role dashboard accepts the same window parameters. */
+export type RangeQuery = { range?: DashboardRange; from?: string; to?: string };
+
+const rangeQs = (q: RangeQuery = {}) => {
+  const p = new URLSearchParams();
+  if (q.range) p.set("range", q.range);
+  if (q.from) p.set("from", q.from);
+  if (q.to) p.set("to", q.to);
+  const s = p.toString();
+  return s ? `?${s}` : "";
 };
 
-export type NewStudentEntry = {
-  no: string;
+export type KpiValue = { value: number; delta?: number };
+export type LabelledPoint = { label: string } & Record<string, number | string>;
+
+export type SuperAdminDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  kpis: {
+    totalStudents: KpiValue;
+    activeStudents: KpiValue;
+    totalTeachers: KpiValue;
+    academicCoaches: KpiValue;
+    courses: KpiValue;
+    activeBatches: KpiValue;
+    todayClasses: KpiValue;
+    runningClasses: KpiValue;
+    completedClasses: KpiValue;
+    assignmentsPending: KpiValue;
+    assessmentsLive: KpiValue;
+    revenueThisMonth: KpiValue;
+    outstandingFees: KpiValue;
+    expenses: KpiValue;
+    netProfit: KpiValue;
+  };
+  live: {
+    onlineStudents: number;
+    teachersTeachingNow: number;
+    activeLiveClasses: number;
+    todayAttendancePct: number;
+    todayAssignmentSubmissionPct: number;
+    todayAssessmentCompletionPct: number;
+  };
+  charts: {
+    studentGrowth: { label: string; students: number }[];
+    revenueTrend: { label: string; revenue: number; expenses: number; profit: number }[];
+    admissions: { label: string; admissions: number }[];
+    attendanceTrend: { label: string; rate: number }[];
+    assessmentTrend: { label: string; avgScore: number; attempts: number }[];
+    assignmentTrend: { label: string; assigned: number; submitted: number; rate: number }[];
+    teacherPerformance: { name: string; rating: number; classes: number; students: number }[];
+    batchUtilization: { name: string; capacity: number; enrolled: number; utilization: number }[];
+    countryMix: { name: string; value: number }[];
+    courseMix: { name: string; value: number }[];
+  };
+};
+
+export type UpcomingClass = {
+  id: string;
+  title: string;
+  time: string;
+  endsAt: string;
+  course: string;
+  batch: string | null;
+  teacher: string;
+  students: number;
+  status: string;
+  meetingUrl: string | null;
+};
+
+export type PendingTask = { key: string; label: string; count: number; link: string };
+
+export type AdminDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  cards: {
+    todayAdmissions: number;
+    todayTrials: number;
+    todayClasses: number;
+    todayAttendancePct: number;
+    pendingAssignments: number;
+    pendingAssessments: number;
+    pendingFees: { count: number; amount: number };
+    pendingApprovals: number;
+  };
+  upcomingClasses: UpcomingClass[];
+  pendingTasks: PendingTask[];
+  charts: {
+    admissions: { label: string; admissions: number }[];
+    attendance: { label: string; rate: number }[];
+    assignmentStatus: { name: string; value: number }[];
+    fees: { label: string; collected: number; outstanding: number }[];
+  };
+};
+
+export type CoachStudentRow = {
+  studentId: string;
+  studentCode: string;
   name: string;
-  professor: string;
-  date: string; // ISO — formatted client-side
-  status: "Checkin" | "Pending" | "Canceled";
-  subject: string;
-  fees: string;
+  avatarUrl: string | null;
+  overallScore?: number;
+  attendancePct?: number;
+  assignmentPct?: number;
+  assessmentPct?: number;
+  statusLabel?: string;
+  joinedAt?: string;
+  risk?: { studentId: string; level: string; reasons: string[] };
 };
 
-export type ActivityItem = {
+export type CoachTask = {
+  kind: "PARENT_MEETING" | "MONTHLY_REVIEW" | "TRIAL_EVALUATION" | "STUDENT_COUNSELING";
   id: string;
+  title: string;
+  detail: string | null;
+  at: string;
+  link: string;
+};
+
+export type CoachDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  cards: {
+    studentsAssigned: number;
+    studentsAtRisk: number;
+    pendingReviews: number;
+    monthlyReviews: number;
+    parentMeetings: number;
+    improvementPlans: number;
+    goalsAchieved: number;
+  };
+  performance: {
+    topPerformers: CoachStudentRow[];
+    needAttention: CoachStudentRow[];
+    weakStudents: CoachStudentRow[];
+    newAdmissions: CoachStudentRow[];
+  };
+  charts: {
+    progress: { label: string; score: number }[];
+    assessment: { label: string; score: number }[];
+    assignment: { label: string; completion: number }[];
+    attendance: { label: string; rate: number }[];
+  };
+  upcomingTasks: CoachTask[];
+};
+
+export type TeacherScheduleRow = {
+  id: string;
+  title: string;
+  time: string;
+  endsAt: string;
+  course: string;
+  batch: string | null;
+  students: number;
+  status: string;
+  meetingUrl: string | null;
+};
+
+export type TeacherStudentRef = {
+  studentId: string;
+  studentCode: string;
+  name: string;
+  avatarUrl: string | null;
+};
+
+export type TeacherDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  cards: {
+    todayClasses: number;
+    upcomingClasses: number;
+    students: number;
+    assignmentsPendingReview: number;
+    assessmentsPendingEvaluation: number;
+    attendancePending: number;
+    trialClasses: number;
+  };
+  schedule: TeacherScheduleRow[];
+  pendingWork: PendingTask[];
+  students: {
+    highestPerformer: (TeacherStudentRef & { score: number }) | null;
+    lowAttendance: (TeacherStudentRef & { attendance: number })[];
+    lateSubmissions: (TeacherStudentRef & { lateCount: number })[];
+    weakStudents: (TeacherStudentRef & { score: number; status: string })[];
+  };
+  charts: {
+    classCompletion: { label: string; scheduled: number; completed: number }[];
+    attendance: { label: string; rate: number }[];
+    assignmentStatus: { name: string; value: number }[];
+    assessmentAverage: { label: string; score: number }[];
+  };
+};
+
+export type StudentPendingItem = {
+  kind: "ASSIGNMENT_DUE" | "ASSESSMENT_UPCOMING" | "TEACHER_FEEDBACK";
+  id: string;
+  title: string;
+  at: string | null;
+  link: string;
+};
+
+export type StudentDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  studentId: string | null;
+  cards: {
+    todayClasses: number;
+    attendancePct: number;
+    assignments: { pending: number; submitted: number; total: number };
+    upcomingTests: number;
+    overallProgress: number;
+    certificates: number;
+    learningGoal: {
+      id: string;
+      title: string;
+      currentPct: number;
+      targetPct: number;
+      deadline: string | null;
+    } | null;
+  };
+  schedule: {
+    id: string;
+    title: string;
+    time: string;
+    endsAt: string;
+    subject: string;
+    teacher: string;
+    status: string;
+    meetingUrl: string | null;
+  }[];
+  pendingWork: StudentPendingItem[];
+  progress: {
+    attendance: { label: string; rate: number }[];
+    assignments: { label: string; completion: number }[];
+    assessment: { label: string; score: number }[];
+    skills: { name: string; percentage: number }[];
+    overall: number;
+  };
+  achievements: {
+    certificates: {
+      id: string;
+      title: string;
+      certificateNo: string | null;
+      url: string | null;
+      score: number;
+      issuedAt: string | null;
+    }[];
+    completedCourses: { id: string; title: string; progress: number; completedAt: string | null }[];
+    badges: {
+      id: string;
+      code: string;
+      name: string;
+      description: string | null;
+      icon: string | null;
+      tone: string | null;
+      awardedAt: string;
+    }[];
+  };
+};
+
+export type ParentChild = {
+  studentId: string;
+  studentCode: string;
+  name: string;
+  avatarUrl: string | null;
+  relationship: string | null;
+  isPrimary: boolean;
+};
+
+export type ParentDashboard = {
+  range: DashboardRange;
+  generatedAt: string;
+  child: {
+    studentId: string;
+    studentCode: string;
+    name: string;
+    avatarUrl: string | null;
+    status: string;
+    level: string | null;
+    course: string | null;
+    teacher: string | null;
+  };
+  children: ParentChild[];
+  cards: {
+    attendancePct: number;
+    assignments: { total: number; submitted: number; pending: number };
+    lastResult: {
+      title: string;
+      percentage: number;
+      score: number;
+      totalMarks: number;
+      passed: boolean;
+      at: string | null;
+    } | null;
+    feeDue: { amount: number; invoices: number };
+    lastFeedback: { remarks: string | null; suggestions: string | null; at: string } | null;
+    overallProgress: number;
+    progressStatus: string | null;
+  };
+  timeline: {
+    todayClasses: {
+      id: string;
+      title: string;
+      subject: string;
+      teacher: string;
+      time: string;
+      classStatus: string;
+      attendance: string | null;
+    }[];
+    recentAttendance: {
+      id: string;
+      title: string;
+      at: string;
+      status: string | null;
+      lateMinutes: number | null;
+    }[];
+    homework: { id: string; title: string; dueAt: string | null; status: string }[];
+    upcomingTests: { id: string; title: string; at: string | null; totalMarks: number }[];
+    teacherRemarks: {
+      id: string;
+      kind: string;
+      remarks: string | null;
+      suggestions: string | null;
+      ratings: {
+        participation: number | null;
+        understanding: number | null;
+        behavior: number | null;
+      };
+      at: string;
+    }[];
+  };
+  charts: {
+    attendance: { label: string; rate: number }[];
+    marks: { label: string; score: number }[];
+    progress: { label: string; score: number }[];
+  };
+  fees: {
+    outstanding: number;
+    unpaidInvoices: number;
+    lastPayment: {
+      amount: number;
+      at: string | null;
+      method: string | null;
+      invoiceNumber: string;
+    } | null;
+    nextDue: {
+      invoiceId: string | null;
+      number: string | null;
+      amount: number;
+      dueAt: string | null;
+    } | null;
+    receipts: {
+      id: string;
+      number: string;
+      amount: number;
+      currency: string;
+      method: string | null;
+      issuedAt: string;
+    }[];
+  };
+};
+
+/** Whatever the signed-in role's dashboard returns. */
+export type AnyRoleDashboard =
+  | SuperAdminDashboard
+  | AdminDashboard
+  | CoachDashboard
+  | TeacherDashboard
+  | StudentDashboard
+  | ParentDashboard;
+
+export const fetchSuperAdminDashboard = (q?: RangeQuery) =>
+  api<SuperAdminDashboard>(`/dashboard/super-admin${rangeQs(q)}`);
+export const fetchAdminDashboard = (q?: RangeQuery) =>
+  api<AdminDashboard>(`/dashboard/admin${rangeQs(q)}`);
+export const fetchCoachDashboard = (q?: RangeQuery) =>
+  api<CoachDashboard>(`/dashboard/coach${rangeQs(q)}`);
+export const fetchTeacherRoleDashboard = (q?: RangeQuery) =>
+  api<TeacherDashboard>(`/dashboard/teacher${rangeQs(q)}`);
+export const fetchStudentRoleDashboard = (q?: RangeQuery) =>
+  api<StudentDashboard>(`/dashboard/student${rangeQs(q)}`);
+export const fetchParentDashboard = (q?: RangeQuery & { childId?: string }) => {
+  const p = new URLSearchParams(rangeQs(q).replace(/^\?/, ""));
+  if (q?.childId) p.set("childId", q.childId);
+  const s = p.toString();
+  return api<ParentDashboard>(`/dashboard/parent${s ? `?${s}` : ""}`);
+};
+export const fetchParentChildren = () => api<ParentChild[]>("/dashboard/parent/children");
+
+// ─── Parent quick actions ────────────────────────────────────────────────────
+
+export type ParentContacts = {
+  teachers: { name: string; email: string; courses: string[] }[];
+  coach: { name: string; email: string } | null;
+};
+
+export type ParentAcademy = {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+};
+
+export type ParentFees = {
+  child: ParentDashboard["child"];
+  summary: ParentDashboard["fees"];
+  academy: ParentAcademy;
+  invoices: {
+    id: string;
+    number: string;
+    status: string;
+    amount: number;
+    paidAmount: number;
+    balance: number;
+    issuedAt: string | null;
+    dueAt: string | null;
+  }[];
+};
+
+export type ParentReceipt = {
+  id: string;
+  number: string;
+  amount: number;
+  currency: string;
+  method: string | null;
+  notes: string | null;
+  issuedAt: string;
+  paidAt: string | null;
+  reference: string | null;
+  invoice: { number: string; amount: number; dueAt: string | null };
+  student: { name: string; code: string };
+  academy: ParentAcademy;
+};
+
+export type ParentReportCard = {
+  generatedAt: string;
+  range: DashboardRange;
+  academy: ParentAcademy;
+  child: ParentDashboard["child"];
+  summary: ParentDashboard["cards"];
+  trends: ParentDashboard["charts"];
+  skills: { name: string; percentage: number }[];
+  reviews: {
+    monthLabel: string;
+    academic: number | null;
+    attendance: number | null;
+    behavior: number | null;
+    participation: number | null;
+    remarks: string | null;
+  }[];
+};
+
+const childQs = (childId?: string) => (childId ? `?childId=${encodeURIComponent(childId)}` : "");
+
+export const fetchParentContacts = (childId?: string) =>
+  api<ParentContacts>(`/dashboard/parent/contacts${childQs(childId)}`);
+export const fetchParentFees = (childId?: string) =>
+  api<ParentFees>(`/dashboard/parent/fees${childQs(childId)}`);
+export const fetchParentReceipt = (receiptId: string, childId?: string) =>
+  api<ParentReceipt>(`/dashboard/parent/receipt/${receiptId}${childQs(childId)}`);
+export const fetchParentReportCard = (q?: RangeQuery & { childId?: string }) => {
+  const p = new URLSearchParams(rangeQs(q).replace(/^\?/, ""));
+  if (q?.childId) p.set("childId", q.childId);
+  const s = p.toString();
+  return api<ParentReportCard>(`/dashboard/parent/report-card${s ? `?${s}` : ""}`);
+};
+
+// ─── Widgets ─────────────────────────────────────────────────────────────────
+
+export type WidgetCategory = "KPI" | "CHART" | "TABLE" | "LIST" | "ACTION";
+export type WidgetSize = "SM" | "MD" | "LG" | "FULL";
+
+export type ResolvedWidget = {
+  key: string;
+  title: string;
+  description: string | null;
+  category: WidgetCategory;
+  size: WidgetSize;
+  order: number;
+  hidden: boolean;
+};
+
+export type RegistryWidget = {
+  key: string;
+  title: string;
+  description: string | null;
+  category: WidgetCategory;
+  defaultSize: WidgetSize;
+  roles: Role[];
+  order: number;
+};
+
+export type RoleWidgetRow = {
+  key: string;
+  title: string;
+  description: string | null;
+  category: WidgetCategory;
+  defaultSize: WidgetSize;
+  enabled: boolean;
+  order: number;
+};
+
+export const fetchMyWidgets = () => api<ResolvedWidget[]>("/dashboard/widgets/me");
+
+export const saveMyWidgets = (
+  items: { key: string; order?: number; size?: WidgetSize; hidden?: boolean }[],
+) =>
+  api<ResolvedWidget[]>("/dashboard/widgets/me", {
+    method: "PATCH",
+    body: JSON.stringify({ items }),
+  });
+
+export const resetMyWidgets = () =>
+  api<ResolvedWidget[]>("/dashboard/widgets/me/reset", { method: "POST" });
+
+export const fetchWidgetRegistry = () => api<RegistryWidget[]>("/dashboard/widgets/registry");
+
+export const fetchRoleWidgets = (role: Role) =>
+  api<RoleWidgetRow[]>(`/dashboard/widgets/role/${role}`);
+
+export const updateRoleWidgets = (
+  role: Role,
+  items: { key: string; enabled?: boolean; order?: number }[],
+) =>
+  api<RoleWidgetRow[]>("/dashboard/widgets/role", {
+    method: "PATCH",
+    body: JSON.stringify({ role, items }),
+  });
+
+// ─── Announcements ───────────────────────────────────────────────────────────
+
+export type AnnouncementType = "HOLIDAY" | "MAINTENANCE" | "EXAM" | "COURSE" | "GENERAL";
+
+export type AnnouncementFeedItem = {
+  id: string;
+  title: string;
+  body: string;
+  type: AnnouncementType;
+  pinned: boolean;
+  link: string | null;
+  publishedAt: string | null;
+  read: boolean;
+};
+
+export type AnnouncementAdminItem = AnnouncementFeedItem & {
+  audience: Role[];
+  active: boolean;
+  expiresAt: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  readCount: number;
+};
+
+export type AnnouncementInput = {
+  title: string;
+  body: string;
+  type?: AnnouncementType;
+  audience?: Role[];
+  pinned?: boolean;
+  link?: string;
+  publishAt?: string;
+  expiresAt?: string;
+};
+
+export const fetchAnnouncementFeed = () => api<AnnouncementFeedItem[]>("/announcements/feed");
+export const fetchAllAnnouncements = () => api<AnnouncementAdminItem[]>("/announcements");
+export const createAnnouncement = (input: AnnouncementInput) =>
+  api<AnnouncementAdminItem>("/announcements", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateAnnouncement = (id: string, input: Partial<AnnouncementInput & { active: boolean }>) =>
+  api<AnnouncementAdminItem>(`/announcements/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export const deleteAnnouncement = (id: string) =>
+  api<{ success: boolean }>(`/announcements/${id}`, { method: "DELETE" });
+export const markAnnouncementRead = (id: string) =>
+  api<{ success: boolean }>(`/announcements/${id}/read`, { method: "PATCH" });
+
+// ─── Global search / calendar / activity ─────────────────────────────────────
+
+export type SearchHit = {
+  type:
+    | "STUDENT"
+    | "TEACHER"
+    | "PARENT"
+    | "BATCH"
+    | "COURSE"
+    | "INVOICE"
+    | "ASSIGNMENT"
+    | "ASSESSMENT";
+  id: string;
+  title: string;
+  subtitle: string | null;
+  link: string;
+};
+
+export type CalendarEvent = {
+  kind: "CLASS" | "ASSIGNMENT" | "ASSESSMENT" | "MEETING" | "HOLIDAY";
+  id: string;
+  title: string;
+  at: string;
+  endsAt: string | null;
+  link: string;
+};
+
+export type DashboardActivityItem = {
+  id: string;
+  kind: "student" | "payment" | "enroll" | "assignment" | "registration" | "assessment";
   who: string;
   action: string;
   target: string;
-  at: string; // ISO — rendered as relative time client-side
-  kind: "payment" | "enroll" | "class" | "alert";
+  at: string;
+  link: string;
 };
 
-export type EducationCourse = {
-  id: string;
-  title: string;
-  cover: string;
-  date: string;
-  likes: number;
-  duration: string;
-  professor: string;
-  students: string;
+export const globalSearch = (q: string, limit = 5) =>
+  api<SearchHit[]>(`/dashboard/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+
+export const fetchCalendar = (from?: string, to?: string) => {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  const s = p.toString();
+  return api<CalendarEvent[]>(`/dashboard/calendar${s ? `?${s}` : ""}`);
 };
 
-export type DashboardOverview = {
-  kpis: Kpi[];
-  newStudentList: NewStudentEntry[];
-  activity: ActivityItem[];
-  educationCourses: EducationCourse[];
-  courseMix: { name: string; value: number }[];
-  enrollmentSeries: { month: string; new: number; churned: number }[];
-  revenueSeries: { month: string; revenue: number; target: number }[];
+export const fetchDashboardActivity = () =>
+  api<DashboardActivityItem[]>("/dashboard/activity");
+
+/*
+ * Report endpoints return either a bare array of rows or
+ * `{ type, columns, rows }`. Callers get a normalised shape so the CSV writer
+ * does not have to care which module produced it.
+ */
+export type ReportPayload = { columns?: string[]; rows: Record<string, unknown>[] };
+
+export async function fetchReport(path: string): Promise<ReportPayload> {
+  const raw = await api<unknown>(path);
+  if (Array.isArray(raw)) return { rows: raw as Record<string, unknown>[] };
+  const obj = (raw ?? {}) as { columns?: string[]; rows?: Record<string, unknown>[] };
+  return { columns: obj.columns, rows: obj.rows ?? [] };
+}
+
+// ─── Academy billing identity ────────────────────────────────────────────────
+
+/*
+ * Used as the header on printed invoices and receipts. This lived in each
+ * admin's own localStorage, so a second admin printed invoices with a blank
+ * header; it is stored in SystemSetting now.
+ */
+export type AcademyBilling = {
+  academyName: string;
+  academyAddress: string;
+  academyPhone: string;
+  academyEmail: string;
 };
 
-export const fetchDashboard = () => api<DashboardOverview>("/dashboard/overview");
+export const fetchAcademyBilling = () => api<AcademyBilling>("/settings/billing");
+
+export const saveAcademyBilling = (input: Partial<AcademyBilling>) =>
+  api<AcademyBilling>("/settings/billing", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+// ─── Parent links (admin) ────────────────────────────────────────────────────
+
+export type ParentLinkRow = {
+  linkId: string;
+  parentUserId: string;
+  name: string;
+  email: string;
+  status: string;
+  lastLoginAt: string | null;
+  relationship: string | null;
+  isPrimary: boolean;
+  linkedAt: string;
+};
+
+export const fetchParentLinks = (studentId: string) =>
+  api<ParentLinkRow[]>(`/parent-links/student/${studentId}`);
+
+export const createParentAccount = (input: {
+  studentId: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  relationship?: string;
+}) =>
+  api<{
+    parentUserId: string;
+    email: string;
+    linkId: string;
+    created: boolean;
+    temporaryPassword: string | null;
+  }>("/parent-links/account", { method: "POST", body: JSON.stringify(input) });
+
+export const linkParentToChild = (input: {
+  parentUserId: string;
+  studentId: string;
+  relationship?: string;
+  isPrimary?: boolean;
+}) => api<unknown>("/parent-links/link", { method: "POST", body: JSON.stringify(input) });
+
+export const unlinkParent = (linkId: string) =>
+  api<{ success: boolean }>(`/parent-links/${linkId}`, { method: "DELETE" });
 
 // ─── Payout Calls & Types ──────────────────────────────────────────────────────
 
@@ -1665,6 +2325,31 @@ export const fetchLeadFunnel = () => api<LeadFunnel>("/leads/funnel");
 
 // ─── In-app notifications (topbar bell) ──────────────────────────────────────
 
+export type NotificationCategory =
+  | "ACADEMIC"
+  | "ATTENDANCE"
+  | "ASSIGNMENT"
+  | "ASSESSMENT"
+  | "FINANCE"
+  | "PROGRESS"
+  | "SYSTEM";
+
+export type NotificationPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type NotificationStatus =
+  | "DRAFT"
+  | "SCHEDULED"
+  | "QUEUED"
+  | "SENT"
+  | "DELIVERED"
+  | "READ"
+  | "FAILED"
+  | "ARCHIVED";
+
+export type NotificationChannel = "IN_APP" | "EMAIL" | "PUSH" | "WHATSAPP" | "SMS";
+
+export type BroadcastAudience = "ALL" | "ROLE" | "COURSE" | "BATCH" | "STUDENTS";
+
 export interface AppNotification {
   id: string;
   type: string;
@@ -1673,15 +2358,444 @@ export interface AppNotification {
   link: string | null;
   read: boolean;
   createdAt: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  status: NotificationStatus;
+  readAt: string | null;
+  archivedAt: string | null;
+  actorName: string | null;
 }
 
 export const fetchNotifications = (limit = 30) =>
   api<AppNotification[]>(`/notifications?limit=${limit}`);
-export const fetchUnreadCount = () => api<{ count: number }>("/notifications/unread-count");
+export const fetchUnreadCount = () =>
+  api<{ count: number; critical: number }>("/notifications/unread-count");
 export const markNotificationRead = (id: string) =>
   api<{ success: boolean }>(`/notifications/${id}/read`, { method: "PATCH" });
 export const markAllNotificationsRead = () =>
-  api<{ success: boolean }>("/notifications/read-all", { method: "PATCH" });
+  api<{ success: boolean; count: number }>("/notifications/read-all", { method: "PATCH" });
+
+// ─── Notification inbox (every role) ─────────────────────────────────────────
+
+export type NotificationFeedQuery = {
+  limit?: number;
+  cursor?: string;
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  unreadOnly?: boolean;
+  includeArchived?: boolean;
+  q?: string;
+};
+
+const notifQs = (q: Record<string, unknown> = {}) => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) {
+    if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+};
+
+export const fetchNotificationFeed = (q: NotificationFeedQuery = {}) =>
+  api<{ items: AppNotification[]; nextCursor: string | null }>(
+    `/notifications/feed${notifQs(q as Record<string, unknown>)}`,
+  );
+
+export const fetchNotificationSummary = () =>
+  api<{ category: NotificationCategory; total: number; unread: number }[]>(
+    "/notifications/summary",
+  );
+
+export const archiveNotification = (id: string) =>
+  api<{ success: boolean }>(`/notifications/${id}`, { method: "DELETE" });
+
+export const archiveReadNotifications = () =>
+  api<{ success: boolean; count: number }>("/notifications/archive-read", { method: "POST" });
+
+export type NotificationTypeDef = {
+  type: string;
+  label: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  channels: NotificationChannel[];
+  marketing?: boolean;
+};
+
+export const fetchNotificationTypes = () =>
+  api<NotificationTypeDef[]>("/notifications/types");
+
+// ─── Preferences & push ──────────────────────────────────────────────────────
+
+export type NotificationPreferences = {
+  inApp: boolean;
+  email: boolean;
+  push: boolean;
+  whatsapp: boolean;
+  sms: boolean;
+  muteMarketing: boolean;
+  mutedCategories: NotificationCategory[];
+  pushSubscriptions: number;
+  whatsappAvailable: boolean;
+  smsAvailable: boolean;
+  customised: boolean;
+};
+
+export const fetchNotificationPreferences = () =>
+  api<NotificationPreferences>("/notifications/preferences");
+
+export const saveNotificationPreferences = (input: Partial<NotificationPreferences>) =>
+  api<NotificationPreferences>("/notifications/preferences", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+export const resetNotificationPreferences = () =>
+  api<NotificationPreferences>("/notifications/preferences/reset", { method: "POST" });
+
+export const fetchPushPublicKey = () =>
+  api<{ publicKey: string | null; enabled: boolean }>("/notifications/push/public-key");
+
+export const subscribePush = (input: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent?: string;
+}) =>
+  api<{ success: boolean }>("/notifications/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const unsubscribePush = (endpoint: string) =>
+  api<{ success: boolean }>("/notifications/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
+
+// ─── Compose (roles with an outbox) ──────────────────────────────────────────
+
+export type ComposeRecipient = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  context: string | null;
+};
+
+export const fetchComposeRecipients = () =>
+  api<ComposeRecipient[]>("/notification-admin/compose/recipients");
+
+export const sendNotification = (input: {
+  userIds: string[];
+  title: string;
+  body: string;
+  link?: string;
+  priority?: NotificationPriority;
+  channels?: NotificationChannel[];
+}) =>
+  api<{ sent: number; suppressed: number }>("/notification-admin/compose", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+// ─── Admin notification management ───────────────────────────────────────────
+
+export type NotificationChannelHealth = {
+  channel: NotificationChannel;
+  configured: boolean;
+  detail: string;
+};
+
+export type NotificationAdminDashboard = {
+  cards: {
+    todayNotifications: number;
+    failed: number;
+    unread: number;
+    queued: number;
+    delivered: number;
+    readRate: number;
+    deliveryRate: number;
+    scheduledBroadcasts: number;
+  };
+  channels: NotificationChannelHealth[];
+  realtime: { connectedUsers: number; connections: number };
+};
+
+export const fetchNotificationAdminDashboard = () =>
+  api<NotificationAdminDashboard>("/notification-admin/dashboard");
+
+export type NotificationMeta = {
+  types: NotificationTypeDef[];
+  categories: NotificationCategory[];
+  priorities: NotificationPriority[];
+  statuses: NotificationStatus[];
+  channels: NotificationChannel[];
+  roles: Role[];
+};
+
+export const fetchNotificationMeta = () => api<NotificationMeta>("/notification-admin/meta");
+
+export type AudienceOptions = {
+  courses: { id: string; title: string }[];
+  batches: { id: string; name: string; code: string; course: string }[];
+  students: { id: string; studentCode: string; name: string; email: string }[];
+};
+
+export const fetchAudienceOptions = (q?: string) =>
+  api<AudienceOptions>(`/notification-admin/audience-options${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+
+export type CentreRow = {
+  id: string;
+  time: string;
+  user: { id: string; name: string; email: string; role: Role };
+  title: string;
+  body: string | null;
+  link: string | null;
+  type: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  status: NotificationStatus;
+  read: boolean;
+  readAt: string | null;
+  actorName: string | null;
+  broadcastId: string | null;
+  channels: {
+    channel: NotificationChannel;
+    status: NotificationStatus;
+    attempts: number;
+    error: string | null;
+    skipped: string | null;
+    sentAt: string | null;
+  }[];
+};
+
+export type CentreQuery = {
+  limit?: number;
+  offset?: number;
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  channel?: NotificationChannel;
+  status?: NotificationStatus;
+  role?: Role;
+  type?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+};
+
+export const fetchNotificationCentre = (q: CentreQuery = {}) =>
+  api<{ total: number; limit: number; offset: number; items: CentreRow[] }>(
+    `/notification-admin/centre${notifQs(q as Record<string, unknown>)}`,
+  );
+
+export type DeliveryFailure = {
+  deliveryId: string;
+  notificationId: string;
+  channel: NotificationChannel;
+  attempts: number;
+  error: string | null;
+  target: string | null;
+  failedAt: string | null;
+  title: string;
+  type: string;
+  recipient: { name: string; email: string; role: Role };
+};
+
+export const fetchNotificationFailures = (limit = 100) =>
+  api<DeliveryFailure[]>(`/notification-admin/failures?limit=${limit}`);
+
+export const retryDelivery = (deliveryId: string) =>
+  api<{ success: boolean; reason: string | null }>(
+    `/notification-admin/failures/${deliveryId}/retry`,
+    { method: "POST" },
+  );
+
+export const retryAllDeliveries = () =>
+  api<{ retried: number; recovered: number; candidates: number }>(
+    "/notification-admin/failures/retry-all",
+    { method: "POST" },
+  );
+
+export const runScheduledBroadcasts = () =>
+  api<{ dispatched: number; due: number }>("/notification-admin/scheduled/run", {
+    method: "POST",
+  });
+
+export type NotificationAnalytics = {
+  range: { from: string; to: string };
+  cards: {
+    total: number;
+    deliveryRate: number;
+    readRate: number;
+    failureRate: number;
+    avgReadMinutes: number;
+  };
+  charts: {
+    daily: { label: string; count: number }[];
+    channelUsage: { name: string; value: number }[];
+    byRole: { name: string; value: number }[];
+    readTrend: { label: string; rate: number }[];
+    failureTrend: { label: string; rate: number }[];
+    byCategory: { name: string; value: number }[];
+    byPriority: { name: string; value: number }[];
+  };
+};
+
+export const fetchNotificationAnalytics = (range: DashboardRange = "30d") =>
+  api<NotificationAnalytics>(`/notification-admin/analytics?range=${range}`);
+
+export const NOTIFICATION_REPORTS = [
+  { kind: "daily", label: "Daily notifications" },
+  { kind: "delivery", label: "Delivery report" },
+  { kind: "read", label: "Read report" },
+  { kind: "failure", label: "Failure report" },
+  { kind: "engagement", label: "User engagement" },
+  { kind: "channel", label: "Channel usage" },
+] as const;
+
+// ─── Broadcasts ──────────────────────────────────────────────────────────────
+
+export type BroadcastRow = {
+  id: string;
+  title: string;
+  body: string;
+  link: string | null;
+  templateCode: string | null;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  channels: NotificationChannel[];
+  audience: BroadcastAudience;
+  roles: Role[];
+  courseId: string | null;
+  batchId: string | null;
+  studentIds: string[];
+  scheduledAt: string | null;
+  status: NotificationStatus;
+  recipientCount: number;
+  sentCount: number;
+  failedCount: number;
+  sentAt: string | null;
+  cancelledAt: string | null;
+  createdByName: string | null;
+  createdAt: string;
+};
+
+export type BroadcastInput = {
+  title: string;
+  body: string;
+  link?: string;
+  templateCode?: string;
+  audience: BroadcastAudience;
+  roles?: Role[];
+  courseId?: string;
+  batchId?: string;
+  studentIds?: string[];
+  category?: NotificationCategory;
+  priority?: NotificationPriority;
+  channels?: NotificationChannel[];
+  scheduledAt?: string;
+  /** Park it as an editable draft instead of sending or scheduling. */
+  draft?: boolean;
+};
+
+export const fetchBroadcasts = (limit = 50) =>
+  api<BroadcastRow[]>(`/notification-admin/broadcasts?limit=${limit}`);
+
+export const previewBroadcast = (input: BroadcastInput) =>
+  api<{ recipientCount: number }>("/notification-admin/broadcasts/preview", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const createBroadcast = (input: BroadcastInput) =>
+  api<BroadcastRow>("/notification-admin/broadcasts", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+/** Edit a draft — or, with `draft: false`, send/schedule the draft it edits. */
+export const updateBroadcast = (id: string, input: BroadcastInput) =>
+  api<BroadcastRow>(`/notification-admin/broadcasts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+export const fetchBroadcast = (id: string) =>
+  api<BroadcastRow & { deliveredCount: number; readCount: number }>(
+    `/notification-admin/broadcasts/${id}`,
+  );
+
+export const cancelBroadcast = (id: string) =>
+  api<BroadcastRow>(`/notification-admin/broadcasts/${id}/cancel`, { method: "POST" });
+
+export const sendBroadcastNow = (id: string) =>
+  api<BroadcastRow>(`/notification-admin/broadcasts/${id}/send-now`, { method: "POST" });
+
+// ─── Templates ───────────────────────────────────────────────────────────────
+
+export type NotificationTemplate = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  channels: NotificationChannel[];
+  subject: string;
+  bodyText: string;
+  bodyHtml: string | null;
+  link: string | null;
+  active: boolean;
+  isSystem: boolean;
+  placeholders: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TemplateInput = {
+  code?: string;
+  name: string;
+  description?: string;
+  category: NotificationCategory;
+  priority?: NotificationPriority;
+  channels?: NotificationChannel[];
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string;
+  link?: string;
+  active?: boolean;
+};
+
+export const fetchNotificationTemplates = () =>
+  api<NotificationTemplate[]>("/notification-admin/templates");
+
+export const createNotificationTemplate = (input: TemplateInput) =>
+  api<NotificationTemplate>("/notification-admin/templates", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const updateNotificationTemplate = (code: string, input: Partial<TemplateInput>) =>
+  api<NotificationTemplate>(`/notification-admin/templates/${code}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+export const deleteNotificationTemplate = (code: string) =>
+  api<{ success: boolean }>(`/notification-admin/templates/${code}`, { method: "DELETE" });
+
+export const previewNotificationTemplate = (code: string, vars: Record<string, string> = {}) =>
+  api<{
+    code: string;
+    subject: string;
+    bodyText: string;
+    bodyHtml: string | null;
+    link: string | null;
+    placeholders: string[];
+  }>(`/notification-admin/templates/${code}/preview`, {
+    method: "POST",
+    body: JSON.stringify({ vars }),
+  });
 
 // ─── Online Attendance Management (batches → classes → attendance) ────────────
 

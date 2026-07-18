@@ -493,3 +493,66 @@ export class SettingsService {
     return { success: true };
   }
 }
+
+/*
+ * Academy billing identity (used as the header on printed invoices/receipts).
+ *
+ * These four fields previously lived in the admin's own localStorage, so a
+ * second admin — or the same admin on another machine — printed invoices with
+ * a blank header. They belong in the database.
+ */
+export class AcademyBillingDto {
+  @IsOptional()
+  @IsString()
+  academyName?: string;
+
+  @IsOptional()
+  @IsString()
+  academyAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  academyPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  academyEmail?: string;
+}
+
+const BILLING_KEYS = {
+  academyName: 'ACADEMY_BILLING_NAME',
+  academyAddress: 'ACADEMY_BILLING_ADDRESS',
+  academyPhone: 'ACADEMY_BILLING_PHONE',
+  academyEmail: 'ACADEMY_BILLING_EMAIL',
+} as const;
+
+@Injectable()
+export class AcademyBillingService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async get(): Promise<Required<AcademyBillingDto>> {
+    const records = await this.prisma.systemSetting.findMany({
+      where: { key: { in: Object.values(BILLING_KEYS) } },
+    });
+    const map = new Map(records.map((r) => [r.key, r.value]));
+    return {
+      academyName: map.get(BILLING_KEYS.academyName) ?? '',
+      academyAddress: map.get(BILLING_KEYS.academyAddress) ?? '',
+      academyPhone: map.get(BILLING_KEYS.academyPhone) ?? '',
+      academyEmail: map.get(BILLING_KEYS.academyEmail) ?? '',
+    };
+  }
+
+  async save(dto: AcademyBillingDto): Promise<Required<AcademyBillingDto>> {
+    for (const [field, key] of Object.entries(BILLING_KEYS)) {
+      const value = dto[field as keyof AcademyBillingDto];
+      if (value === undefined) continue;
+      await this.prisma.systemSetting.upsert({
+        where: { key },
+        update: { value },
+        create: { key, value },
+      });
+    }
+    return this.get();
+  }
+}

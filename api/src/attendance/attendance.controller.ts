@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Ip, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Ip, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, Roles, type AuthUser } from '../auth/decorators';
@@ -37,6 +37,16 @@ export class AttendanceController {
   @ApiOperation({ summary: 'Update attendance rules (thresholds / auto-lock / grace)' })
   updateConfig(@Body() dto: AttendanceConfigDto) {
     return this.service.updateConfig(dto);
+  }
+
+  @Post('low-attendance-check')
+  @HttpCode(200)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Run the low-attendance check now (it also runs hourly on its own)',
+  })
+  runLowAttendanceCheck() {
+    return this.service.runLowAttendanceCheck();
   }
 
   // ── Batches (admin) ─────────────────────────────────────────────────────────

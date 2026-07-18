@@ -32,7 +32,7 @@ import {
   fetchSessions,
   revokeSession,
 } from "@/lib/api";
-import { useAuth } from "@/store/auth";
+import { authSnapshot, useAuth } from "@/store/auth";
 import { parseUserAgent } from "@/lib/utils";
 
 export default function TeacherProfile() {
@@ -149,24 +149,21 @@ export default function TeacherProfile() {
     }
   };
 
+  /* Read the store rather than parsing its persisted localStorage blob — the
+     shape of that blob is zustand's private business. */
   const updateLocalAuthSession = (newAvatarUrl?: string) => {
-    const authData = localStorage.getItem("lms-auth");
-    if (authData) {
-      const auth = JSON.parse(authData);
-      if (auth.state) {
-        const sessionTokens = {
-          accessToken: auth.state.accessToken,
-          refreshToken: auth.state.refreshToken,
-        };
-        const updatedUser = {
-          ...auth.state.user,
-          avatarUrl: newAvatarUrl !== undefined ? newAvatarUrl : auth.state.user.avatarUrl,
-          firstName: firstName || auth.state.user.firstName,
-          lastName: lastName || auth.state.user.lastName,
-        };
-        setSession(sessionTokens, updatedUser);
-      }
-    }
+    const { accessToken, refreshToken, user } = authSnapshot();
+    if (!accessToken || !refreshToken || !user) return;
+
+    setSession(
+      { accessToken, refreshToken },
+      {
+        ...user,
+        avatarUrl: newAvatarUrl !== undefined ? newAvatarUrl : user.avatarUrl,
+        firstName: firstName || user.firstName,
+        lastName: lastName || user.lastName,
+      },
+    );
   };
 
   const handleRevokeSession = async (id: string) => {

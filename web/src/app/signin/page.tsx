@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleAlert, Eye, EyeOff, Loader2, GraduationCap } from "lucide-react";
 
@@ -9,6 +9,7 @@ import { ApiError, fetchMe, login, verifyOtp } from "@/lib/api";
 import { useAuth, useAuthHydrated } from "@/store/auth";
 import { useSettingsStore } from "@/store/settings";
 import { useUI } from "@/store/ui";
+import { dashboardPathFor } from "@/lib/routes";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -39,13 +40,7 @@ export default function SignInPage() {
   // Already signed in? Don't show the form again.
   useEffect(() => {
     if (hydrated && accessToken && user) {
-      if (user.role === "STUDENT") {
-        router.replace("/student/dashboard");
-      } else if (user.role === "TEACHER") {
-        router.replace("/teacher/dashboard");
-      } else {
-        router.replace("/dashboard");
-      }
+      router.replace(dashboardPathFor(user.role));
     }
   }, [hydrated, accessToken, user, router]);
 
@@ -79,20 +74,14 @@ export default function SignInPage() {
       setTokens(tokens);
 
       const fetchedUser = await fetchMe();
-      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR", "PARENT"];
       if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
         throw new ApiError(403, "This console is for authorized users only.");
       }
 
       setSession(tokens, fetchedUser);
-      if (fetchedUser.role === "STUDENT") {
-        router.replace("/student/dashboard");
-      } else if (fetchedUser.role === "TEACHER") {
-        router.replace("/teacher/dashboard");
-      } else {
-        router.replace("/dashboard");
-      }
+      router.replace(dashboardPathFor(fetchedUser.role));
     } catch (err) {
       clear();
       setError(err instanceof ApiError ? err.message : "Could not reach the server.");
@@ -116,20 +105,14 @@ export default function SignInPage() {
       setTokens(tokens);
 
       const fetchedUser = await fetchMe();
-      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR", "PARENT"];
       if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
         throw new ApiError(403, "This console is for authorized users only.");
       }
 
       setSession(tokens, fetchedUser);
-      if (fetchedUser.role === "STUDENT") {
-        router.replace("/student/dashboard");
-      } else if (fetchedUser.role === "TEACHER") {
-        router.replace("/teacher/dashboard");
-      } else {
-        router.replace("/dashboard");
-      }
+      router.replace(dashboardPathFor(fetchedUser.role));
     } catch (err) {
       clear();
       setError(err instanceof ApiError ? err.message : "Verification failed. Please try again.");

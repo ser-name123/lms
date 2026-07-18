@@ -24,10 +24,20 @@
   --accent-ink: #ffffff;
   --accent-soft: rgba(56, 111, 164, 0.09);
 
-  --series-1: #133C55;
-  --series-2: #386FA4;
-  --series-3: #59A5D8;
-  --series-4: #84D2F6;
+  /* Categorical slots, assigned in fixed order and never cycled. The previous
+     four were all steps of one blue: the worst adjacent pair measured ΔE 13.5
+     to normal vision (below the 15 floor) and the lightest sat at 1.68:1 on
+     white. These eight clear every gate on this surface — re-run
+     scripts/validate_palette.js before touching them. Slots 3/4/5 sit below
+     3:1 here, so charts using them ship a legend or direct labels. */
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
+  --series-5: #1baf7a;
+  --series-6: #eb6834;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
 
   --good: #10b981;
   --good-ink: #047857;
@@ -64,10 +74,16 @@
   --accent-ink: #ffffff;
   --accent-soft: rgba(56, 111, 164, 0.15);
 
-  --series-1: #386FA4;
-  --series-2: #34d399;
-  --series-3: #fbbf24;
-  --series-4: #a78bfa;
+  /* Same eight hues, re-stepped for the dark surface — a selected palette, not
+     an automatic flip. All eight clear 3:1 on #18181b. */
+  --series-1: #3987e5;
+  --series-2: #008300;
+  --series-3: #d55181;
+  --series-4: #c98500;
+  --series-5: #199e70;
+  --series-6: #d95926;
+  --series-7: #9085e9;
+  --series-8: #e66767;
 
   --good: #10b981;
   --good-ink: #34d399;
@@ -113,6 +129,10 @@
   --color-series-2: var(--series-2);
   --color-series-3: var(--series-3);
   --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
 
   --color-good: var(--good);
   --color-good-ink: var(--good-ink);

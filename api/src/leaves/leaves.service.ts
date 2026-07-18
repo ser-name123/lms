@@ -4,6 +4,11 @@ import { LeaveRequestStatus, LeaveType, Role } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
 import type { CreateLeaveDto, ListLeavesDto, UpdateLeaveDto } from './dto';
 import { TeacherManagementService } from '../teacher-management/teacher-management.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+/** "12 Mar" — leave windows read better than raw ISO in a notification body. */
+const shortDate = (d: Date) =>
+  d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
 const LEAVE_SELECT = {
   id: true,
@@ -32,6 +37,7 @@ export class LeavesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly teacherMgmt: TeacherManagementService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(dto: ListLeavesDto) {
@@ -85,7 +91,7 @@ export class LeavesService {
   }
 
   async create(dto: CreateLeaveDto) {
-    return this.prisma.leaveRequest.create({
+    const created = await this.prisma.leaveRequest.create({
       data: {
         userId: dto.userId,
         leaveType: dto.leaveType,
@@ -95,6 +101,20 @@ export class LeavesService {
       },
       select: LEAVE_SELECT,
     });
+
+    // A leave request sat in the queue with nobody told about it. Fire-and-
+    // forget, so a notification failure never loses the request itself.
+    const who = `${created.user.firstName} ${created.user.lastName}`.trim();
+    this.notifications
+      .createForRoles([Role.ADMIN, Role.SUPERVISOR], {
+        type: 'LEAVE_REQUESTED',
+        title: 'Leave request pending',
+        body: `${who} requested ${created.leaveType.toLowerCase()} leave, ${shortDate(created.startDate)} – ${shortDate(created.endDate)}.`,
+        link: '/leaves',
+      })
+      .catch(() => undefined);
+
+    return created;
   }
 
   async update(id: string, dto: UpdateLeaveDto) {
@@ -117,6 +137,26 @@ export class LeavesService {
     ) {
       this.teacherMgmt
         .cancelClassesForLeave(updated.userId, updated.startDate, updated.endDate, updated.reason)
+        .catch(() => undefined);
+    }
+
+    // Tell the requester the outcome — previously a decision was silent.
+    if (dto.status && dto.status !== existing.status) {
+      const window = `${shortDate(updated.startDate)} – ${shortDate(updated.endDate)}`;
+      this.notifications
+        .createFor(updated.userId, {
+          type: 'LEAVE_DECISION',
+          title:
+            dto.status === LeaveRequestStatus.APPROVED
+              ? 'Leave approved'
+              : dto.status === LeaveRequestStatus.DECLINED
+                ? 'Leave declined'
+                : 'Leave request updated',
+          body: updated.adminNotes
+            ? `${window} — ${updated.adminNotes}`
+            : `Your ${updated.leaveType.toLowerCase()} leave for ${window}.`,
+          link: updated.user.role === Role.TEACHER ? '/teacher/availability' : '/leaves',
+        })
         .catch(() => undefined);
     }
 

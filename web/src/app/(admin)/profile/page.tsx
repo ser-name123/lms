@@ -19,7 +19,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/store/auth";
-import { updateProfile, fetchMe, fetchSessions, deleteSession, revokeSession, fetchAdmins, createAdmin, deleteAdmin, ApiError } from "@/lib/api";
+import { updateProfile, fetchMe, fetchSessions, deleteSession, revokeSession, fetchAdmins, createAdmin, deleteAdmin, fetchAcademyBilling, saveAcademyBilling, ApiError } from "@/lib/api";
 import { initials } from "@/lib/utils";
 import { ImageCropperModal } from "@/components/image-cropper";
 
@@ -96,32 +96,48 @@ export default function ProfilePage() {
     }
   };
 
-  // Load Academy Billing settings from localStorage
+  // Academy billing identity lives in the database, not this browser — every
+  // admin (and every invoice print) sees the same values.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedName = localStorage.getItem("academy_billing_name");
-      const savedAddress = localStorage.getItem("academy_billing_address");
-      const savedPhone = localStorage.getItem("academy_billing_phone");
-      const savedEmail = localStorage.getItem("academy_billing_email");
-      if (savedName) setAcademyName(savedName);
-      if (savedAddress) setAcademyAddress(savedAddress);
-      if (savedPhone) setAcademyPhone(savedPhone);
-      if (savedEmail) setAcademyEmail(savedEmail);
-    }
+    let active = true;
+    fetchAcademyBilling()
+      .then((b) => {
+        if (!active) return;
+        setAcademyName(b.academyName);
+        setAcademyAddress(b.academyAddress);
+        setAcademyPhone(b.academyPhone);
+        setAcademyEmail(b.academyEmail);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleSaveAcademySettings = (e: React.FormEvent) => {
+  const handleSaveAcademySettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("academy_billing_name", academyName);
-    localStorage.setItem("academy_billing_address", academyAddress);
-    localStorage.setItem("academy_billing_phone", academyPhone);
-    localStorage.setItem("academy_billing_email", academyEmail);
-    Swal.fire({
-      title: "Settings Saved",
-      text: "Academy billing details updated successfully!",
-      icon: "success",
-      background: document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff"
-    });
+    const isDark = document.documentElement.classList.contains("dark");
+    try {
+      await saveAcademyBilling({
+        academyName,
+        academyAddress,
+        academyPhone,
+        academyEmail,
+      });
+      Swal.fire({
+        title: "Settings Saved",
+        text: "Academy billing details updated successfully!",
+        icon: "success",
+        background: isDark ? "#18181b" : "#ffffff",
+      });
+    } catch (err) {
+      Swal.fire({
+        title: "Could not save",
+        text: err instanceof ApiError ? err.message : "Failed to save billing details.",
+        icon: "error",
+        background: isDark ? "#18181b" : "#ffffff",
+      });
+    }
   };
 
   useEffect(() => {

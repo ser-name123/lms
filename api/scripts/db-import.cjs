@@ -25,7 +25,9 @@ const path = require('path');
   const tables = payload.tables || {};
   const names = payload.tableOrder || Object.keys(tables);
 
-  const conn = process.env.DIRECT_URL || process.env.DATABASE_URL;
+  // DIRECT_URL (5432) is unreachable in this environment — the pooler is the
+  // working connection, so prefer it and keep DIRECT_URL as the fallback.
+  const conn = process.env.DATABASE_URL || process.env.DIRECT_URL;
   if (!conn) throw new Error('DATABASE_URL / DIRECT_URL is not set');
 
   const client = new Client({ connectionString: conn });

@@ -7,14 +7,43 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { SettingsService, SystemSettingsDto } from './settings.service';
+import {
+  AcademyBillingDto,
+  AcademyBillingService,
+  SettingsService,
+  SystemSettingsDto,
+} from './settings.service';
 import { Public, Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 
 @ApiTags('settings')
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly billing: AcademyBillingService,
+  ) {}
+
+  /* Billing routes are declared before the bare '' routes below purely for
+     readability — they are distinct static segments, so order is not load-
+     bearing here. */
+
+  @Get('billing')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Academy billing identity used on invoice headers' })
+  getBilling() {
+    return this.billing.get();
+  }
+
+  @Post('billing')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Update academy billing identity (Admin only)' })
+  saveBilling(@Body() dto: AcademyBillingDto) {
+    return this.billing.save(dto);
+  }
 
   @Public() // Allow public access so frontend root layout can fetch logo, favicon, colors, and head scripts on load
   @Get()

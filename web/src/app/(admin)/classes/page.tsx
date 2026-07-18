@@ -33,47 +33,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { fetchStudentsTeachers, authHeader } from "@/lib/api";
 
-// Course List (for linking in dropdowns)
-const AVAILABLE_COURSES = [
-  { code: "QRN-101", title: "Basic Quran Reading", studentsCount: 42 },
-  { code: "TAJ-202", title: "Advanced Tajweed Rules", studentsCount: 28 },
-  { code: "ARB-101", title: "Arabic Grammar Level 1", studentsCount: 35 },
-  { code: "ISL-301", title: "Seerah of Prophet Muhammad", studentsCount: 56 },
-  { code: "QRN-401", title: "Quran Memorization Hifz", studentsCount: 18 },
-  { code: "QRN-099", title: "Noorani Qaida for Kids", studentsCount: 84 },
-  { code: "ARB-201", title: "Arabic Conversational Skills", studentsCount: 22 },
-  { code: "ISL-202", title: "Fiqh of Worship", studentsCount: 40 },
-  { code: "ISL-102", title: "Introduction to Hadith", studentsCount: 30 },
-  { code: "ARB-302", title: "Advanced Arabic Rhetoric", studentsCount: 12 },
-  { code: "ARB-150", title: "Quranic Arabic Vocabulary", studentsCount: 48 },
-  { code: "TAJ-150", title: "Intermediate Tajweed Practice", studentsCount: 32 },
-  { code: "ISL-101", title: "Islamic Creed Aqeedah", studentsCount: 50 },
-  { code: "ISL-050", title: "Pillars of Islam Course", studentsCount: 15 },
-  { code: "QRN-250", title: "Tafseer of Juz Amma", studentsCount: 65 },
-  { code: "ISL-401", title: "Advanced Seerah Analysis", studentsCount: 9 },
-  { code: "ARB-099", title: "Arabic Handwriting Naskh", studentsCount: 19 },
-  { code: "ISL-250", title: "Rulings of Hajj & Umrah", studentsCount: 72 },
-  { code: "QRN-102", title: "Quran Recitation Correction", studentsCount: 60 },
-  { code: "ISL-080", title: "Basic Islamic Manners Akhlaq", studentsCount: 44 },
-  { code: "TAJ-101", title: "Tajweed Rules for Kids", studentsCount: 75 },
-  { code: "ARB-401", title: "Advanced Arabic Syntax", studentsCount: 8 },
-  { code: "ISL-302", title: "Fiqh of Transactions Muamalat", studentsCount: 14 },
-  { code: "ISL-350", title: "History of Islamic Caliphates", studentsCount: 25 },
-  { code: "TAJ-301", title: "Tajweed Masterclass", studentsCount: 16 },
-  { code: "ARB-350", title: "Arabic Media Translation", studentsCount: 11 },
-  { code: "QRN-301", title: "Quranic Reflections", studentsCount: 38 },
-  { code: "QRN-202", title: "Intro to Quran Sciences", studentsCount: 29 },
-  { code: "ISL-220", title: "Islamic History & Heritage", studentsCount: 31 },
-  { code: "TAJ-099", title: "Introduction to Tajweed", studentsCount: 90 }
-];
-
-const TEACHERS = [
-  "Sheikh Abdul Rahman",
-  "Ustadha Fatima",
-  "Sheikh Muhammad Al-Mansoori",
-  "Ustadha Zaynab",
-  "Sheikh Yasir Qadhi"
-];
+type CourseOption = { code: string; title: string; studentsCount: number };
 
 // Initial Mock Classes Data (30 items with independent categories)
 const INITIAL_CLASSES: any[] = [];
@@ -112,8 +72,8 @@ export default function ClassesPage() {
 
   // Add/Edit form fields
   const [formTopic, setFormTopic] = useState("");
-  const [formCourseCode, setFormCourseCode] = useState(AVAILABLE_COURSES[0].code);
-  const [formTeacher, setFormTeacher] = useState(TEACHERS[0]);
+  const [formCourseCode, setFormCourseCode] = useState("");
+  const [formTeacher, setFormTeacher] = useState("");
   const [formCategory, setFormCategory] = useState("Regular Class");
   const [formCapacity, setFormCapacity] = useState<number>(15);
   const [formEnrolled, setFormEnrolled] = useState<number>(0);
@@ -123,8 +83,8 @@ export default function ClassesPage() {
   const [formStatus, setFormStatus] = useState("Upcoming");
   const [formDescription, setFormDescription] = useState("");
 
-  const [teachersList, setTeachersList] = useState<string[]>(TEACHERS);
-  const [coursesList, setCoursesList] = useState(AVAILABLE_COURSES);
+  const [teachersList, setTeachersList] = useState<string[]>([]);
+  const [coursesList, setCoursesList] = useState<CourseOption[]>([]);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
@@ -145,7 +105,7 @@ export default function ClassesPage() {
           setTeachersList(names);
         }
       })
-      .catch(err => console.warn("Failed to fetch teachers from API, using fallback data", err));
+      .catch(err => console.warn("Failed to fetch teachers from API", err));
 
     // Courses come from the admin's Learning-Management catalogue (LmsCourse),
     // so the dropdown shows real course codes/titles — never a database UUID.
@@ -161,7 +121,7 @@ export default function ClassesPage() {
           setCoursesList(formatted);
         }
       })
-      .catch(err => console.warn("Failed to fetch courses from API, using fallback data", err));
+      .catch(err => console.warn("Failed to fetch courses from API", err));
   }, [apiBase]);
 
   // Reset page when filter triggers
@@ -243,8 +203,8 @@ export default function ClassesPage() {
 
   const handleOpenAddModal = () => {
     setFormTopic("");
-    setFormCourseCode(coursesList[0]?.code || AVAILABLE_COURSES[0].code);
-    setFormTeacher(teachersList[0] || TEACHERS[0]);
+    setFormCourseCode(coursesList[0]?.code || "");
+    setFormTeacher(teachersList[0] || "");
     setFormCategory(categories[0] || "Regular Class");
     setFormCapacity(15);
     setFormEnrolled(0);
@@ -268,7 +228,11 @@ export default function ClassesPage() {
       return;
     }
 
-    const courseObj = coursesList.find(c => c.code === formCourseCode) || AVAILABLE_COURSES.find(c => c.code === formCourseCode)!;
+    const courseObj = coursesList.find(c => c.code === formCourseCode);
+    if (!courseObj) {
+      Swal.fire({ title: "Course Required", text: "Please select a course. If the list is empty, add a course in Learning Management first.", icon: "error" });
+      return;
+    }
 
     const payload = {
       topic: formTopic,
@@ -333,7 +297,11 @@ export default function ClassesPage() {
       return;
     }
 
-    const courseObj = coursesList.find(c => c.code === formCourseCode) || AVAILABLE_COURSES.find(c => c.code === formCourseCode)!;
+    const courseObj = coursesList.find(c => c.code === formCourseCode);
+    if (!courseObj) {
+      Swal.fire({ title: "Course Required", text: "Please select a course. If the list is empty, add a course in Learning Management first.", icon: "error" });
+      return;
+    }
 
     const payload = {
       topic: formTopic,
@@ -799,8 +767,12 @@ export default function ClassesPage() {
                   <select
                     value={formCourseCode}
                     onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={coursesList.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {coursesList.length === 0 && (
+                      <option value="">No courses available</option>
+                    )}
                     {coursesList.map(c => (
                       <option key={c.code} value={c.code}>
                         {c.title}
@@ -813,8 +785,12 @@ export default function ClassesPage() {
                   <select
                     value={formTeacher}
                     onChange={(e) => setFormTeacher(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={teachersList.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {teachersList.length === 0 && (
+                      <option value="">No teachers available</option>
+                    )}
                     {teachersList.map(t => (
                       <option key={t} value={t}>{t}</option>
                     ))}
@@ -966,8 +942,12 @@ export default function ClassesPage() {
                   <select
                     value={formCourseCode}
                     onChange={(e) => setFormCourseCode(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={coursesList.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {coursesList.length === 0 && (
+                      <option value="">No courses available</option>
+                    )}
                     {coursesList.map(c => (
                       <option key={c.code} value={c.code}>
                         {c.title}
@@ -980,8 +960,12 @@ export default function ClassesPage() {
                   <select
                     value={formTeacher}
                     onChange={(e) => setFormTeacher(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={teachersList.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {teachersList.length === 0 && (
+                      <option value="">No teachers available</option>
+                    )}
                     {teachersList.map(t => (
                       <option key={t} value={t}>{t}</option>
                     ))}

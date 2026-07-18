@@ -253,7 +253,9 @@ export class ProgressCoachService {
     if (achieved && goal.status !== 'ACHIEVED') {
       this.notifications
         .createFor(student.userId, {
-          type: 'PROGRESS_GOAL',
+          // Distinct from PROGRESS_GOAL (goal *set*) so the two can be told
+          // apart in the feed and filtered separately.
+          type: 'GOAL_COMPLETED',
           title: 'Goal achieved 🎉',
           body: `You reached your goal: ${updated.title}.`,
           link: '/student/progress',

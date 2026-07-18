@@ -28,6 +28,15 @@ export class AttendanceConfigDto {
 
   @ApiPropertyOptional({ description: 'Allow admin manual correction', default: true })
   @IsOptional() @IsBoolean() allowManualCorrection?: boolean;
+
+  @ApiPropertyOptional({ description: 'Alert when a student falls below this %', default: 75 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) lowAttendanceThreshold?: number;
+
+  @ApiPropertyOptional({ description: 'Days the low-attendance rate is measured over', default: 30 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(365) lowAttendanceWindowDays?: number;
+
+  @ApiPropertyOptional({ description: 'Minimum marked sessions before alerting', default: 4 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) lowAttendanceMinSessions?: number;
 }
 
 // ── Batch ─────────────────────────────────────────────────────────────────────

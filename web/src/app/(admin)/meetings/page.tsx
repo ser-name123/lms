@@ -40,29 +40,6 @@ const MEETING_TYPES = ["1-on-1 Meeting", "Group Meeting", "Staff Call", "Parent-
 const MEETING_STATUSES = ["Upcoming", "In Progress", "Completed", "Cancelled"] as const;
 const RSVP_STATUSES = ["Accepted", "Declined", "Pending"] as const;
 
-// Fallback lists
-const FALLBACK_TEACHERS = [
-  "Sheikh Abdul Rahman",
-  "Ustadha Fatima",
-  "Sheikh Muhammad Al-Mansoori",
-  "Ustadha Zaynab",
-  "Sheikh Yasir Qadhi"
-];
-
-const FALLBACK_STUDENTS = [
-  { name: "Ahmad Ali", email: "ahmad@example.com" },
-  { name: "Sara Khan", email: "sara@example.com" },
-  { name: "Zayd Ahmed", email: "zayd@example.com" },
-  { name: "Yusuf Hussain", email: "yusuf@example.com" },
-  { name: "Mariam Omar", email: "mariam@example.com" }
-];
-
-const FALLBACK_STAFF = [
-  { name: "Farhan Ali", email: "farhan@example.com", role: "Supervisor" },
-  { name: "Aisha Siddiqa", email: "aisha@example.com", role: "Coach" },
-  { name: "Bilal Mansoor", email: "bilal@example.com", role: "Admin" }
-];
-
 // Initial 30 Mock Meetings
 const INITIAL_MEETINGS: any[] = [];
 
@@ -80,11 +57,9 @@ export default function MeetingsPage() {
   }, [apiBase]);
 
   // Dynamic Lists from Database APIs
-  const [dbTeachers, setDbTeachers] = useState<{ name: string; email: string }[]>(
-    FALLBACK_TEACHERS.map(t => ({ name: t, email: t.toLowerCase().replace(/ /g, "") + "@example.com" }))
-  );
-  const [dbStudents, setDbStudents] = useState<{ name: string; email: string }[]>(FALLBACK_STUDENTS);
-  const [dbStaff, setDbStaff] = useState<{ name: string; email: string; role: string }[]>(FALLBACK_STAFF);
+  const [dbTeachers, setDbTeachers] = useState<{ name: string; email: string }[]>([]);
+  const [dbStudents, setDbStudents] = useState<{ name: string; email: string }[]>([]);
+  const [dbStaff, setDbStaff] = useState<{ name: string; email: string; role: string }[]>([]);
 
   // Search queries for lists inside modals
   const [studentSearch, setStudentSearch] = useState("");
@@ -104,7 +79,7 @@ export default function MeetingsPage() {
           setDbTeachers(teachers);
         }
       })
-      .catch(err => console.warn("Failed to fetch teachers for meetings, using fallback", err));
+      .catch(err => console.warn("Failed to fetch teachers for meetings", err));
 
     // 2. Fetch Students
     fetchStudents({ page: 1, limit: 100 })
@@ -117,7 +92,7 @@ export default function MeetingsPage() {
           setDbStudents(students);
         }
       })
-      .catch(err => console.warn("Failed to fetch students for meetings, using fallback", err));
+      .catch(err => console.warn("Failed to fetch students for meetings", err));
 
     // 3. Fetch Employees (Staff)
     fetchEmployees({ page: 1, limit: 100 })
@@ -131,7 +106,7 @@ export default function MeetingsPage() {
           setDbStaff(staff);
         }
       })
-      .catch(err => console.warn("Failed to fetch employees/staff for meetings, using fallback", err));
+      .catch(err => console.warn("Failed to fetch employees/staff for meetings", err));
   }, []);
 
   // Filter, sorting, and pagination
@@ -261,7 +236,7 @@ export default function MeetingsPage() {
     setFormTimeStart(new Date().toISOString().slice(0, 16));
     setFormTimeEnd(new Date(Date.now() + 1800000).toISOString().slice(0, 16));
     setFormLink("https://zoom.us/j/1112223330");
-    setFormHost(dbTeachers[0]?.name || FALLBACK_TEACHERS[0]);
+    setFormHost(dbTeachers[0]?.name || "");
     setFormStatus("Upcoming");
     setFormAgenda("");
     setFormAttendees([]);
@@ -290,7 +265,10 @@ export default function MeetingsPage() {
       host: formHost,
       status: formStatus,
       agenda: formAgenda || "No agenda provided.",
-      attendees: formAttendees.length > 0 ? formAttendees : [{ name: "General Audience", role: "Guest", email: "", status: "Pending" }]
+      // Persist exactly who was invited. This used to write a synthetic
+      // "General Audience" attendee when none were picked, which put a person
+      // who does not exist into the database.
+      attendees: formAttendees
     };
 
     fetch(`${apiBase}/lms-data/meetings`, {
@@ -867,8 +845,12 @@ export default function MeetingsPage() {
                   <select
                     value={formHost}
                     onChange={(e) => setFormHost(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={dbTeachers.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {dbTeachers.length === 0 && (
+                      <option value="">No teachers available</option>
+                    )}
                     {dbTeachers.map(t => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}
@@ -1173,8 +1155,12 @@ export default function MeetingsPage() {
                   <select
                     value={formHost}
                     onChange={(e) => setFormHost(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    disabled={dbTeachers.length === 0}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-60"
                   >
+                    {dbTeachers.length === 0 && (
+                      <option value="">No teachers available</option>
+                    )}
                     {dbTeachers.map(t => (
                       <option key={t.name} value={t.name}>{t.name}</option>
                     ))}

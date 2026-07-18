@@ -877,7 +877,7 @@ export class StudentManagementService {
   async issueCertificate(id: string, enrollmentId: string, actor: Actor) {
     const e = await this.prisma.enrollment.findFirst({
       where: { id: enrollmentId, studentId: id },
-      include: { course: { select: { title: true } }, teacher: { select: { user: { select: { firstName: true, lastName: true } } } }, student: { select: { studentCode: true, user: { select: { firstName: true, lastName: true } } } } },
+      include: { course: { select: { title: true } }, teacher: { select: { user: { select: { firstName: true, lastName: true } } } }, student: { select: { studentCode: true, userId: true, user: { select: { firstName: true, lastName: true } } } } },
     });
     if (!e) throw new NotFoundException('Enrollment not found for this student.');
     if (e.status !== EnrollmentStatus.COMPLETED) throw new BadRequestException('Course is not completed yet.');
@@ -890,6 +890,15 @@ export class StudentManagementService {
       issuedAt: (e.completedAt ?? new Date()).toISOString(),
     };
     await this.log(id, { kind: 'TIMELINE', type: 'CERTIFICATE_ISSUED', title: `Certificate issued: ${e.course.title}`, description: cert.certificateId }, actor);
+    // The timeline row is an audit trail; the student also needs telling.
+    this.notifications
+      .createFor(e.student.userId, {
+        type: 'CERTIFICATE_AVAILABLE',
+        title: 'Certificate available',
+        body: `Your certificate for ${e.course.title} is ready to download.`,
+        link: '/student/dashboard',
+      })
+      .catch(() => undefined);
     return cert;
   }
 

@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { Role, ClassStatus } from '../generated/prisma/enums';
+import { Role, ClassStatus, StudentAttendanceStatus } from '../generated/prisma/enums';
 import {
   AssignStudentsDto,
   AttendanceConfigDto,
@@ -32,6 +32,9 @@ const DEFAULT_CONFIG = {
   autoLockMinutes: 30, // lock N minutes after class ends
   lateGraceMinutes: 5, // join within grace ⇒ not late
   allowManualCorrection: true,
+  lowAttendanceThreshold: 75, // alert below this % over the window
+  lowAttendanceWindowDays: 30, // window the rate is measured over
+  lowAttendanceMinSessions: 4, // don't judge a student on one or two classes
 };
 type AttendanceConfig = typeof DEFAULT_CONFIG;
 
@@ -50,6 +53,8 @@ export class AttendanceService implements OnModuleInit {
   onModuleInit() {
     setInterval(() => this.reminderSweep().catch(() => undefined), 5 * 60 * 1000);
     setInterval(() => this.autoLockSweep().catch(() => undefined), 5 * 60 * 1000);
+    // Hourly: an attendance rate does not move fast enough to warrant more.
+    setInterval(() => this.lowAttendanceSweep().catch(() => undefined), 60 * 60 * 1000);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -865,6 +870,104 @@ export class AttendanceService implements OnModuleInit {
         await this.prisma.classSession.update({ where: { id: cls.id }, data: { [w.field]: new Date() } });
       }
     }
+  }
+
+  /**
+   * Raises a low-attendance alert for students who have fallen below the
+   * configured rate over the configured window.
+   *
+   * Runs hourly rather than on the 5-minute cadence, and re-alerts for the same
+   * student at most once a week — an alert that fires every sweep is an alert
+   * everybody learns to ignore. The dedup key is the student link on the
+   * notification, since the rows are addressed to staff, not to the student.
+   */
+  /** Admin-triggered run of the same check, reporting what it did. */
+  async runLowAttendanceCheck() {
+    const alerted = await this.lowAttendanceSweep();
+    return { alerted: alerted.length, students: alerted };
+  }
+
+  private async lowAttendanceSweep() {
+    const config = await this.getConfig();
+    const windowStart = new Date(
+      Date.now() - config.lowAttendanceWindowDays * 24 * 60 * 60 * 1000,
+    );
+
+    const marked = await this.prisma.classAttendee.groupBy({
+      by: ['studentId'],
+      where: { status: { not: null }, class: { startsAt: { gte: windowStart } } },
+      _count: { _all: true },
+    });
+
+    const eligible = marked.filter((m) => m._count._all >= config.lowAttendanceMinSessions);
+    if (!eligible.length) return [];
+
+    const present = await this.prisma.classAttendee.groupBy({
+      by: ['studentId'],
+      where: {
+        studentId: { in: eligible.map((e) => e.studentId) },
+        status: { in: [StudentAttendanceStatus.PRESENT, StudentAttendanceStatus.LATE] },
+        class: { startsAt: { gte: windowStart } },
+      },
+      _count: { _all: true },
+    });
+    const presentByStudent = new Map(present.map((p) => [p.studentId, p._count._all]));
+
+    const breaching = eligible
+      .map((e) => ({
+        studentId: e.studentId,
+        total: e._count._all,
+        rate: Math.round(((presentByStudent.get(e.studentId) ?? 0) / e._count._all) * 1000) / 10,
+      }))
+      .filter((s) => s.rate < config.lowAttendanceThreshold);
+    if (!breaching.length) return [];
+
+    // Drop anyone already alerted about in the last week.
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recent = await this.prisma.notification.findMany({
+      where: { type: 'LOW_ATTENDANCE', createdAt: { gte: weekAgo } },
+      select: { link: true },
+    });
+    const alreadyAlerted = new Set(recent.map((r) => r.link ?? ''));
+
+    const fresh = breaching.filter((s) => !alreadyAlerted.has(`/students/${s.studentId}`));
+    if (!fresh.length) return [];
+
+    const profiles = await this.prisma.studentProfile.findMany({
+      where: { id: { in: fresh.map((f) => f.studentId) } },
+      select: {
+        id: true,
+        coachId: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    const alerted: { studentId: string; name: string; rate: number; sessions: number }[] = [];
+
+    for (const s of fresh) {
+      const profile = profiles.find((p) => p.id === s.studentId);
+      if (!profile) continue;
+      const name = `${profile.user.firstName} ${profile.user.lastName}`.trim();
+      const payload = {
+        type: 'LOW_ATTENDANCE',
+        title: 'Low attendance alert',
+        body: `${name} is at ${s.rate}% over the last ${config.lowAttendanceWindowDays} days (${s.total} sessions), below the ${config.lowAttendanceThreshold}% threshold.`,
+        link: `/students/${profile.id}`,
+      };
+
+      await this.notifications
+        .createForRoles([Role.ADMIN, Role.SUPERVISOR], payload)
+        .catch(() => undefined);
+
+      // The assigned coach owns the follow-up, so notify them directly.
+      if (profile.coachId) {
+        await this.notifications.createFor(profile.coachId, payload).catch(() => undefined);
+      }
+
+      alerted.push({ studentId: profile.id, name, rate: s.rate, sessions: s.total });
+    }
+
+    return alerted;
   }
 
   private async autoLockSweep() {

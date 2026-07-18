@@ -34,40 +34,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-// Course List (for linking in checkboxes)
-const AVAILABLE_COURSES = [
-  { code: "QRN-101", title: "Basic Quran Reading", studentsCount: 42 },
-  { code: "TAJ-202", title: "Advanced Tajweed Rules", studentsCount: 28 },
-  { code: "ARB-101", title: "Arabic Grammar Level 1", studentsCount: 35 },
-  { code: "ISL-301", title: "Seerah of Prophet Muhammad", studentsCount: 56 },
-  { code: "QRN-401", title: "Quran Memorization Hifz", studentsCount: 18 },
-  { code: "QRN-099", title: "Noorani Qaida for Kids", studentsCount: 84 },
-  { code: "ARB-201", title: "Arabic Conversational Skills", studentsCount: 22 },
-  { code: "ISL-202", title: "Fiqh of Worship", studentsCount: 40 },
-  { code: "ISL-102", title: "Introduction to Hadith", studentsCount: 30 },
-  { code: "ARB-302", title: "Advanced Arabic Rhetoric", studentsCount: 12 },
-  { code: "ARB-150", title: "Quranic Arabic Vocabulary", studentsCount: 48 },
-  { code: "TAJ-150", title: "Intermediate Tajweed Practice", studentsCount: 32 },
-  { code: "ISL-101", title: "Islamic Creed Aqeedah", studentsCount: 50 },
-  { code: "ISL-050", title: "Pillars of Islam Course", studentsCount: 15 },
-  { code: "QRN-250", title: "Tafseer of Juz Amma", studentsCount: 65 },
-  { code: "ISL-401", title: "Advanced Seerah Analysis", studentsCount: 9 },
-  { code: "ARB-099", title: "Arabic Handwriting Naskh", studentsCount: 19 },
-  { code: "ISL-250", title: "Rulings of Hajj & Umrah", studentsCount: 72 },
-  { code: "QRN-102", title: "Quran Recitation Correction", studentsCount: 60 },
-  { code: "ISL-080", title: "Basic Islamic Manners Akhlaq", studentsCount: 44 },
-  { code: "TAJ-101", title: "Tajweed Rules for Kids", studentsCount: 75 },
-  { code: "ARB-401", title: "Advanced Arabic Syntax", studentsCount: 8 },
-  { code: "ISL-302", title: "Fiqh of Transactions Muamalat", studentsCount: 14 },
-  { code: "ISL-350", title: "History of Islamic Caliphates", studentsCount: 25 },
-  { code: "TAJ-301", title: "Tajweed Masterclass", studentsCount: 16 },
-  { code: "ARB-350", title: "Arabic Media Translation", studentsCount: 11 },
-  { code: "QRN-301", title: "Quranic Reflections", studentsCount: 38 },
-  { code: "QRN-202", title: "Intro to Quran Sciences", studentsCount: 29 },
-  { code: "ISL-220", title: "Islamic History & Heritage", studentsCount: 31 },
-  { code: "TAJ-099", title: "Introduction to Tajweed", studentsCount: 90 }
-];
-
 // Initial Mock Packages Data (30 items with dynamic feature benefits lists and linked courses)
 const INITIAL_PACKAGES: any[] = [];
 
