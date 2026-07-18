@@ -301,8 +301,8 @@ export class AssessmentsService implements OnModuleInit {
         where: { archived: false, difficulty, ...(subject ? { subject } : {}) },
         select: { id: true }, take: n * 4,
       });
-      // Shuffle deterministically-enough by id and take n.
-      return rows.map((r) => r.id).sort(() => 0.5 - (parseInt(id.slice(-4), 16) % 2 ? 1 : -1)).slice(0, n);
+      // Deterministic shuffle (seeded per assessment + difficulty), then take n.
+      return shuffleStable(rows.map((r) => r.id), id + difficulty).slice(0, n);
     };
     const ids = [
       ...(await pick('EASY', rules.easy ?? 0)),
