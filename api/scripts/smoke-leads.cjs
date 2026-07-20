@@ -513,6 +513,249 @@ const isoDay = (offsetDays) =>
     );
     check('nor reschedule them', strangerMoves.ok, `status ${strangerMoves.status}`);
 
+    // ── The teacher's trial report ───────────────────────────────────────────
+    console.log('\n── Teacher trial report ──');
+
+    const teacherRows = (
+      await db.query(
+        `SELECT tp.id, tp."userId", u.email
+           FROM "TeacherProfile" tp JOIN "User" u ON u.id = tp."userId"
+          WHERE u.status = 'ACTIVE'
+          ORDER BY tp.id LIMIT 2`,
+      )
+    ).rows;
+
+    if (teacherRows.length < 2) {
+      console.log('  skip  fewer than two active teachers to test isolation with');
+    } else {
+      const [mine, stranger] = teacherRows;
+      const teacherToken = token(mine.userId, 'TEACHER', mine.email);
+      const otherTeacherToken = token(stranger.userId, 'TEACHER', stranger.email);
+
+      // Put the trial in this teacher's hands.
+      await req('PATCH', `/leads/trials/${originalTrial.id}`, ownerToken, { teacherId: mine.id });
+
+      const options = await req('GET', '/leads/trial-options', teacherToken);
+      check(
+        'a teacher can load the levels and catalogue the report offers',
+        options.ok && Array.isArray(options.body.levels) && options.body.levels.length > 0,
+        `status ${options.status}`,
+      );
+
+      const queue = await req('GET', '/leads/trials/mine?scope=all', teacherToken);
+      check(
+        'the trial shows up in the assigned teacher’s queue',
+        queue.ok && queue.body.some((t) => t.id === originalTrial.id),
+        `status ${queue.status}`,
+      );
+
+      const report = await req('GET', `/leads/trials/${originalTrial.id}/report`, teacherToken);
+      check('the assigned teacher can open the report', report.ok, `status ${report.status}`);
+      check(
+        'and it carries the booking they have to verify against',
+        report.ok && report.body.lead && report.body.lead.email && 'medicalDisability' in report.body.lead,
+        'lead details missing from the report',
+      );
+
+      const strangerReads = await req(
+        'GET',
+        `/leads/trials/${originalTrial.id}/report`,
+        otherTeacherToken,
+        undefined,
+        403,
+      );
+      check('another teacher cannot open it', strangerReads.ok, `status ${strangerReads.status}`);
+
+      const strangerWrites = await req(
+        'PATCH',
+        `/leads/trials/${originalTrial.id}/report`,
+        otherTeacherToken,
+        { coveredIntro: true },
+        403,
+      );
+      check('nor write to it', strangerWrites.ok, `status ${strangerWrites.status}`);
+
+      /*
+       * A deliberately wrong age alongside a date of birth: the service should
+       * ignore the number and derive the age, otherwise the two disagree on
+       * the record and go stale on the student's next birthday.
+       */
+      const dob = '2014-03-05';
+      const draft = await req('PATCH', `/leads/trials/${originalTrial.id}/report`, teacherToken, {
+        coveredIntro: true,
+        coveredPresentation: true,
+        coveredDemoLesson: true,
+        coveredPackages: true,
+        verifiedDetails: true,
+        studentDob: dob,
+        studentAge: 99,
+        guardianName: 'Smoke Guardian',
+        guardianRelation: 'Father',
+        guardianPhone: '+911234567890',
+        guardianEmail: 'zz-smoke-guardian@example.test',
+        preferredDays: ['Monday', 'Wednesday'],
+        preferredTime: '17:30',
+        preferredStartDate: isoDay(14),
+        teacherRating: 4,
+        teacherFeedback: 'Reads confidently, needs tajweed practice.',
+        teacherRecommendsEnroll: true,
+      });
+      check('the teacher can save the report as a draft', draft.ok, `status ${draft.status}`);
+      check(
+        'the draft is kept on the server, not just in the browser',
+        draft.ok && draft.body.guardianName === 'Smoke Guardian' && draft.body.coveredPackages === true,
+      );
+      check(
+        'a draft does not complete the trial',
+        draft.ok && draft.body.reportSubmittedAt === null && draft.body.status !== 'COMPLETED',
+        `status ${draft.body?.status}, submittedAt ${draft.body?.reportSubmittedAt}`,
+      );
+      const born = new Date(dob);
+      const today = new Date();
+      let expectedAge = today.getFullYear() - born.getFullYear();
+      const monthsIn = today.getMonth() - born.getMonth();
+      if (monthsIn < 0 || (monthsIn === 0 && today.getDate() < born.getDate())) expectedAge -= 1;
+      check(
+        'age is derived from the date of birth, not from the number sent',
+        draft.ok && draft.body.studentAge !== 99 && draft.body.studentAge === expectedAge,
+        `got ${draft.body?.studentAge}, expected ${expectedAge}`,
+      );
+
+      const noLevel = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/report/submit`,
+        teacherToken,
+        {},
+        400,
+      );
+      check(
+        'a report cannot be submitted without an assessed level',
+        noLevel.ok,
+        `status ${noLevel.status}`,
+      );
+
+      const submitted = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/report/submit`,
+        teacherToken,
+        { assessedLevel: 'Intermediate' },
+        201,
+      );
+      check('the teacher can submit the report', submitted.ok, `status ${submitted.status}`);
+      check(
+        'submitting completes the trial and stamps it',
+        submitted.ok && submitted.body.status === 'COMPLETED' && submitted.body.reportSubmittedAt,
+        `status ${submitted.body?.status}`,
+      );
+      check(
+        'the draft survives into the submitted report',
+        submitted.ok && submitted.body.guardianName === 'Smoke Guardian' && submitted.body.teacherRating === 4,
+      );
+
+      const leadAfter = (
+        await db.query(
+          `SELECT status, "recommendedLevel", "parentName", "dateOfBirth", "preferredDays"
+             FROM "Lead" WHERE id=$1`,
+          [first.body.id],
+        )
+      ).rows[0];
+      check(
+        'the lead moves to waiting-on-the-parent with the level the teacher assessed',
+        leadAfter.status === 'WAITING_PARENT_DECISION' && leadAfter.recommendedLevel === 'Intermediate',
+        `${leadAfter.status} / ${leadAfter.recommendedLevel}`,
+      );
+      check(
+        'what the teacher verified in the room overwrites what the form was told',
+        leadAfter.parentName === 'Smoke Guardian' &&
+          leadAfter.dateOfBirth &&
+          leadAfter.preferredDays.includes('Wednesday'),
+        `${leadAfter.parentName} / ${leadAfter.dateOfBirth} / ${leadAfter.preferredDays}`,
+      );
+
+      /*
+       * The point of submitting is that the coach finds out. Fire-and-forget,
+       * so poll briefly rather than assuming it has landed by now.
+       */
+      let coachNotice = 0;
+      for (let i = 0; i < 10 && !coachNotice; i++) {
+        coachNotice = Number(
+          (
+            await db.query(
+              `SELECT count(*) FROM "Notification"
+                WHERE "userId" = $1 AND type = 'TRIAL_REPORT_SUBMITTED' AND link = $2`,
+              [ownerId, `/leads/${first.body.id}`],
+            )
+          ).rows[0].count,
+        );
+        if (!coachNotice) await new Promise((r) => setTimeout(r, 300));
+      }
+      check(
+        'the assigned coach is told the report is in',
+        coachNotice === 1,
+        `${coachNotice} notifications`,
+      );
+
+      const twice = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/report/submit`,
+        teacherToken,
+        { assessedLevel: 'Advanced' },
+        400,
+      );
+      check('the same report cannot be submitted twice', twice.ok, `status ${twice.status}`);
+
+      const editAfter = await req(
+        'PATCH',
+        `/leads/trials/${originalTrial.id}/report`,
+        teacherToken,
+        { teacherFeedback: 'changed my mind' },
+        400,
+      );
+      check(
+        'nor edited afterwards — the coach decides on a report that stays put',
+        editAfter.ok,
+        `status ${editAfter.status}`,
+      );
+
+      const coachReads = await req('GET', `/leads/trials/${originalTrial.id}/report`, ownerToken);
+      check(
+        'the owning coach can read the submitted report',
+        coachReads.ok && coachReads.body.assessedLevel === 'Intermediate',
+        `status ${coachReads.status}`,
+      );
+      const strangerCoachReads = await req(
+        'GET',
+        `/leads/trials/${originalTrial.id}/report`,
+        strangerToken,
+        undefined,
+        403,
+      );
+      check(
+        'another coach still cannot',
+        strangerCoachReads.ok,
+        `status ${strangerCoachReads.status}`,
+      );
+
+      // A no-show has nothing to report on.
+      const secondTrialId = second.body.id;
+      await req('PATCH', `/leads/trials/${secondTrialId}`, ownerToken, { teacherId: mine.id });
+      await req('POST', `/leads/trials/${secondTrialId}/attendance`, teacherToken, {
+        attendance: 'ABSENT',
+      }, 201);
+      const absentReport = await req(
+        'POST',
+        `/leads/trials/${secondTrialId}/report/submit`,
+        teacherToken,
+        { assessedLevel: 'Beginner' },
+        400,
+      );
+      check(
+        'a student marked absent cannot be reported on',
+        absentReport.ok,
+        `status ${absentReport.status}`,
+      );
+    }
+
     // ── Siblings become separate students ────────────────────────────────────
     console.log('\n── Siblings & conversion ──');
     const familySlot = slotList.find((s) => !usedSlots.includes(s));

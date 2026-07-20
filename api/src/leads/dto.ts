@@ -180,6 +180,61 @@ export class TrialFeedbackDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() positive?: boolean;
 }
 
+/** Levels the teacher can place a student at, coarsest first. */
+export const TRIAL_LEVEL_OPTIONS = [
+  'Beginner',
+  'Elementary',
+  'Intermediate',
+  'Advanced',
+] as const;
+
+export const WEEKDAY_OPTIONS = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+] as const;
+
+/*
+ * Step 14 — the teacher's trial report.
+ *
+ * Every field is optional: the teacher saves as they go and the report only
+ * has to be complete at submit time, which the service checks. Requiring the
+ * whole form on each save would mean losing notes taken mid-class.
+ */
+export class TrialReportDto {
+  // What was covered in the session.
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() coveredIntro?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() coveredPresentation?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() coveredDemoLesson?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() coveredPackages?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() verifiedDetails?: boolean;
+
+  // Details collected from the family.
+  @ApiPropertyOptional({ minimum: 3, maximum: 99 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(3) @Max(99) studentAge?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() studentDob?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() guardianName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() guardianRelation?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() guardianPhone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsEmail() guardianEmail?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() preferredPackage?: string;
+  @ApiPropertyOptional({ enum: WEEKDAY_OPTIONS, isArray: true })
+  @IsOptional() @IsArray() @IsIn(WEEKDAY_OPTIONS as unknown as string[], { each: true })
+  preferredDays?: string[];
+  @ApiPropertyOptional({ description: 'HH:mm' })
+  @IsOptional() @IsString() preferredTime?: string;
+  @ApiPropertyOptional({ description: 'YYYY-MM-DD' })
+  @IsOptional() @IsString() preferredStartDate?: string;
+
+  // Assessment and recommendation.
+  @ApiPropertyOptional({ enum: TRIAL_LEVEL_OPTIONS })
+  @IsOptional() @IsIn(TRIAL_LEVEL_OPTIONS as unknown as string[]) assessedLevel?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() recommendedCourseId?: string;
+  @ApiPropertyOptional({ minimum: 1, maximum: 5 })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) teacherRating?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() teacherFeedback?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() teacherRecommendsEnroll?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() reportNotes?: string;
+}
+
 // Step 13 — coach's final decision; ENROLL converts the lead into a student.
 export class CoachDecisionDto {
   @ApiProperty({ enum: ['ENROLL', 'REJECT', 'FOLLOW_UP'] })

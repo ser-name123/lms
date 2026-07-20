@@ -23,6 +23,7 @@ import {
   ScheduleTrialDto,
   TrialAttendanceDto,
   TrialFeedbackDto,
+  TrialReportDto,
   UpdateLeadDto,
   UpdateTrialDto,
 } from './dto';
@@ -97,6 +98,13 @@ export class LeadsController {
     return this.service.myTrials(user.id, scope || 'upcoming');
   }
 
+  @Get('trial-options')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Courses, packages and levels a trial report can recommend' })
+  trialOptions() {
+    return this.service.trialOptions();
+  }
+
   // ── Trial mutations (keyed by trialId — distinct path from :id) ─────────────
   @Patch('trials/:trialId')
   @ApiOperation({ summary: 'Update / reschedule a trial' })
@@ -116,6 +124,36 @@ export class LeadsController {
   @ApiOperation({ summary: 'Record teacher / parent feedback for a trial' })
   trialFeedback(@Param('trialId') trialId: string, @Body() dto: TrialFeedbackDto, @CurrentUser() user: AuthUser) {
     return this.service.submitTrialFeedback(trialId, dto, actor(user));
+  }
+
+  // ── The teacher's trial report ──────────────────────────────────────────────
+  @Get('trials/:trialId/report')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Trial report so far, with the booking the teacher must verify' })
+  getReport(@Param('trialId') trialId: string, @CurrentUser() user: AuthUser) {
+    return this.service.getTrialReport(trialId, actor(user));
+  }
+
+  @Patch('trials/:trialId/report')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Save the trial report as a draft' })
+  saveReport(
+    @Param('trialId') trialId: string,
+    @Body() dto: TrialReportDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.saveTrialReport(trialId, dto, actor(user));
+  }
+
+  @Post('trials/:trialId/report/submit')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Submit the trial report — completes the trial and alerts the coach' })
+  submitReport(
+    @Param('trialId') trialId: string,
+    @Body() dto: TrialReportDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.submitTrialReport(trialId, dto, actor(user));
   }
 
   @Post('trials/:trialId/reminder')

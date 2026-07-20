@@ -2317,7 +2317,32 @@ export interface LeadTrial {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
-  // Present only on the teacher "my trials" view.
+
+  // ── The teacher's trial report ──
+  coveredIntro: boolean;
+  coveredPresentation: boolean;
+  coveredDemoLesson: boolean;
+  coveredPackages: boolean;
+  verifiedDetails: boolean;
+  studentAge: number | null;
+  studentDob: string | null;
+  guardianName: string | null;
+  guardianRelation: string | null;
+  guardianPhone: string | null;
+  guardianEmail: string | null;
+  preferredPackage: string | null;
+  preferredDays: string[];
+  preferredTime: string | null;
+  preferredStartDate: string | null;
+  assessedLevel: string | null;
+  recommendedCourseId: string | null;
+  recommendedCourse: string | null;
+  reportNotes: string | null;
+  /** Null while the report is a draft. */
+  reportSubmittedAt: string | null;
+
+  // Present on the teacher "my trials" view and the report view — the booking
+  // the teacher checks the family's answers against.
   lead?: {
     id: string;
     leadNumber: string;
@@ -2327,7 +2352,53 @@ export interface LeadTrial {
     email: string;
     mobile: string;
     timeZone: string | null;
+    gender?: string | null;
+    dateOfBirth?: string | null;
+    currentGrade?: string | null;
+    country?: string | null;
+    parentName?: string | null;
+    relationship?: string | null;
+    whatsappNumber?: string | null;
+    currentLevel?: string | null;
+    preferredLanguage?: string | null;
+    sessionFor?: string | null;
+    learningGoal?: string | null;
+    specialRequirements?: string | null;
+    medicalDisability?: string | null;
+    siblings?: { firstName?: string; lastName?: string }[] | null;
   } | null;
+}
+
+/** Everything a teacher may fill into the report. All optional — it saves as a draft. */
+export interface TrialReportInput {
+  coveredIntro?: boolean;
+  coveredPresentation?: boolean;
+  coveredDemoLesson?: boolean;
+  coveredPackages?: boolean;
+  verifiedDetails?: boolean;
+  studentAge?: number;
+  studentDob?: string;
+  guardianName?: string;
+  guardianRelation?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
+  preferredPackage?: string;
+  preferredDays?: string[];
+  preferredTime?: string;
+  preferredStartDate?: string;
+  assessedLevel?: string;
+  recommendedCourseId?: string;
+  teacherRating?: number;
+  teacherFeedback?: string;
+  teacherRecommendsEnroll?: boolean;
+  reportNotes?: string;
+}
+
+export interface TrialOptions {
+  courses: { id: string; title: string; level: string | null }[];
+  packages: { id: string; name: string; price: number; classesPerMonth: number }[];
+  levels: string[];
+  weekdays: string[];
 }
 
 export interface LeadFunnel {
@@ -2384,6 +2455,27 @@ export const sendLeadTrialReminder = (trialId: string) =>
 
 export const fetchMyTrials = (scope: "today" | "upcoming" | "all" = "upcoming") =>
   api<LeadTrial[]>(`/leads/trials/mine?scope=${scope}`);
+
+// ─── Teacher's trial report ──────────────────────────────────────────────────
+
+export const fetchTrialOptions = () => api<TrialOptions>("/leads/trial-options");
+
+export const fetchTrialReport = (trialId: string) =>
+  api<LeadTrial>(`/leads/trials/${trialId}/report`);
+
+/** Saves without finishing — the teacher can keep typing during the class. */
+export const saveTrialReport = (trialId: string, dto: TrialReportInput) =>
+  api<LeadTrial>(`/leads/trials/${trialId}/report`, {
+    method: "PATCH",
+    body: JSON.stringify(dto),
+  });
+
+/** Completes the trial, moves the lead on and alerts the assigned coach. */
+export const submitTrialReport = (trialId: string, dto: TrialReportInput) =>
+  api<LeadTrial>(`/leads/trials/${trialId}/report/submit`, {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
 
 export const leadCoachDecision = (
   id: string,

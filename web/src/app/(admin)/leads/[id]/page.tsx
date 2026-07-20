@@ -60,6 +60,7 @@ import {
   LEAD_STATUS_TONE,
 } from "@/components/leads/lead-meta";
 import { TeacherAvailabilityPanel } from "@/components/leads/teacher-availability";
+import { SubmittedReport } from "@/components/leads/trial-report";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: User },
@@ -644,10 +645,29 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
           )}
         </div>
 
-        {/* Feedback (post-trial) */}
-        {(done || trial.teacherFeedback || trial.parentFeedback) && (
+        {/*
+          * The teacher's report, once filed. Read-only here: the coach's
+          * enrolment decision rests on it, so it must not change under them —
+          * and the teacher was the one in the room.
+          */}
+        {trial.reportSubmittedAt ? (
+          <SubmittedReport trial={trial} />
+        ) : (
+          done && (
+            <p className="mt-3 rounded-lg border border-dashed border-hairline px-3 py-2 text-[11px] font-semibold text-ink-3">
+              Waiting on {trial.teacherName || "the teacher"} to file the trial report.
+            </p>
+          )
+        )}
+
+        {/*
+          * Parent feedback stays the coach's to record — they are the one who
+          * calls the family afterwards. The teacher's half now arrives with
+          * the report above rather than being typed in twice.
+          */}
+        {(done || trial.parentFeedback) && (
           <div className="mt-4 grid gap-3 border-t border-hairline pt-4 sm:grid-cols-2">
-            <FeedbackBlock trial={trial} side="teacher" onChange={onChange} />
+            {!trial.reportSubmittedAt && <FeedbackBlock trial={trial} side="teacher" onChange={onChange} />}
             <FeedbackBlock trial={trial} side="parent" onChange={onChange} />
           </div>
         )}

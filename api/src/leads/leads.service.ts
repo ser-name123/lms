@@ -29,8 +29,11 @@ import {
   ScheduleTrialDto,
   TrialAttendanceDto,
   TrialFeedbackDto,
+  TrialReportDto,
+  TRIAL_LEVEL_OPTIONS,
   UpdateLeadDto,
   UpdateTrialDto,
+  WEEKDAY_OPTIONS,
 } from './dto';
 
 /*
@@ -909,6 +912,248 @@ export class LeadsService implements OnModuleInit {
     return this.attachTrialNames([updated]).then((r) => r[0]);
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // Step 14 — the teacher's trial report
+  //
+  // The teacher the trial was assigned to runs the session and records it:
+  // what they covered, the details the family gave them, and the level and
+  // course they recommend. Saved as a draft while the class is running, then
+  // submitted, which is what tells the coach the trial is theirs to act on.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** The catalogue a teacher picks a recommendation from. */
+  async trialOptions() {
+    const [courses, packages] = await Promise.all([
+      this.prisma.course.findMany({
+        where: { status: CourseStatus.PUBLISHED },
+        select: { id: true, title: true, level: { select: { name: true } } },
+        orderBy: { title: 'asc' },
+      }),
+      this.prisma.package.findMany({
+        where: { active: true },
+        select: { id: true, name: true, price: true, classesPerMonth: true },
+        orderBy: { price: 'asc' },
+      }),
+    ]);
+
+    return {
+      courses: courses.map((c) => ({ id: c.id, title: c.title, level: c.level?.name ?? null })),
+      packages: packages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        price: Number(p.price),
+        classesPerMonth: p.classesPerMonth,
+      })),
+      levels: TRIAL_LEVEL_OPTIONS as unknown as string[],
+      weekdays: WEEKDAY_OPTIONS as unknown as string[],
+    };
+  }
+
+  /**
+   * The trial, its report so far, and everything the family submitted when
+   * they booked — the teacher has to check that information against what they
+   * are told in the session, which they cannot do without seeing it.
+   */
+  async getTrialReport(trialId: string, user: Actor) {
+    await this.assertTrialAccess(trialId, user);
+
+    const trial = await this.prisma.leadTrial.findUnique({
+      where: { id: trialId },
+      include: {
+        lead: {
+          select: {
+            id: true, leadNumber: true, studentFirstName: true, studentLastName: true,
+            gender: true, dateOfBirth: true, currentGrade: true, country: true,
+            timeZone: true, parentName: true, relationship: true, email: true,
+            mobile: true, countryCode: true, whatsappNumber: true,
+            interestedSubject: true, currentLevel: true, preferredLanguage: true,
+            preferredDate: true, preferredSlot: true, sessionFor: true,
+            learningGoal: true, previousCoaching: true, specialRequirements: true,
+            medicalDisability: true, siblings: true, status: true,
+          },
+        },
+      },
+    });
+    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+
+    const [withName] = await this.attachTrialNames([trial]);
+    return withName;
+  }
+
+  /** Save the report without finishing it. Called as the teacher types. */
+  async saveTrialReport(trialId: string, dto: TrialReportDto, actor: Actor) {
+    const trial = await this.assertTrialAccess(trialId, actor);
+    if (trial.reportSubmittedAt) {
+      throw new BadRequestException('This report has already been submitted.');
+    }
+
+    const updated = await this.prisma.leadTrial.update({
+      where: { id: trialId },
+      data: await this.reportData(dto),
+    });
+    return this.attachTrialNames([updated]).then((r) => r[0]);
+  }
+
+  /**
+   * Finish the report. Beyond stamping the trial this is the hand-back to the
+   * coach: the lead moves to WAITING_PARENT_DECISION, the recommended level
+   * lands on the lead, and the assigned coach is told there is a decision to
+   * make.
+   */
+  async submitTrialReport(trialId: string, dto: TrialReportDto, actor: Actor) {
+    const trial = await this.assertTrialAccess(trialId, actor);
+    if (trial.reportSubmittedAt) {
+      throw new BadRequestException('This report has already been submitted.');
+    }
+    if (trial.status === 'CANCELLED') {
+      throw new BadRequestException('This trial was cancelled — there is nothing to report on.');
+    }
+    if (trial.attendance === 'ABSENT') {
+      throw new BadRequestException(
+        'The student was marked absent. Reopen attendance before filing a report.',
+      );
+    }
+
+    const data = await this.reportData(dto);
+    const level = data.assessedLevel ?? trial.assessedLevel;
+    if (!level) {
+      throw new BadRequestException('Record the level you assessed the student at before submitting.');
+    }
+
+    const updated = await this.prisma.leadTrial.update({
+      where: { id: trialId },
+      data: {
+        ...data,
+        reportSubmittedAt: new Date(),
+        // Filing a report is itself the statement that the class happened.
+        status: 'COMPLETED',
+        attendance: trial.attendance ?? 'PRESENT',
+        attendedAt: trial.attendedAt ?? new Date(),
+      },
+    });
+
+    /*
+     * The teacher was the one in the room, so where they corrected what the
+     * family typed into the booking form, their version wins on the lead. Only
+     * the fields they actually filled in — a blank box is "not asked", not
+     * "erase what we had".
+     */
+    const leadPatch: any = {
+      status: LeadStatus.WAITING_PARENT_DECISION,
+      recommendedLevel: level,
+    };
+    if (updated.studentDob) leadPatch.dateOfBirth = updated.studentDob;
+    if (updated.guardianName) leadPatch.parentName = updated.guardianName;
+    if (updated.guardianRelation) leadPatch.relationship = updated.guardianRelation;
+    if (updated.preferredDays.length) leadPatch.preferredDays = updated.preferredDays;
+    if (updated.preferredTime) leadPatch.preferredTimeSlots = [updated.preferredTime];
+    await this.prisma.lead.update({ where: { id: trial.leadId }, data: leadPatch });
+
+    const summary = [
+      `Trial report submitted — level assessed as ${level}`,
+      updated.recommendedCourse ? `recommended ${updated.recommendedCourse}` : null,
+      updated.teacherRecommendsEnroll === true
+        ? 'teacher recommends enrolment'
+        : updated.teacherRecommendsEnroll === false
+          ? 'teacher does not recommend enrolment'
+          : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    await this.addActivity(trial.leadId, 'TRIAL_REPORT', `${summary}.`, actor);
+
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: trial.leadId },
+      select: { leadNumber: true, studentFirstName: true, studentLastName: true, assignedCoachId: true },
+    });
+    if (lead?.assignedCoachId) {
+      this.notifications
+        .createFor(lead.assignedCoachId, {
+          type: 'TRIAL_REPORT_SUBMITTED',
+          title: 'Trial report ready',
+          body: `${actor?.name || 'The teacher'} filed the trial report for ${lead.studentFirstName} ${lead.studentLastName} (${lead.leadNumber}) — level ${level}.`,
+          link: `/leads/${trial.leadId}`,
+        })
+        .catch(() => undefined);
+    }
+
+    return this.attachTrialNames([updated]).then((r) => r[0]);
+  }
+
+  /** Shared mapping for save and submit. */
+  private async reportData(dto: TrialReportDto) {
+    const data: any = {};
+
+    for (const flag of [
+      'coveredIntro', 'coveredPresentation', 'coveredDemoLesson',
+      'coveredPackages', 'verifiedDetails',
+    ] as const) {
+      if (dto[flag] !== undefined) data[flag] = dto[flag];
+    }
+
+    if (dto.guardianName !== undefined) data.guardianName = dto.guardianName || null;
+    if (dto.guardianRelation !== undefined) data.guardianRelation = dto.guardianRelation || null;
+    if (dto.guardianPhone !== undefined) data.guardianPhone = dto.guardianPhone || null;
+    if (dto.guardianEmail !== undefined) data.guardianEmail = dto.guardianEmail || null;
+    if (dto.preferredPackage !== undefined) data.preferredPackage = dto.preferredPackage || null;
+    if (dto.preferredDays !== undefined) data.preferredDays = dto.preferredDays;
+    if (dto.preferredTime !== undefined) data.preferredTime = dto.preferredTime || null;
+    if (dto.assessedLevel !== undefined) data.assessedLevel = dto.assessedLevel || null;
+    if (dto.reportNotes !== undefined) data.reportNotes = dto.reportNotes || null;
+    if (dto.teacherRating !== undefined) data.teacherRating = dto.teacherRating ?? null;
+    if (dto.teacherFeedback !== undefined) data.teacherFeedback = dto.teacherFeedback || null;
+    if (dto.teacherRecommendsEnroll !== undefined) {
+      data.teacherRecommendsEnroll = dto.teacherRecommendsEnroll;
+    }
+
+    if (dto.studentDob !== undefined) data.studentDob = this.parseDate(dto.studentDob, 'date of birth');
+    if (dto.preferredStartDate !== undefined) {
+      data.preferredStartDate = this.parseDate(dto.preferredStartDate, 'preferred start date');
+    }
+
+    /*
+     * Age is derived from the date of birth whenever there is one, so the two
+     * cannot disagree — and a stored age would go stale on the next birthday
+     * anyway. It is only kept as a typed number for families who give an age
+     * but not a date.
+     */
+    if (data.studentDob) data.studentAge = this.ageFrom(data.studentDob);
+    else if (dto.studentAge !== undefined) data.studentAge = dto.studentAge ?? null;
+
+    if (dto.recommendedCourseId !== undefined) {
+      if (!dto.recommendedCourseId) {
+        data.recommendedCourseId = null;
+        data.recommendedCourse = null;
+      } else {
+        const course = await this.prisma.course.findUnique({
+          where: { id: dto.recommendedCourseId },
+          select: { id: true, title: true },
+        });
+        if (!course) throw new BadRequestException('That course no longer exists.');
+        data.recommendedCourseId = course.id;
+        // Snapshot the title so the report still reads right if it is renamed.
+        data.recommendedCourse = course.title;
+      }
+    }
+
+    return data;
+  }
+
+  private parseDate(value: string | undefined, label: string): Date | null {
+    if (!value) return null;
+    const d = new Date(value);
+    if (isNaN(d.getTime())) throw new BadRequestException(`Invalid ${label}.`);
+    return d;
+  }
+
+  private ageFrom(dob: Date) {
+    const now = new Date();
+    let age = now.getFullYear() - dob.getFullYear();
+    const month = now.getMonth() - dob.getMonth();
+    if (month < 0 || (month === 0 && now.getDate() < dob.getDate())) age--;
+    return age;
+  }
+
   // ── Step 13: coach decision — ENROLL converts the lead into a student ───────
   async coachDecision(leadId: string, dto: CoachDecisionDto, actor: Actor) {
     const lead = await this.assertAccess(leadId, actor);
@@ -1439,6 +1684,14 @@ export class LeadsService implements OnModuleInit {
             select: {
               id: true, leadNumber: true, studentFirstName: true, studentLastName: true,
               interestedSubject: true, email: true, mobile: true, timeZone: true,
+              // The teacher has to check what the family submitted against what
+              // they are told in the session, so the booking travels with the
+              // trial rather than needing a second round trip per card.
+              gender: true, dateOfBirth: true, currentGrade: true, country: true,
+              parentName: true, relationship: true, whatsappNumber: true,
+              currentLevel: true, preferredLanguage: true, sessionFor: true,
+              learningGoal: true, specialRequirements: true, medicalDisability: true,
+              siblings: true,
             },
           })
         : [],

@@ -109,6 +109,7 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   LEAD_NEW: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'New lead' },
   LEAD_ASSIGNED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Lead assigned' },
   LEAD_CONVERTED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Lead converted' },
+  TRIAL_REPORT_SUBMITTED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Trial report submitted' },
 };
 
 /** Fallback for a type nobody registered — delivers, but only in-app. */

@@ -1553,6 +1553,40 @@ model LeadTrial {
   parentFeedback          String?
   parentInterested        Boolean?
 
+  // ── Step 14 — the teacher's trial report ──────────────────────────────────
+  // Filled in by the teacher the trial is assigned to, during or after the
+  // session. Everything lives on the trial rather than the lead because a
+  // student can sit more than one trial: two teachers may hear two different
+  // answers, and writing straight onto the lead would lose who was told what.
+
+  // What the teacher actually covered. Separate flags, not one "done" tick,
+  // so a half-finished trial can say which half.
+  coveredIntro        Boolean @default(false) // introduced the academy
+  coveredPresentation Boolean @default(false) // company presentation / video
+  coveredDemoLesson   Boolean @default(false) // sample Quran / Arabic lesson
+  coveredPackages     Boolean @default(false) // explained subscription packages
+  verifiedDetails     Boolean @default(false) // checked the submitted information
+
+  // Details collected from the family during the trial.
+  studentAge         Int?
+  studentDob         DateTime?
+  guardianName       String?
+  guardianRelation   String?
+  guardianPhone      String?
+  guardianEmail      String?
+  preferredPackage   String?
+  preferredDays      String[] @default([])
+  preferredTime      String?
+  preferredStartDate DateTime?
+
+  // The teacher's assessment and recommendation.
+  assessedLevel       String? // Beginner / Elementary / Intermediate / Advanced
+  recommendedCourseId String?
+  recommendedCourse   String? // title snapshot, so a renamed course reads right
+  reportNotes         String?
+  // Null while the report is still a draft; stamped once the teacher submits.
+  reportSubmittedAt   DateTime?
+
   notes       String?
   createdById String?
   createdAt   DateTime @default(now())

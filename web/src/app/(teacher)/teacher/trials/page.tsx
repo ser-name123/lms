@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import {
   CalendarClock,
+  ClipboardList,
   Video,
   Loader2,
   CheckCircle2,
   XCircle,
-  Star,
-  Save,
   Mail,
   Phone,
   BookOpen,
@@ -17,12 +16,8 @@ import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
-import {
-  fetchMyTrials,
-  markLeadTrialAttendance,
-  submitLeadTrialFeedback,
-  type LeadTrial,
-} from "@/lib/api";
+import { TrialReportPanel } from "@/components/leads/trial-report";
+import { fetchMyTrials, markLeadTrialAttendance, type LeadTrial } from "@/lib/api";
 
 const swalBg = () =>
   typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
@@ -99,6 +94,8 @@ export default function TeacherTrialsPage() {
 function TeacherTrialCard({ trial, onChange }: { trial: LeadTrial; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const done = trial.status === "COMPLETED" || trial.status === "NO_SHOW";
+  const hasReport = Boolean(trial.reportSubmittedAt || trial.assessedLevel);
+  const [reportOpen, setReportOpen] = useState(done || hasReport);
   const studentName = trial.lead ? `${trial.lead.studentFirstName} ${trial.lead.studentLastName}` : "Student";
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -152,48 +149,26 @@ function TeacherTrialCard({ trial, onChange }: { trial: LeadTrial; onChange: () 
           )}
         </div>
 
-        {(done || trial.teacherFeedback) && <TeacherFeedback trial={trial} onChange={onChange} />}
+        {/*
+          * The report is the teacher's side of the trial: what they covered,
+          * what the family told them, and the level they assessed. It opens by
+          * itself once the class is over or has anything recorded, but stays
+          * reachable before then — notes get taken during the session, not
+          * only after it.
+          */}
+        {trial.status !== "CANCELLED" &&
+          (reportOpen ? (
+            <TrialReportPanel trial={trial} onChange={onChange} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setReportOpen(true)}
+              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-3 text-[11px] font-bold text-ink-3 hover:border-accent hover:text-accent"
+            >
+              <ClipboardList className="size-3.5" /> Open trial report
+            </button>
+          ))}
       </CardBody>
     </Card>
-  );
-}
-
-function TeacherFeedback({ trial, onChange }: { trial: LeadTrial; onChange: () => void }) {
-  const [rating, setRating] = useState(trial.teacherRating ?? 0);
-  const [text, setText] = useState(trial.teacherFeedback ?? "");
-  const [positive, setPositive] = useState<boolean | null>(trial.teacherRecommendsEnroll ?? null);
-  const [busy, setBusy] = useState(false);
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      await submitLeadTrialFeedback(trial.id, { side: "teacher", rating: rating || undefined, feedback: text || undefined, positive: positive ?? undefined });
-      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Feedback saved", showConfirmButton: false, timer: 1600 });
-      onChange();
-    } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() }); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <div className="mt-4 rounded-xl border border-hairline bg-surface-2/40 p-3.5">
-      <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-ink-3">Your Feedback</p>
-      <div className="mb-2 flex items-center gap-1">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" onClick={() => setRating(n)}>
-            <Star className={`size-5 ${n <= rating ? "fill-amber-400 text-amber-400" : "text-ink-3/40"}`} />
-          </button>
-        ))}
-      </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="How did the student do? Level, strengths, areas to work on…"
-        className="w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-xs text-ink focus:outline-none focus:border-accent" />
-      <div className="mt-2 flex items-center gap-2">
-        <span className="text-[11px] font-semibold text-ink-3">Recommend enrolment?</span>
-        <button type="button" onClick={() => setPositive(true)} className={`rounded-lg border px-2.5 py-0.5 text-[11px] font-bold ${positive === true ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600" : "border-hairline text-ink-3"}`}>Yes</button>
-        <button type="button" onClick={() => setPositive(false)} className={`rounded-lg border px-2.5 py-0.5 text-[11px] font-bold ${positive === false ? "border-rose-500/40 bg-rose-500/10 text-rose-600" : "border-hairline text-ink-3"}`}>No</button>
-        <button onClick={save} disabled={busy} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[11px] font-bold text-white hover:opacity-90 disabled:opacity-60">
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save
-        </button>
-      </div>
-    </div>
   );
 }
