@@ -26,6 +26,7 @@ import {
   TrialFeedbackDto,
   TrialInfoFormDto,
   TrialReportDto,
+  TrialStatusDto,
   UpdateLeadDto,
   UpdateTrialDto,
 } from './dto';
@@ -126,6 +127,19 @@ export class LeadsController {
   @ApiOperation({ summary: 'Record teacher / parent feedback for a trial' })
   trialFeedback(@Param('trialId') trialId: string, @Body() dto: TrialFeedbackDto, @CurrentUser() user: AuthUser) {
     return this.service.submitTrialFeedback(trialId, dto, actor(user));
+  }
+
+  @Post('trials/:trialId/status')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({
+    summary: 'Teacher: close the trial out as completed or a no-show',
+  })
+  setTrialStatus(
+    @Param('trialId') trialId: string,
+    @Body() dto: TrialStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.setTrialStatus(trialId, dto, actor(user));
   }
 
   // ── The teacher's trial report ──────────────────────────────────────────────

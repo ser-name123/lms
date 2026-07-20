@@ -388,10 +388,42 @@ function RecommendationTab({ lead, teachers, onAssigned }: { lead: Lead; teacher
             <div className="flex items-center gap-2 py-6 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Computing…</div>
           ) : rec ? (
             <div className="space-y-2.5">
+              {/*
+                * A teacher who sat in the room outranks a level derived from
+                * an evaluation score, so their assessment leads and the
+                * heuristic is labelled as the fallback it is.
+                */}
+              {rec.fromTeacher && (
+                <div className="mb-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-600">
+                    From the trial teacher
+                  </p>
+                  <RecRow label="Assessed Level" value={rec.fromTeacher.assessedLevel || "—"} />
+                  {rec.fromTeacher.recommendedCourse && (
+                    <RecRow label="Recommended Course" value={rec.fromTeacher.recommendedCourse} />
+                  )}
+                  {rec.fromTeacher.recommendsEnroll != null && (
+                    <RecRow
+                      label="Recommends Enrolment"
+                      value={rec.fromTeacher.recommendsEnroll ? "Yes" : "No"}
+                    />
+                  )}
+                  <p className="pt-1 text-[11px] text-ink-3">
+                    {rec.fromTeacher.teacherName || "The teacher"}
+                    {rec.fromTeacher.submittedAt
+                      ? ` · ${new Date(rec.fromTeacher.submittedAt).toLocaleDateString()}`
+                      : ""}
+                  </p>
+                </div>
+              )}
               <RecRow label="Recommended Level" value={rec.recommendedLevel} />
               <RecRow label="Recommended Batch" value={rec.recommendedBatch} />
               <RecRow label="Best-fit Teacher" value={rec.teacher ? `${rec.teacher.name}${rec.teacher.specialisation ? ` · ${rec.teacher.specialisation}` : ""} (workload ${rec.teacher.workload})` : "No active teacher found"} />
-              <p className="pt-1 text-[11px] text-ink-3">Based on evaluation score, subject, and teacher workload.</p>
+              <p className="pt-1 text-[11px] text-ink-3">
+                {rec.source === "teacher"
+                  ? "Level taken from the trial report. Batch and best-fit teacher from subject and workload."
+                  : "Based on evaluation score, subject, and teacher workload."}
+              </p>
             </div>
           ) : (
             <button onClick={compute} className="text-xs font-bold text-accent hover:underline">Compute recommendation</button>

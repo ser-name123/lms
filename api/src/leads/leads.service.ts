@@ -32,6 +32,7 @@ import {
   TrialFeedbackDto,
   TrialInfoFormDto,
   TrialReportDto,
+  TrialStatusDto,
   TRIAL_LEVEL_OPTIONS,
   UpdateLeadDto,
   UpdateTrialDto,
@@ -580,20 +581,51 @@ export class LeadsService implements OnModuleInit {
     const rec = this.recommendFromScore(lead.overallScore ?? null, lead);
     const teacher = await this.bestTeacher(lead.interestedSubject);
 
-    // Persist the level/batch/teacher suggestion for quick reference.
+    /*
+     * A teacher who sat in the room and assessed the student outranks a level
+     * derived from an evaluation score. This used to overwrite the assessed
+     * level with the heuristic every time the coach opened the tab, silently
+     * discarding the report they had just been notified about.
+     */
+    const [report] = await this.prisma.leadTrial.findMany({
+      where: { leadId: id, reportSubmittedAt: { not: null }, assessedLevel: { not: null } },
+      orderBy: { reportSubmittedAt: 'desc' },
+      take: 1,
+    });
+
+    const level = report?.assessedLevel ?? rec.level;
+
     await this.prisma.lead.update({
       where: { id },
       data: {
-        recommendedLevel: rec.level,
+        recommendedLevel: level,
         recommendedBatch: rec.batch,
         recommendedTeacherId: teacher?.id || null,
       },
     });
 
+    let fromTeacher: Record<string, unknown> | null = null;
+    if (report) {
+      const [named] = await this.attachTrialNames([report]);
+      fromTeacher = {
+        trialId: report.id,
+        teacherName: named.teacherName,
+        assessedLevel: report.assessedLevel,
+        recommendedCourse: report.recommendedCourse,
+        recommendsEnroll: report.teacherRecommendsEnroll,
+        rating: report.teacherRating,
+        feedback: report.teacherFeedback,
+        submittedAt: report.reportSubmittedAt?.toISOString() ?? null,
+      };
+    }
+
     return {
-      recommendedLevel: rec.level,
+      recommendedLevel: level,
       recommendedBatch: rec.batch,
       teacher,
+      // Which of the two produced the level above, so the UI need not guess.
+      source: report ? 'teacher' : 'evaluation',
+      fromTeacher,
     };
   }
 
@@ -1139,6 +1171,52 @@ export class LeadsService implements OnModuleInit {
     }
 
     return data;
+  }
+
+  /**
+   * The teacher declaring how their own trial ended.
+   *
+   * Attendance and status are the same fact stated twice, so this keeps them
+   * in step rather than letting a trial sit COMPLETED with nobody marked
+   * present. Cancelling and rescheduling are not offered here — see
+   * TEACHER_TRIAL_OUTCOMES.
+   */
+  async setTrialStatus(trialId: string, dto: TrialStatusDto, actor: Actor) {
+    const trial = await this.assertTrialAccess(trialId, actor);
+    if (trial.status === 'CANCELLED') {
+      throw new BadRequestException('This trial was cancelled by the academic coach.');
+    }
+    if (trial.reportSubmittedAt && dto.status !== 'COMPLETED') {
+      throw new BadRequestException(
+        'A report has already been filed for this trial, so it cannot be reopened as a no-show.',
+      );
+    }
+
+    const present = dto.status === 'COMPLETED';
+    const updated = await this.prisma.leadTrial.update({
+      where: { id: trialId },
+      data: {
+        status: dto.status as any,
+        attendance: present ? 'PRESENT' : 'ABSENT',
+        attendedAt: trial.attendedAt ?? new Date(),
+        ...(dto.note ? { notes: dto.note } : {}),
+      },
+    });
+
+    await this.prisma.lead.update({
+      where: { id: trial.leadId },
+      data: present ? { status: LeadStatus.TRIAL_COMPLETED } : {},
+    });
+    await this.addActivity(
+      trial.leadId,
+      present ? 'TRIAL_ATTENDED' : 'TRIAL_NO_SHOW',
+      present
+        ? `Trial marked completed${dto.note ? ` — ${dto.note}` : ''}.`
+        : `Trial marked a no-show${dto.note ? ` — ${dto.note}` : ''}.`,
+      actor,
+    );
+
+    return this.attachTrialNames([updated]).then((r) => r[0]);
   }
 
   // ══════════════════════════════════════════════════════════════════════════

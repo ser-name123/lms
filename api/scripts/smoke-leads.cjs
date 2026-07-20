@@ -549,6 +549,41 @@ const isoDay = (offsetDays) =>
         `status ${queue.status}`,
       );
 
+      // ── Closing the trial out ──
+      const closed = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/status`,
+        teacherToken,
+        { status: 'COMPLETED', note: 'Ran the full session.' },
+        201,
+      );
+      check('the teacher can set the trial status themselves', closed.ok, `status ${closed.status}`);
+      check(
+        'status and attendance move together — no trial completed with nobody present',
+        closed.ok && closed.body.status === 'COMPLETED' && closed.body.attendance === 'PRESENT',
+        `${closed.body?.status} / ${closed.body?.attendance}`,
+      );
+      const strangerCloses = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/status`,
+        otherTeacherToken,
+        { status: 'NO_SHOW' },
+        403,
+      );
+      check('another teacher cannot close it', strangerCloses.ok, `status ${strangerCloses.status}`);
+      const badOutcome = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/status`,
+        teacherToken,
+        { status: 'CANCELLED' },
+        400,
+      );
+      check(
+        'a teacher cannot cancel a family’s class — that stays with the coach',
+        badOutcome.ok,
+        `status ${badOutcome.status}`,
+      );
+
       const report = await req('GET', `/leads/trials/${originalTrial.id}/report`, teacherToken);
       check('the assigned teacher can open the report', report.ok, `status ${report.status}`);
       check(
@@ -606,9 +641,9 @@ const isoDay = (offsetDays) =>
         draft.ok && draft.body.guardianName === 'Smoke Guardian' && draft.body.coveredPackages === true,
       );
       check(
-        'a draft does not complete the trial',
-        draft.ok && draft.body.reportSubmittedAt === null && draft.body.status !== 'COMPLETED',
-        `status ${draft.body?.status}, submittedAt ${draft.body?.reportSubmittedAt}`,
+        'a draft is not a submission',
+        draft.ok && draft.body.reportSubmittedAt === null,
+        `submittedAt ${draft.body?.reportSubmittedAt}`,
       );
       const born = new Date(dob);
       const today = new Date();
@@ -693,6 +728,36 @@ const isoDay = (offsetDays) =>
         'the assigned coach is told the report is in',
         coachNotice === 1,
         `${coachNotice} notifications`,
+      );
+
+      /*
+       * The regression that motivated this: opening the Recommendation tab
+       * recomputed the level from the evaluation score and wrote it over the
+       * assessment the teacher had just filed — the coach was notified about
+       * a report and then shown something else.
+       */
+      const recAfter = await req('GET', `/leads/${first.body.id}/recommendation`, ownerToken);
+      check(
+        'the coach’s recommendation follows the teacher who taught them',
+        recAfter.ok &&
+          recAfter.body.recommendedLevel === 'Intermediate' &&
+          recAfter.body.source === 'teacher',
+        `${recAfter.body?.recommendedLevel} from ${recAfter.body?.source}`,
+      );
+      check(
+        'and it carries the teacher’s own words, not just a level',
+        recAfter.ok &&
+          recAfter.body.fromTeacher &&
+          recAfter.body.fromTeacher.recommendsEnroll === true &&
+          recAfter.body.fromTeacher.submittedAt,
+      );
+      const levelAfterRec = (
+        await db.query(`SELECT "recommendedLevel" FROM "Lead" WHERE id=$1`, [first.body.id])
+      ).rows[0];
+      check(
+        'reading the recommendation does not overwrite what the teacher assessed',
+        levelAfterRec.recommendedLevel === 'Intermediate',
+        levelAfterRec.recommendedLevel,
       );
 
       const twice = await req(

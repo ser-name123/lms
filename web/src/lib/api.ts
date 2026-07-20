@@ -2195,6 +2195,18 @@ export interface LeadRecommendation {
   recommendedLevel: string;
   recommendedBatch: string;
   teacher: { id: string; name: string; specialisation: string | null; workload: number } | null;
+  /** Where recommendedLevel came from — a teacher who taught them beats a score. */
+  source: "teacher" | "evaluation";
+  fromTeacher: {
+    trialId: string;
+    teacherName: string | null;
+    assessedLevel: string | null;
+    recommendedCourse: string | null;
+    recommendsEnroll: boolean | null;
+    rating: number | null;
+    feedback: string | null;
+    submittedAt: string | null;
+  } | null;
 }
 
 // Public — no auth (endpoints are @Public).
@@ -2464,6 +2476,17 @@ export const fetchMyTrials = (scope: "today" | "upcoming" | "all" = "upcoming") 
 // ─── Teacher's trial report ──────────────────────────────────────────────────
 
 export const fetchTrialOptions = () => api<TrialOptions>("/leads/trial-options");
+
+/** The teacher closing their own trial out. Reschedule and cancel stay with the coach. */
+export const setTrialStatus = (
+  trialId: string,
+  status: "COMPLETED" | "NO_SHOW",
+  note?: string,
+) =>
+  api<LeadTrial>(`/leads/trials/${trialId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status, note }),
+  });
 
 export const fetchTrialReport = (trialId: string) =>
   api<LeadTrial>(`/leads/trials/${trialId}/report`);

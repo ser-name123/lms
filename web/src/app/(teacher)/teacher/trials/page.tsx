@@ -17,7 +17,7 @@ import Swal from "sweetalert2";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
 import { TrialReportPanel } from "@/components/leads/trial-report";
-import { fetchMyTrials, markLeadTrialAttendance, type LeadTrial } from "@/lib/api";
+import { fetchMyTrials, setTrialStatus, type LeadTrial } from "@/lib/api";
 
 const swalBg = () =>
   typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
@@ -135,14 +135,29 @@ function TeacherTrialCard({ trial, onChange }: { trial: LeadTrial; onChange: () 
             </div>
           </div>
 
-          {!done && trial.status !== "CANCELLED" && (
+          {/*
+            * Closing the trial out. Attendance and status are the same fact,
+            * so one control sets both — a trial sitting COMPLETED with nobody
+            * marked present is a contradiction the teacher shouldn't be able
+            * to create. Reschedule and cancel are the coach's, not shown here.
+            */}
+          {trial.status !== "CANCELLED" && (
             <div className="flex flex-wrap gap-1.5">
-              <button onClick={() => act(() => markLeadTrialAttendance(trial.id, "PRESENT"), "Marked present")} disabled={busy}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-[11px] font-bold text-emerald-600 hover:bg-emerald-500/20 disabled:opacity-50">
-                <CheckCircle2 className="size-3.5" /> Present
+              <button onClick={() => act(() => setTrialStatus(trial.id, "COMPLETED"), "Marked completed")} disabled={busy}
+                className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-bold disabled:opacity-50 ${
+                  trial.status === "COMPLETED"
+                    ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-600"
+                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
+                }`}>
+                <CheckCircle2 className="size-3.5" /> Completed
               </button>
-              <button onClick={() => act(() => markLeadTrialAttendance(trial.id, "ABSENT"), "Marked no-show")} disabled={busy}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-bold text-rose-600 hover:bg-rose-500/20 disabled:opacity-50">
+              <button onClick={() => act(() => setTrialStatus(trial.id, "NO_SHOW"), "Marked no-show")} disabled={busy || Boolean(trial.reportSubmittedAt)}
+                title={trial.reportSubmittedAt ? "A report has been filed for this trial" : undefined}
+                className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-bold disabled:opacity-50 ${
+                  trial.status === "NO_SHOW"
+                    ? "border-rose-500/50 bg-rose-500/20 text-rose-600"
+                    : "border-rose-500/30 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20"
+                }`}>
                 <XCircle className="size-3.5" /> No-show
               </button>
             </div>

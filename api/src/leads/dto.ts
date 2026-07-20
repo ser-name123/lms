@@ -236,6 +236,21 @@ export class TrialReportDto {
 }
 
 /*
+ * The teacher closing out their own trial.
+ *
+ * Only the two outcomes a teacher is in a position to declare. Rescheduling
+ * and cancelling stay with the coach — a teacher standing a family down
+ * without the coach knowing is not a call they should be able to make alone.
+ */
+export const TEACHER_TRIAL_OUTCOMES = ['COMPLETED', 'NO_SHOW'] as const;
+
+export class TrialStatusDto {
+  @ApiProperty({ enum: TEACHER_TRIAL_OUTCOMES })
+  @IsIn(TEACHER_TRIAL_OUTCOMES as unknown as string[]) status!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+}
+
+/*
  * What the family fills in on the link the coach sends them after the trial.
  *
  * Only the four preference fields — this form is reached with a token, not a
