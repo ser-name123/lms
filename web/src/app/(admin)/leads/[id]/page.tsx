@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -48,12 +48,14 @@ import {
   sendLeadTrialReminder,
   requestTrialInfo,
   fetchTrialOptions,
+  fetchTeacherAvailability,
   leadCoachDecision,
   type Lead,
   type LeadActivity,
   type LeadRecommendation,
   type LeadTrial,
   type TrialOptions,
+  type TrialDayAvailability,
 } from "@/lib/api";
 import {
   ALL_LEAD_STATUSES,
@@ -551,10 +553,36 @@ function TrialTab({ lead, teachers, onChange }: { lead: Lead; teachers: { id: st
   );
 }
 
+/*
+ * Scheduling a trial from the coach's side.
+ *
+ * This used to be a free-text datetime box and a dropdown of every teacher in
+ * the academy, which let a coach book 3am with someone who does not work
+ * Tuesdays — and the family only found out when nobody joined. The date now
+ * comes prefilled from what the family asked for, the times offered are real
+ * 30-minute slots, and the teacher list is whoever is actually free then.
+ */
 function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
   lead: Lead; teachers: { id: string; name: string }[]; onCancel: () => void; onScheduled: () => void;
 }) {
-  const [scheduledAt, setScheduledAt] = useState("");
+  const toMin = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5));
+  const toHHmm = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+  /* Booking window mirrors the public form: tomorrow to +30 days. */
+  const day = 86_400_000;
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  const todayUtc = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const minDate = iso(todayUtc + day);
+  const maxDate = iso(todayUtc + 30 * day);
+
+  /* Start from the date the family picked, unless it has already gone by. */
+  const wanted = lead.preferredDate ? lead.preferredDate.slice(0, 10) : "";
+  const [date, setDate] = useState(wanted >= minDate && wanted <= maxDate ? wanted : minDate);
+
+  const [avail, setAvail] = useState<TrialDayAvailability | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [slot, setSlot] = useState("");
   const [teacherId, setTeacherId] = useState(lead.assignedTeacherId || "");
   const [duration, setDuration] = useState(30);
   const [provider, setProvider] = useState("Zoom");
@@ -562,12 +590,75 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!date) return;
+    setLoading(true);
+    setAvail(null);
+    fetchTeacherAvailability(date)
+      .then(setAvail)
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+  }, [date]);
+
+  /*
+   * A 60-minute trial needs two consecutive free slots, not one. Checking only
+   * the start would offer a teacher who is booked half an hour in.
+   */
+  const canStart = (free: string[], start: string) => {
+    const set = new Set(free);
+    const need = Math.ceil(duration / 30);
+    const from = toMin(start);
+    for (let i = 0; i < need; i++) if (!set.has(toHHmm(from + i * 30))) return false;
+    return true;
+  };
+
+  /* Every time somebody could actually teach, across all teachers. */
+  const slotOptions = useMemo(() => {
+    if (!avail) return [];
+    const all = new Set<string>();
+    for (const t of avail.teachers) for (const s of t.freeSlots) if (canStart(t.freeSlots, s)) all.add(s);
+    return [...all].sort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avail, duration]);
+
+  /* Only the teachers free for the whole of the chosen slot. */
+  const freeTeachers = useMemo(() => {
+    if (!avail || !slot) return [];
+    const matching = avail.teachers.filter((t) => canStart(t.freeSlots, slot));
+    /*
+     * The family asked for a male or female teacher on the booking form. Not a
+     * hard filter — a coach may still have to place them — but the ones who
+     * match are listed first and labelled, so honouring the request is the
+     * path of least resistance rather than something to remember.
+     */
+    const want = lead.preferredTeacherGender;
+    if (!want || want === "Either") return matching;
+    return [...matching].sort((a, b) => Number(b.gender === want) - Number(a.gender === want));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avail, slot, duration, lead.preferredTeacherGender]);
+
+  /* Prefer the slot the family asked for; otherwise the first one going. */
+  useEffect(() => {
+    if (!slotOptions.length) { setSlot(""); return; }
+    setSlot((current) => {
+      if (current && slotOptions.includes(current)) return current;
+      const asked = lead.preferredSlot ?? "";
+      return slotOptions.includes(asked) ? asked : slotOptions[0];
+    });
+  }, [slotOptions, lead.preferredSlot]);
+
+  /* Keep the teacher honest: clear the choice if they are not free any more. */
+  useEffect(() => {
+    if (teacherId && !freeTeachers.some((t) => t.teacherId === teacherId)) setTeacherId("");
+  }, [freeTeachers, teacherId]);
+
   const submit = async () => {
-    if (!scheduledAt) { Swal.fire({ title: "Pick a date & time", icon: "info", background: swalBg() }); return; }
+    if (!slot) { Swal.fire({ title: "Pick a time", icon: "info", background: swalBg() }); return; }
     setBusy(true);
     try {
       await scheduleLeadTrial(lead.id, {
-        scheduledAt: new Date(scheduledAt).toISOString(),
+        // Slots are published in UTC, same as the public booking form.
+        scheduledAt: new Date(`${date}T${slot}:00.000Z`).toISOString(),
         teacherId: teacherId || undefined,
         durationMins: duration,
         meetingProvider: provider,
@@ -581,36 +672,98 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
     } finally { setBusy(false); }
   };
 
+  const askedFor = lead.preferredDate
+    ? `${lead.preferredDate.slice(0, 10)}${lead.preferredSlot ? ` at ${lead.preferredSlot}` : ""}`
+    : null;
+
   return (
     <Card className="border border-accent/30 bg-surface shadow-sm">
       <CardBody className="p-5">
-        <h4 className="mb-3 text-sm font-bold text-ink">Schedule a Trial Class</h4>
+        <h4 className="mb-1 text-sm font-bold text-ink">Schedule a Trial Class</h4>
+        <p className="mb-3 text-[11px] text-ink-3">
+          {askedFor
+            ? `The family asked for ${askedFor} (UTC). Only teachers free at the time you pick are listed.`
+            : "Only teachers free at the time you pick are listed. Times in UTC."}
+        </p>
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Date & Time">
-            <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)}
+          <Field label="Date">
+            <input type="date" value={date} min={minDate} max={maxDate} onChange={(e) => setDate(e.target.value)}
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
-          </Field>
-          <Field label="Teacher">
-            <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)}
-              className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
-              <option value="">— Assigned teacher —</option>
-              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
           </Field>
           <Field label="Duration (mins)">
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
-              {[20, 30, 45, 60].map((d) => <option key={d} value={d}>{d} minutes</option>)}
+              {[30, 60].map((d) => <option key={d} value={d}>{d} minutes</option>)}
             </select>
           </Field>
+
+          <Field label="Time" full>
+            {loading ? (
+              <div className="flex items-center gap-2 py-2 text-xs font-bold text-ink-3">
+                <Loader2 className="size-4 animate-spin text-accent" /> Checking who is free…
+              </div>
+            ) : slotOptions.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-hairline px-3 py-3 text-xs text-ink-3">
+                No teacher is free for {duration} minutes on this date. Try another date, a shorter
+                slot, or ask a teacher to publish their availability.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {slotOptions.map((s) => (
+                  <button key={s} type="button" onClick={() => setSlot(s)}
+                    className={`h-9 rounded-lg border px-3 text-xs font-bold transition-colors ${
+                      slot === s ? "border-accent bg-accent/10 text-accent" : "border-hairline text-ink-3 hover:text-ink-2"
+                    }`}>
+                    {s}
+                    {s === lead.preferredSlot ? " ★" : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Field>
+
+          <Field label={`Teacher${slot ? ` — free at ${slot}` : ""}`} full>
+            <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={!slot}
+              className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent disabled:opacity-50">
+              <option value="">— Leave unassigned —</option>
+              {freeTeachers.map((t) => (
+                <option key={t.teacherId} value={t.teacherId}>
+                  {t.name}
+                  {t.gender ? ` · ${t.gender}` : ""}
+                  {lead.preferredTeacherGender && lead.preferredTeacherGender !== "Either" && t.gender === lead.preferredTeacherGender
+                    ? " · matches request"
+                    : ""}
+                  {t.subjects?.length ? ` · ${t.subjects.join(", ")}` : ""}
+                </option>
+              ))}
+            </select>
+            {slot && freeTeachers.length === 0 && (
+              <p className="mt-1 text-[11px] font-semibold text-amber-600">
+                Nobody is free at {slot} for {duration} minutes.
+              </p>
+            )}
+            {/*
+              * Teachers who never published availability cannot appear above,
+              * so say how many are being left out rather than letting the coach
+              * assume the academy is fully booked.
+              */}
+            {avail && teachers.length > avail.teachers.length && (
+              <p className="mt-1 text-[11px] text-ink-3">
+                {teachers.length - avail.teachers.length} of {teachers.length} teachers have no
+                approved availability and cannot be offered here.
+              </p>
+            )}
+          </Field>
+
           <Field label="Platform">
             <select value={provider} onChange={(e) => setProvider(e.target.value)}
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
               {MEETING_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </Field>
-          <Field label="Meeting link (optional)" full>
-            <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…"
+          <Field label="Meeting link (optional)">
+            <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Leave blank — Zoom room is created for you"
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
           </Field>
           <Field label="Notes (optional)" full>
@@ -618,8 +771,9 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
           </Field>
         </div>
+
         <div className="mt-4 flex gap-2">
-          <button onClick={submit} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-60">
+          <button onClick={submit} disabled={busy || !slot} className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <CalendarClock className="size-4" />} Schedule & Send Invite
           </button>
           <button onClick={onCancel} className="inline-flex h-10 items-center rounded-xl border border-hairline px-4 text-xs font-bold text-ink-2 hover:bg-surface-2">Cancel</button>

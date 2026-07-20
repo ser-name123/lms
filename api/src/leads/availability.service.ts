@@ -209,16 +209,24 @@ export class LeadAvailabilityService {
           status: { in: ['SCHEDULED', 'RESCHEDULED'] },
           teacherId: { not: null },
         },
-        select: { teacherId: true, scheduledAt: true },
+        select: { teacherId: true, scheduledAt: true, durationMins: true },
       }),
     ]);
 
     const busy = new Map<string, Set<string>>();
     for (const t of booked) {
       if (!t.teacherId) continue;
-      const at = this.toHHmm(t.scheduledAt.getUTCHours() * 60 + t.scheduledAt.getUTCMinutes());
+      /*
+       * Every slot the booking covers, not just the one it starts in. A
+       * 60-minute trial at 17:00 leaves the teacher unavailable at 17:30 too,
+       * and marking only the start would offer that half hour to somebody else.
+       */
+      const start = t.scheduledAt.getUTCHours() * 60 + t.scheduledAt.getUTCMinutes();
+      const spans = Math.max(1, Math.ceil((t.durationMins || SLOT_MINUTES) / SLOT_MINUTES));
       if (!busy.has(t.teacherId)) busy.set(t.teacherId, new Set());
-      busy.get(t.teacherId)!.add(at);
+      for (let i = 0; i < spans; i++) {
+        busy.get(t.teacherId)!.add(this.toHHmm(start + i * SLOT_MINUTES));
+      }
     }
 
     return {
@@ -251,7 +259,7 @@ export class LeadAvailabilityService {
           scheduledAt: { gte: date, lt: dayEnd },
           status: { in: ['SCHEDULED', 'RESCHEDULED'] },
         },
-        select: { scheduledAt: true },
+        select: { scheduledAt: true, durationMins: true },
       }),
       this.prisma.lead.findMany({
         where: { preferredDate: date, preferredSlot: { not: null } },
@@ -261,7 +269,11 @@ export class LeadAvailabilityService {
 
     const taken = new Set<string>();
     for (const t of trials) {
-      taken.add(this.toHHmm(t.scheduledAt.getUTCHours() * 60 + t.scheduledAt.getUTCMinutes()));
+      // Same as teacherAvailabilityFor: a longer trial occupies every slot it
+      // runs through, not only the one it begins in.
+      const start = t.scheduledAt.getUTCHours() * 60 + t.scheduledAt.getUTCMinutes();
+      const spans = Math.max(1, Math.ceil((t.durationMins || SLOT_MINUTES) / SLOT_MINUTES));
+      for (let i = 0; i < spans; i++) taken.add(this.toHHmm(start + i * SLOT_MINUTES));
     }
     for (const l of leads) if (l.preferredSlot) taken.add(l.preferredSlot);
     return taken;

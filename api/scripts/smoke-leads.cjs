@@ -62,6 +62,12 @@ async function req(method, path, auth, payload, expect = 200) {
   return { status: res.status, body, ok: res.status === expect };
 }
 
+/** The 30-minute slot immediately after this one, as "HH:mm". */
+const nextSlot = (hhmm) => {
+  const m = Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5)) + 30;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
+
 const isoDay = (offsetDays) =>
   new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
 
@@ -480,6 +486,54 @@ const isoDay = (offsetDays) =>
       );
     }
 
+    /*
+     * A 60-minute trial occupies two slots, not one. Marking only the start
+     * would offer the second half hour to another family and put the teacher
+     * in two places at once.
+     */
+    /*
+     * The teacher has to come from the availability response, not from any old
+     * TeacherProfile row: only teachers with approved availability appear
+     * there, so picking one by id would test nothing and report "not found".
+     */
+    const before = await req('GET', `/leads/teacher-availability?date=${slotDate}`, ownerToken);
+    const longTeacher = (before.body.teachers ?? []).find((t) =>
+      t.freeSlots.some((s) => !usedSlots.includes(s) && t.freeSlots.includes(nextSlot(s))),
+    );
+    const longSlot = longTeacher?.freeSlots.find(
+      (s) => !usedSlots.includes(s) && longTeacher.freeSlots.includes(nextSlot(s)),
+    );
+    if (longSlot) {
+      const longTrial = await req(
+        'POST',
+        `/leads/${first.body.id}/trials`,
+        ownerToken,
+        {
+          scheduledAt: new Date(Date.parse(`${slotDate}T${longSlot}:00.000Z`)).toISOString(),
+          durationMins: 60,
+          teacherId: longTeacher.teacherId,
+        },
+        201,
+      );
+      usedSlots.push(longSlot, nextSlot(longSlot));
+      const after = await req('GET', `/leads/teacher-availability?date=${slotDate}`, ownerToken);
+      const row = after.body.teachers?.find((t) => t.teacherId === longTeacher.teacherId);
+      check(
+        'a 60-minute booking blocks both half hours, not just the first',
+        longTrial.ok && row && row.busySlots.includes(longSlot) && row.busySlots.includes(nextSlot(longSlot)),
+        row ? `busy: ${row.busySlots.join(', ')}` : 'teacher not in availability',
+      );
+
+      const publicAfter = await req('GET', `/leads/availability?date=${slotDate}`, null);
+      check(
+        'and the public form stops offering the second half too',
+        publicAfter.ok && !publicAfter.body.slots.includes(nextSlot(longSlot)),
+        publicAfter.body?.slots?.join(', '),
+      );
+    } else {
+      console.log('  skip  no pair of consecutive free slots to test a 60-minute booking');
+    }
+
     const trialsBefore = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
     const originalTrial = trialsBefore.body[0];
 
@@ -507,10 +561,16 @@ const isoDay = (offsetDays) =>
     check('the coach can book a second trial for the same student', second.ok, `status ${second.status}`);
 
     const trialsAfter = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
+    /*
+     * Both specific trials, not a total — other cases in this file add their
+     * own trials to the same lead, and a bare count would break every time one
+     * is added without saying anything about overwriting.
+     */
+    const keptIds = (trialsAfter.body ?? []).map((t) => t.id);
     check(
       'both trials are kept, not overwritten',
-      trialsAfter.ok && trialsAfter.body.length === 2,
-      `${trialsAfter.body?.length} trials`,
+      trialsAfter.ok && keptIds.includes(originalTrial.id) && keptIds.includes(second.body.id),
+      `${trialsAfter.body?.length} trials, ids ${keptIds.join(', ')}`,
     );
 
     const strangerTrials = await req(
