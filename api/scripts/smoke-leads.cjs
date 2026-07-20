@@ -329,6 +329,190 @@ const isoDay = (offsetDays) =>
     const anon = await req('GET', `/leads/${first.body.id}`, null, undefined, 401);
     check('lead details are not public', anon.ok, `status ${anon.status}`);
 
+    // ── A lead belongs to one coach ──────────────────────────────────────────
+    console.log('\n── Coach isolation ──');
+
+    const ownerId = stored.assignedCoachId;
+    const strangerId = coaches.find((c) => c !== ownerId);
+    check('there is a second coach to test isolation against', Boolean(strangerId));
+
+    const ownerRow = (
+      await db.query(`SELECT id, email FROM "User" WHERE id=$1`, [ownerId])
+    ).rows[0];
+    const strangerRow = (
+      await db.query(`SELECT id, email FROM "User" WHERE id=$1`, [strangerId])
+    ).rows[0];
+    const ownerToken = token(ownerRow.id, 'ACADEMIC_COACH', ownerRow.email);
+    const strangerToken = token(strangerRow.id, 'ACADEMIC_COACH', strangerRow.email);
+
+    const ownerSees = await req('GET', `/leads/${first.body.id}`, ownerToken);
+    check('the assigned coach can open their lead', ownerSees.ok, `status ${ownerSees.status}`);
+
+    const strangerSees = await req(
+      'GET',
+      `/leads/${first.body.id}`,
+      strangerToken,
+      undefined,
+      403,
+    );
+    check('another coach cannot open it', strangerSees.ok, `status ${strangerSees.status}`);
+
+    const strangerList = await req('GET', '/leads?page=1&limit=100', strangerToken);
+    check(
+      'it does not appear in another coach’s list',
+      strangerList.ok && !strangerList.body.items.some((l) => l.id === first.body.id),
+    );
+    check(
+      'a coach’s list contains only their own leads',
+      strangerList.ok &&
+        strangerList.body.items.every((l) => l.assignedCoachId === strangerRow.id),
+      `${strangerList.body.items?.filter((l) => l.assignedCoachId !== strangerRow.id).length} foreign rows`,
+    );
+
+    // Passing someone else's coachId must not widen the scope.
+    const strangerFilters = await req(
+      'GET',
+      `/leads?page=1&limit=100&coachId=${ownerId}`,
+      strangerToken,
+    );
+    check(
+      'filtering by another coach’s id returns nothing, not their pipeline',
+      strangerFilters.ok && strangerFilters.body.items.length === 0,
+      `${strangerFilters.body.items?.length} rows leaked`,
+    );
+
+    const strangerStats = await req('GET', '/leads/stats', strangerToken);
+    const ownerStats = await req('GET', '/leads/stats', ownerToken);
+    const adminStats = await req('GET', '/leads/stats', adminToken);
+    check(
+      'the counts are scoped too, not just the rows',
+      strangerStats.body.total < adminStats.body.total &&
+        ownerStats.body.total < adminStats.body.total,
+      `stranger=${strangerStats.body?.total} owner=${ownerStats.body?.total} admin=${adminStats.body?.total}`,
+    );
+
+    const strangerWrites = await req(
+      'PATCH',
+      `/leads/${first.body.id}`,
+      strangerToken,
+      { priority: 'URGENT' },
+      403,
+    );
+    check('another coach cannot edit it either', strangerWrites.ok, `status ${strangerWrites.status}`);
+
+    const strangerTimeline = await req(
+      'GET',
+      `/leads/${first.body.id}/activities`,
+      strangerToken,
+      undefined,
+      403,
+    );
+    check('the timeline is closed to them as well', strangerTimeline.ok, `status ${strangerTimeline.status}`);
+
+    const adminSees = await req('GET', `/leads/${first.body.id}`, adminToken);
+    check('an admin still sees every lead', adminSees.ok, `status ${adminSees.status}`);
+
+    // ── Coach tools: availability, teacher, reschedule, extra trials ─────────
+    console.log('\n── Coach tools ──');
+
+    const teacherAvail = await req(
+      'GET',
+      `/leads/teacher-availability?date=${slotDate}`,
+      ownerToken,
+    );
+    check('the coach can see who is free on a date', teacherAvail.ok, `status ${teacherAvail.status}`);
+    check(
+      'availability is per teacher, with free and busy slots split',
+      teacherAvail.ok &&
+        Array.isArray(teacherAvail.body.teachers) &&
+        teacherAvail.body.teachers.every(
+          (t) => t.teacherId && Array.isArray(t.freeSlots) && Array.isArray(t.busySlots),
+        ),
+    );
+
+    // TeacherProfile has no createdAt — order by id so the pick is stable.
+    const someTeacher = (
+      await db.query(`SELECT id FROM "TeacherProfile" ORDER BY id LIMIT 2`)
+    ).rows;
+    if (someTeacher.length >= 2) {
+      const assign = await req(
+        'POST',
+        `/leads/${first.body.id}/assign-teacher`,
+        ownerToken,
+        { teacherId: someTeacher[0].id },
+        201,
+      );
+      check('the coach can assign a teacher', assign.ok, `status ${assign.status}`);
+
+      const reassign = await req(
+        'POST',
+        `/leads/${first.body.id}/assign-teacher`,
+        ownerToken,
+        { teacherId: someTeacher[1].id },
+        201,
+      );
+      check('and can change the teacher afterwards', reassign.ok, `status ${reassign.status}`);
+      const afterReassign = (
+        await db.query(`SELECT "assignedTeacherId" FROM "Lead" WHERE id=$1`, [first.body.id])
+      ).rows[0];
+      check(
+        'the change actually sticks',
+        afterReassign.assignedTeacherId === someTeacher[1].id,
+        afterReassign.assignedTeacherId,
+      );
+    }
+
+    const trialsBefore = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
+    const originalTrial = trialsBefore.body[0];
+
+    const moved = await req('PATCH', `/leads/trials/${originalTrial.id}`, ownerToken, {
+      scheduledAt: new Date(Date.parse(`${slotDate}T14:00:00.000Z`)).toISOString(),
+    });
+    check('the coach can change the date and time', moved.ok, `status ${moved.status}`);
+    check(
+      'a reschedule is recorded as such and re-arms the reminders',
+      moved.ok && moved.body.status === 'RESCHEDULED' && moved.body.reminder24hSentAt === null,
+      `${moved.body?.status}`,
+    );
+
+    const second = await req(
+      'POST',
+      `/leads/${first.body.id}/trials`,
+      ownerToken,
+      {
+        scheduledAt: new Date(Date.parse(`${slotDate}T16:00:00.000Z`)).toISOString(),
+        durationMins: 30,
+        notes: 'Second trial for the same student',
+      },
+      201,
+    );
+    check('the coach can book a second trial for the same student', second.ok, `status ${second.status}`);
+
+    const trialsAfter = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
+    check(
+      'both trials are kept, not overwritten',
+      trialsAfter.ok && trialsAfter.body.length === 2,
+      `${trialsAfter.body?.length} trials`,
+    );
+
+    const strangerTrials = await req(
+      'GET',
+      `/leads/${first.body.id}/trials`,
+      strangerToken,
+      undefined,
+      403,
+    );
+    check('another coach cannot list those trials', strangerTrials.ok, `status ${strangerTrials.status}`);
+
+    const strangerMoves = await req(
+      'PATCH',
+      `/leads/trials/${originalTrial.id}`,
+      strangerToken,
+      { notes: 'should not be possible' },
+      403,
+    );
+    check('nor reschedule them', strangerMoves.ok, `status ${strangerMoves.status}`);
+
     // ── Siblings become separate students ────────────────────────────────────
     console.log('\n── Siblings & conversion ──');
     const familySlot = slotList.find((s) => !usedSlots.includes(s));

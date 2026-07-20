@@ -178,6 +178,69 @@ export class LeadAvailabilityService {
     };
   }
 
+  /**
+   * Per-teacher availability for one date, for the coach's assignment screen.
+   *
+   * Unlike `slotsFor`, this does not merge: the coach needs to see *who* is
+   * free when, and which of their slots are already committed, to pick the
+   * right person. Teachers with no published availability for that weekday are
+   * still listed, with an empty slot list, so the coach can see the roster is
+   * incomplete rather than wondering where someone went.
+   */
+  async teacherAvailabilityFor(rawDate: string) {
+    const date = this.parseBookableDate(rawDate);
+    const weekday = WEEKDAYS[date.getUTCDay()];
+    const dayEnd = new Date(date.getTime() + 86_400_000);
+
+    const [teachers, booked] = await Promise.all([
+      this.prisma.teacherProfile.findMany({
+        where: { availabilityApproved: true },
+        select: {
+          id: true,
+          availability: true,
+          subjects: true,
+          gender: true,
+          user: { select: { firstName: true, lastName: true } },
+        },
+      }),
+      this.prisma.leadTrial.findMany({
+        where: {
+          scheduledAt: { gte: date, lt: dayEnd },
+          status: { in: ['SCHEDULED', 'RESCHEDULED'] },
+          teacherId: { not: null },
+        },
+        select: { teacherId: true, scheduledAt: true },
+      }),
+    ]);
+
+    const busy = new Map<string, Set<string>>();
+    for (const t of booked) {
+      if (!t.teacherId) continue;
+      const at = this.toHHmm(t.scheduledAt.getUTCHours() * 60 + t.scheduledAt.getUTCMinutes());
+      if (!busy.has(t.teacherId)) busy.set(t.teacherId, new Set());
+      busy.get(t.teacherId)!.add(at);
+    }
+
+    return {
+      date: rawDate,
+      timeZone: 'UTC',
+      teachers: teachers
+        .map((t) => {
+          const slots = this.toSlots(this.merge(this.readWindows(t.availability, weekday)));
+          const taken = busy.get(t.id) ?? new Set<string>();
+          return {
+            teacherId: t.id,
+            name: `${t.user.firstName} ${t.user.lastName}`.trim(),
+            gender: t.gender,
+            subjects: t.subjects,
+            freeSlots: slots.filter((s) => !taken.has(s)),
+            busySlots: slots.filter((s) => taken.has(s)),
+          };
+        })
+        .sort((a, b) => b.freeSlots.length - a.freeSlots.length),
+    };
+  }
+
   /** Slots on this date already held by a live trial or an unprocessed lead. */
   private async takenSlots(date: Date): Promise<Set<string>> {
     const dayEnd = new Date(date.getTime() + 86_400_000);

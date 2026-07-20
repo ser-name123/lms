@@ -27,6 +27,16 @@ import {
   UpdateTrialDto,
 } from './dto';
 
+/*
+ * The caller, in the shape the service expects.
+ *
+ * `role` has to travel with it: a lead belongs to the coach it was assigned
+ * to, and LeadsService decides visibility from this. Passing only { id, name }
+ * — as this controller used to — silently disables that scoping and hands
+ * every coach the whole pipeline.
+ */
+const actor = (user: AuthUser) => ({ id: user.id, name: user.email, role: user.role });
+
 @ApiTags('leads')
 @ApiBearerAuth()
 @Controller('leads')
@@ -53,22 +63,30 @@ export class LeadsController {
     return this.availabilityService.slotsFor(date);
   }
 
+  @Get('teacher-availability')
+  @ApiOperation({
+    summary: 'Who is free on a date, per teacher — the coach assignment screen',
+  })
+  teacherAvailability(@Query('date') date: string) {
+    return this.availabilityService.teacherAvailabilityFor(date);
+  }
+
   @Get()
-  @ApiOperation({ summary: 'List / filter leads' })
-  list(@Query() query: ListLeadsDto) {
-    return this.service.list(query);
+  @ApiOperation({ summary: 'List / filter leads (a coach sees only their own)' })
+  list(@Query() query: ListLeadsDto, @CurrentUser() user: AuthUser) {
+    return this.service.list(query, actor(user));
   }
 
   @Get('stats')
-  @ApiOperation({ summary: 'Lead pipeline + marketing stats' })
-  stats() {
-    return this.service.getStats();
+  @ApiOperation({ summary: 'Lead pipeline + marketing stats, scoped to the caller' })
+  stats(@CurrentUser() user: AuthUser) {
+    return this.service.getStats(actor(user));
   }
 
   @Get('funnel')
-  @ApiOperation({ summary: 'Full conversion funnel + trial analytics' })
-  funnel() {
-    return this.service.getFunnel();
+  @ApiOperation({ summary: 'Full conversion funnel + trial analytics, scoped to the caller' })
+  funnel(@CurrentUser() user: AuthUser) {
+    return this.service.getFunnel(actor(user));
   }
 
   // ── Teacher: my trial queue (static path — declare before :id) ──────────────
@@ -83,63 +101,63 @@ export class LeadsController {
   @Patch('trials/:trialId')
   @ApiOperation({ summary: 'Update / reschedule a trial' })
   updateTrial(@Param('trialId') trialId: string, @Body() dto: UpdateTrialDto, @CurrentUser() user: AuthUser) {
-    return this.service.updateTrial(trialId, dto, { id: user.id, name: user.email });
+    return this.service.updateTrial(trialId, dto, actor(user));
   }
 
   @Post('trials/:trialId/attendance')
   @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Mark trial attendance (present / absent)' })
   markAttendance(@Param('trialId') trialId: string, @Body() dto: TrialAttendanceDto, @CurrentUser() user: AuthUser) {
-    return this.service.markAttendance(trialId, dto, { id: user.id, name: user.email });
+    return this.service.markAttendance(trialId, dto, actor(user));
   }
 
   @Post('trials/:trialId/feedback')
   @Roles(Role.TEACHER, Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Record teacher / parent feedback for a trial' })
   trialFeedback(@Param('trialId') trialId: string, @Body() dto: TrialFeedbackDto, @CurrentUser() user: AuthUser) {
-    return this.service.submitTrialFeedback(trialId, dto, { id: user.id, name: user.email });
+    return this.service.submitTrialFeedback(trialId, dto, actor(user));
   }
 
   @Post('trials/:trialId/reminder')
   @ApiOperation({ summary: 'Send a reminder email for this trial now' })
-  sendReminder(@Param('trialId') trialId: string) {
-    return this.service.sendReminderNow(trialId);
+  sendReminder(@Param('trialId') trialId: string, @CurrentUser() user: AuthUser) {
+    return this.service.sendReminderNow(trialId, actor(user));
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get one lead' })
-  getOne(@Param('id') id: string) {
-    return this.service.getOne(id);
+  getOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getOne(id, actor(user));
   }
 
   @Get(':id/activities')
   @ApiOperation({ summary: 'Activity timeline for a lead' })
-  activities(@Param('id') id: string) {
-    return this.service.listActivities(id);
+  activities(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.listActivities(id, actor(user));
   }
 
   @Get(':id/recommendation')
   @ApiOperation({ summary: 'Level / batch / best-fit teacher recommendation' })
-  recommendation(@Param('id') id: string) {
-    return this.service.getRecommendation(id);
+  recommendation(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getRecommendation(id, actor(user));
   }
 
   @Get(':id/trials')
   @ApiOperation({ summary: 'List the trial classes booked for a lead' })
-  trials(@Param('id') id: string) {
-    return this.service.listTrials(id);
+  trials(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.listTrials(id, actor(user));
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update status / priority / coach / add note' })
   update(@Param('id') id: string, @Body() dto: UpdateLeadDto, @CurrentUser() user: AuthUser) {
-    return this.service.update(id, dto, { id: user.id, name: user.email });
+    return this.service.update(id, dto, actor(user));
   }
 
   @Post(':id/evaluate')
   @ApiOperation({ summary: 'Record evaluation scores (auto overall %)' })
   evaluate(@Param('id') id: string, @Body() dto: EvaluateLeadDto, @CurrentUser() user: AuthUser) {
-    return this.service.evaluate(id, dto, { id: user.id, name: user.email });
+    return this.service.evaluate(id, dto, actor(user));
   }
 
   @Post(':id/assign-teacher')
@@ -149,18 +167,18 @@ export class LeadsController {
     @Body() dto: AssignTeacherLeadDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.service.assignTeacher(id, dto, { id: user.id, name: user.email });
+    return this.service.assignTeacher(id, dto, actor(user));
   }
 
   @Post(':id/trials')
   @ApiOperation({ summary: 'Schedule a trial class for a lead' })
   scheduleTrial(@Param('id') id: string, @Body() dto: ScheduleTrialDto, @CurrentUser() user: AuthUser) {
-    return this.service.scheduleTrial(id, dto, { id: user.id, name: user.email });
+    return this.service.scheduleTrial(id, dto, actor(user));
   }
 
   @Post(':id/decision')
   @ApiOperation({ summary: 'Coach decision — ENROLL converts the lead to a student' })
   decision(@Param('id') id: string, @Body() dto: CoachDecisionDto, @CurrentUser() user: AuthUser) {
-    return this.service.coachDecision(id, dto, { id: user.id, name: user.email });
+    return this.service.coachDecision(id, dto, actor(user));
   }
 }

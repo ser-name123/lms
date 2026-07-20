@@ -2219,6 +2219,26 @@ export type TrialBooking = {
 export const fetchTrialSlots = (date: string) =>
   api<TrialSlots>(`/leads/availability?date=${encodeURIComponent(date)}`);
 
+export type TrialDayAvailability = {
+  date: string;
+  timeZone: string;
+  teachers: {
+    teacherId: string;
+    name: string;
+    gender: string | null;
+    subjects: string[];
+    freeSlots: string[];
+    busySlots: string[];
+  }[];
+};
+
+/**
+ * Per-teacher availability for the coach's assignment screen — unmerged, so
+ * they can see *who* is free, unlike the public form's combined slot list.
+ */
+export const fetchTeacherAvailability = (date: string) =>
+  api<TrialDayAvailability>(`/leads/teacher-availability?date=${encodeURIComponent(date)}`);
+
 /**
  * Books the trial outright: the lead, the trial and its Zoom meeting are all
  * created by this one call. There is no OTP step — the old one returned the

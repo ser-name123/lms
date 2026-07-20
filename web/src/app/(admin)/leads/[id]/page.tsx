@@ -59,6 +59,7 @@ import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_TONE,
 } from "@/components/leads/lead-meta";
+import { TeacherAvailabilityPanel } from "@/components/leads/teacher-availability";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: User },
@@ -489,6 +490,12 @@ function TrialTab({ lead, teachers, onChange }: { lead: Lead; teachers: { id: st
           onScheduled={() => { setShowForm(false); refresh(); }}
         />
       )}
+
+      {/* Opens on the date the visitor asked for, so the coach starts where the
+          family expected rather than on an arbitrary day. */}
+      <TeacherAvailabilityPanel
+        defaultDate={lead.preferredDate ? lead.preferredDate.slice(0, 10) : null}
+      />
 
       {loading ? (
         <div className="flex items-center gap-2 py-8 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Loading trials…</div>

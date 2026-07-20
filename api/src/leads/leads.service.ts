@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   type OnModuleInit,
@@ -32,7 +33,12 @@ import {
   UpdateTrialDto,
 } from './dto';
 
-type Actor = { id?: string; name?: string } | undefined;
+/*
+ * The signed-in staff member. `role` is what decides which leads they may
+ * touch, so it is part of the type rather than something each caller
+ * remembers to pass — see scopeFor / assertAccess.
+ */
+type Actor = { id?: string; name?: string; role?: string } | undefined;
 
 /** Points at the coach who received the most recent lead. See nextCoachInRotation. */
 const COACH_ROTATION_KEY = 'LEAD_COACH_ROTATION_LAST';
@@ -305,8 +311,81 @@ export class LeadsService implements OnModuleInit {
   }
 
   // ── Admin/Coach: list / stats / detail ──────────────────────────────────────
-  async list(dto: ListLeadsDto) {
+  /*
+   * ── Who may see which lead ────────────────────────────────────────────────
+   *
+   * A lead belongs to the coach the rotation handed it to. Another coach must
+   * not see it at all — not in the list, not in the counts, not by guessing the
+   * URL. Admins see everything.
+   *
+   * The scope is built here, in the service, and every read and write funnels
+   * through `scopeFor` or `assertAccess`. Enforcing it in the controller, or in
+   * each query by hand, is how one forgotten endpoint quietly becomes the way
+   * around the rule.
+   */
+  private scopeFor(user: Actor): { assignedCoachId?: string } {
+    if (!user?.role || user.role === Role.ADMIN) return {};
+    if (user.role === Role.ACADEMIC_COACH) return { assignedCoachId: user.id };
+    return {};
+  }
+
+  /**
+   * Throws unless this user may work on this lead. Returns the lead so callers
+   * do not fetch it twice.
+   */
+  private async assertAccess(leadId: string, user: Actor) {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
+
+    if (user?.role === Role.ACADEMIC_COACH && lead.assignedCoachId !== user.id) {
+      /*
+       * 403, not 404. These are trusted colleagues: telling a coach the lead
+       * exists but belongs to someone else lets them ask for it to be
+       * reassigned, where a bare "not found" just looks broken.
+       */
+      throw new ForbiddenException(
+        'This trial request is assigned to another academic coach. Ask an admin to reassign it.',
+      );
+    }
+    return lead;
+  }
+
+  /**
+   * Same rule for a trial, reached through its lead — plus the assigned teacher,
+   * who has to mark attendance and leave feedback on their own trials without
+   * being able to see the rest of the coach's pipeline.
+   */
+  private async assertTrialAccess(trialId: string, user: Actor) {
+    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
+    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+
+    if (user?.role === Role.TEACHER) {
+      const profile = await this.prisma.teacherProfile.findUnique({
+        where: { userId: user.id ?? '' },
+        select: { id: true },
+      });
+      if (!profile || trial.teacherId !== profile.id) {
+        throw new ForbiddenException('This trial is not assigned to you.');
+      }
+      return trial;
+    }
+
+    await this.assertAccess(trial.leadId, user);
+    return trial;
+  }
+
+  async list(dto: ListLeadsDto, user?: Actor) {
     const { page = 1, limit = 20, search, status, priority, country, subject, coachId } = dto;
+    const scope = this.scopeFor(user);
+
+    /*
+     * A coach asking for someone else's pipeline gets an empty page, not their
+     * own rows. Silently swapping the filter would answer a question they did
+     * not ask and make the UI look like the other coach has these leads.
+     */
+    if (scope.assignedCoachId && coachId && coachId !== scope.assignedCoachId) {
+      return { items: [], meta: { page, limit, total: 0, totalPages: 1 } };
+    }
 
     const where: any = {
       ...(status ? { status } : {}),
@@ -314,6 +393,8 @@ export class LeadsService implements OnModuleInit {
       ...(country ? { country: { contains: country, mode: 'insensitive' } } : {}),
       ...(subject ? { interestedSubject: { contains: subject, mode: 'insensitive' } } : {}),
       ...(coachId ? { assignedCoachId: coachId } : {}),
+      // Last, so it overrides any coachId a coach passed for someone else.
+      ...scope,
       ...(search
         ? {
             OR: [
@@ -346,39 +427,43 @@ export class LeadsService implements OnModuleInit {
     };
   }
 
-  async getOne(id: string) {
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+  async getOne(id: string, user?: Actor) {
+    const lead = await this.assertAccess(id, user);
     const [withNames] = await this.attachNames([lead]);
     return withNames;
   }
 
-  async listActivities(id: string) {
+  async listActivities(id: string, user?: Actor) {
+    await this.assertAccess(id, user);
     return this.prisma.leadActivity.findMany({
       where: { leadId: id },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getStats() {
+  async getStats(user?: Actor) {
+    const scope = this.scopeFor(user);
+    // Counts follow the same scope as the list — a coach's pipeline numbers
+    // must match the rows they can actually open.
     const byStatus = await this.prisma.lead.groupBy({
       by: ['status'],
+      where: scope,
       _count: { _all: true },
     });
     const statusCounts: Record<string, number> = {};
     byStatus.forEach((r) => (statusCounts[r.status] = r._count._all));
 
     const [total, converted, rejected, avgRatingAgg] = await Promise.all([
-      this.prisma.lead.count(),
-      this.prisma.lead.count({ where: { status: LeadStatus.CONVERTED } }),
-      this.prisma.lead.count({ where: { status: LeadStatus.REJECTED } }),
-      this.prisma.lead.aggregate({ _avg: { overallScore: true } }),
+      this.prisma.lead.count({ where: scope }),
+      this.prisma.lead.count({ where: { ...scope, status: LeadStatus.CONVERTED } }),
+      this.prisma.lead.count({ where: { ...scope, status: LeadStatus.REJECTED } }),
+      this.prisma.lead.aggregate({ where: scope, _avg: { overallScore: true } }),
     ]);
 
     // Subject- and country-wise breakdown for the marketing charts.
     const [bySubject, byCountry] = await Promise.all([
-      this.prisma.lead.groupBy({ by: ['interestedSubject'], _count: { _all: true } }),
-      this.prisma.lead.groupBy({ by: ['country'], _count: { _all: true } }),
+      this.prisma.lead.groupBy({ by: ['interestedSubject'], where: scope, _count: { _all: true } }),
+      this.prisma.lead.groupBy({ by: ['country'], where: scope, _count: { _all: true } }),
     ]);
 
     return {
@@ -403,8 +488,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Admin/Coach: update (status / priority / coach assignment / note) ────────
   async update(id: string, dto: UpdateLeadDto, actor: Actor) {
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+    const lead = await this.assertAccess(id, actor);
 
     const data: any = {};
     if (dto.status) data.status = dto.status;
@@ -450,8 +534,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 6: evaluation (scores 1–10 → overall %) ────────────────────────────
   async evaluate(id: string, dto: EvaluateLeadDto, actor: Actor) {
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+    const lead = await this.assertAccess(id, actor);
 
     const values = Object.values(dto.scores || {}).filter(
       (v) => typeof v === 'number' && !isNaN(v),
@@ -486,9 +569,8 @@ export class LeadsService implements OnModuleInit {
   }
 
   // ── Step 7: recommendation engine (level + batch + best-fit teacher) ─────────
-  async getRecommendation(id: string) {
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+  async getRecommendation(id: string, user?: Actor) {
+    const lead = await this.assertAccess(id, user);
 
     const rec = this.recommendFromScore(lead.overallScore ?? null, lead);
     const teacher = await this.bestTeacher(lead.interestedSubject);
@@ -560,8 +642,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 8: teacher assignment (manual or auto) ─────────────────────────────
   async assignTeacher(id: string, dto: AssignTeacherLeadDto, actor: Actor) {
-    const lead = await this.prisma.lead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+    const lead = await this.assertAccess(id, actor);
 
     let teacherId = dto.teacherId;
     if (dto.auto || !teacherId) {
@@ -603,27 +684,62 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 9: schedule a trial (demo) class ───────────────────────────────────
   async scheduleTrial(leadId: string, dto: ScheduleTrialDto, actor: Actor) {
-    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
-    if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
+    const lead = await this.assertAccess(leadId, actor);
 
     const when = new Date(dto.scheduledAt);
     if (isNaN(when.getTime())) throw new BadRequestException('Invalid trial date/time.');
 
     const teacherId = dto.teacherId || lead.assignedTeacherId || null;
 
+    const durationMins = dto.durationMins ?? 30;
     const trial = await this.prisma.leadTrial.create({
       data: {
         leadId,
         teacherId,
         scheduledAt: when,
-        durationMins: dto.durationMins ?? 30,
+        durationMins,
         timeZone: dto.timeZone || lead.timeZone || null,
-        meetingProvider: dto.meetingProvider || null,
+        meetingProvider: dto.meetingProvider || 'Zoom',
         meetingLink: dto.meetingLink || null,
         notes: dto.notes || null,
         createdById: actor?.id || null,
       },
     });
+
+    /*
+     * A coach-scheduled trial gets its own Zoom room too. Without this the
+     * website booking had a link and a second trial arranged by the coach did
+     * not, which is the same class with the same family — the difference would
+     * only ever look like a bug. Skipped when the coach pasted their own link.
+     */
+    if (!dto.meetingLink) {
+      const zoom = await this.zoom.createTrialMeeting({
+        topic: `Trial — ${lead.studentFirstName} ${lead.studentLastName}`.trim(),
+        startAt: when,
+        durationMins,
+        timeZone: dto.timeZone || lead.timeZone || 'UTC',
+        agenda: lead.interestedSubject ? `Trial class: ${lead.interestedSubject}` : undefined,
+      });
+      if (zoom.ok && zoom.meeting) {
+        await this.prisma.leadTrial.update({
+          where: { id: trial.id },
+          data: {
+            meetingId: zoom.meeting.meetingId,
+            meetingLink: zoom.meeting.joinUrl,
+            meetingHostUrl: zoom.meeting.hostUrl,
+          },
+        });
+        trial.meetingId = zoom.meeting.meetingId;
+        trial.meetingLink = zoom.meeting.joinUrl;
+      } else {
+        await this.addActivity(
+          leadId,
+          'TRIAL_SCHEDULED',
+          `Zoom link could not be created (${zoom.reason ?? 'unknown'}). Add a meeting link manually.`,
+          actor,
+        );
+      }
+    }
 
     // Keep the teacher on the lead in sync when one was supplied here.
     await this.prisma.lead.update({
@@ -649,7 +765,8 @@ export class LeadsService implements OnModuleInit {
     return this.attachTrialNames([trial]).then((r) => r[0]);
   }
 
-  async listTrials(leadId: string) {
+  async listTrials(leadId: string, user?: Actor) {
+    await this.assertAccess(leadId, user);
     const trials = await this.prisma.leadTrial.findMany({
       where: { leadId },
       orderBy: { scheduledAt: 'desc' },
@@ -659,8 +776,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Update / reschedule a trial (meeting link, teacher, status) ─────────────
   async updateTrial(trialId: string, dto: UpdateTrialDto, actor: Actor) {
-    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
-    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+    const trial = await this.assertTrialAccess(trialId, actor);
 
     const data: any = {};
     let rescheduled = false;
@@ -731,8 +847,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 11: mark attendance ────────────────────────────────────────────────
   async markAttendance(trialId: string, dto: TrialAttendanceDto, actor: Actor) {
-    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
-    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+    const trial = await this.assertTrialAccess(trialId, actor);
 
     const present = dto.attendance === 'PRESENT';
     const updated = await this.prisma.leadTrial.update({
@@ -764,8 +879,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 12: teacher / parent feedback ──────────────────────────────────────
   async submitTrialFeedback(trialId: string, dto: TrialFeedbackDto, actor: Actor) {
-    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
-    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+    const trial = await this.assertTrialAccess(trialId, actor);
 
     const data: any = {};
     if (dto.side === 'teacher') {
@@ -797,8 +911,7 @@ export class LeadsService implements OnModuleInit {
 
   // ── Step 13: coach decision — ENROLL converts the lead into a student ───────
   async coachDecision(leadId: string, dto: CoachDecisionDto, actor: Actor) {
-    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
-    if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
+    const lead = await this.assertAccess(leadId, actor);
     if (lead.convertedStudentId) {
       throw new BadRequestException('This lead has already been converted to a student.');
     }
@@ -1021,8 +1134,8 @@ export class LeadsService implements OnModuleInit {
   }
 
   // ── Full funnel analytics (Step 15 dashboards) ──────────────────────────────
-  async getFunnel() {
-    const byStatus = await this.prisma.lead.groupBy({ by: ['status'], _count: { _all: true } });
+  async getFunnel(user?: Actor) {
+    const byStatus = await this.prisma.lead.groupBy({ by: ['status'], where: this.scopeFor(user), _count: { _all: true } });
     const statusCounts: Record<string, number> = {};
     byStatus.forEach((r) => (statusCounts[r.status] = r._count._all));
 
@@ -1108,9 +1221,8 @@ export class LeadsService implements OnModuleInit {
   }
 
   // Manual "send reminder now" trigger from the UI.
-  async sendReminderNow(trialId: string) {
-    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
-    if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
+  async sendReminderNow(trialId: string, user?: Actor) {
+    const trial = await this.assertTrialAccess(trialId, user);
     await this.sendTrialReminder(trial, 'soon');
     return { sent: true };
   }
