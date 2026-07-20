@@ -49,28 +49,40 @@ export class BillingService {
   ) {}
 
   // ── Document numbering ──────────────────────────────────────────────────────
+  /*
+   * The sequence is the highest number *numerically*, not the last one in
+   * lexical order.
+   *
+   * Ordering by the string breaks the moment two zero-padding widths coexist:
+   * "INV-2026-105" sorts above "INV-2026-000106", so the max never advances
+   * past the legacy row and every subsequent invoice is handed the same
+   * number — the second one in any batch dies on the unique index. Parsing the
+   * tail costs one small per-year scan and cannot be fooled by the format.
+   */
   private async nextNumber(
     prefix: 'INV' | 'RCPT',
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<string> {
     const year = new Date().getFullYear();
     const stem = `${prefix}-${year}-`;
-    if (prefix === 'INV') {
-      const latest = await tx.invoice.findFirst({
-        where: { number: { startsWith: stem } },
-        orderBy: { number: 'desc' },
-        select: { number: true },
-      });
-      const seq = latest ? Number(latest.number.slice(stem.length)) + 1 : 1;
-      return formatDocNumber(prefix, year, seq);
-    }
-    const latest = await tx.receipt.findFirst({
-      where: { number: { startsWith: stem } },
-      orderBy: { number: 'desc' },
-      select: { number: true },
-    });
-    const seq = latest ? Number(latest.number.slice(stem.length)) + 1 : 1;
-    return formatDocNumber(prefix, year, seq);
+
+    const rows =
+      prefix === 'INV'
+        ? await tx.invoice.findMany({
+            where: { number: { startsWith: stem } },
+            select: { number: true },
+          })
+        : await tx.receipt.findMany({
+            where: { number: { startsWith: stem } },
+            select: { number: true },
+          });
+
+    const highest = rows.reduce((max, r) => {
+      const seq = Number(r.number.slice(stem.length));
+      return Number.isFinite(seq) && seq > max ? seq : max;
+    }, 0);
+
+    return formatDocNumber(prefix, year, highest + 1);
   }
 
   // ── Listing ─────────────────────────────────────────────────────────────────
@@ -253,6 +265,67 @@ export class BillingService {
       await this.notifyIssued(invoice.id);
     }
     return invoice;
+  }
+
+  /**
+   * The first invoice for a student who has just been converted from a lead.
+   *
+   * Lives here rather than in the leads module so it goes through the same
+   * numbering, tax config and issue notification as every other invoice —
+   * a second INV-YYYY-NNN generator would eventually collide with this one.
+   *
+   * Returns null rather than throwing when there is no package to bill: a
+   * conversion must not fail because finance is not set up yet.
+   */
+  async createEnrolmentInvoice(input: {
+    studentId: string;
+    label: string;
+    amount: number;
+    dueInDays?: number;
+  }) {
+    if (!(input.amount > 0)) return null;
+
+    const cfg = await this.settings.getConfig();
+    const items: InvoiceItemInput[] = [
+      { type: FeeComponentType.COURSE, label: input.label, amount: round2(input.amount) },
+    ];
+    const totals = computeInvoiceTotals({
+      items,
+      taxEnabled: cfg.taxEnabled,
+      taxPct: cfg.taxPct,
+    });
+
+    const dueAt = new Date();
+    dueAt.setDate(dueAt.getDate() + (input.dueInDays ?? 7));
+
+    const number = await this.nextNumber('INV');
+    const invoice = await this.prisma.invoice.create({
+      data: {
+        number,
+        studentId: input.studentId,
+        amount: totals.total,
+        subtotal: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        taxAmount: totals.taxAmount,
+        currency: cfg.currency,
+        // SENT, not DRAFT: the family is told about it in the welcome email,
+        // so it has to be a real bill they can see in their portal.
+        status: InvoiceStatus.SENT,
+        issuedAt: new Date(),
+        dueAt,
+        notes: 'First invoice on enrolment',
+        items: { create: items.map((it) => ({ type: it.type, label: it.label, amount: it.amount })) },
+      },
+      select: { id: true, number: true, amount: true, currency: true, dueAt: true },
+    });
+
+    return {
+      id: invoice.id,
+      number: invoice.number,
+      amount: Number(invoice.amount),
+      currency: invoice.currency,
+      dueAt: invoice.dueAt,
+    };
   }
 
   /** Generate the recurring invoice for a fee assignment + advance its schedule. */

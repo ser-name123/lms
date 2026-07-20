@@ -21,6 +21,7 @@ import {
 } from '../generated/prisma/enums';
 import { LeadAvailabilityService } from './availability.service';
 import { ZoomService } from './zoom.service';
+import { BillingService } from '../finance/billing.service';
 import {
   AssignTeacherLeadDto,
   CoachDecisionDto,
@@ -57,6 +58,7 @@ export class LeadsService implements OnModuleInit {
     private readonly notifications: NotificationsService,
     private readonly availability: LeadAvailabilityService,
     private readonly zoom: ZoomService,
+    private readonly billing: BillingService,
   ) {}
 
   // ── Reminder sweep ──────────────────────────────────────────────────────────
@@ -1471,7 +1473,7 @@ export class LeadsService implements OnModuleInit {
     });
 
     if (dto.decision === 'ENROLL') {
-      return this.convert(lead, dto.courseCode, actor);
+      return this.convert(lead, dto.courseCode, actor, dto.packageId);
     }
 
     const status = dto.decision === 'REJECT' ? LeadStatus.REJECTED : LeadStatus.WAITING_PARENT_DECISION;
@@ -1502,7 +1504,43 @@ export class LeadsService implements OnModuleInit {
    * (parent+ahmed@example.com). Mail still lands in the same inbox, and the
    * family gets one email listing every account.
    */
-  private async convert(lead: any, courseCode: string | undefined, actor: Actor) {
+  /**
+   * Work out which package to bill.
+   *
+   * The coach can name one outright, but by default it is the package the
+   * family chose — either during the trial or afterwards on the info-form
+   * link. Falling back to the report means the coach does not have to
+   * re-enter something the family already told the teacher.
+   */
+  private async packageForConversion(leadId: string, packageId?: string) {
+    if (packageId) {
+      const chosen = await this.prisma.package.findUnique({ where: { id: packageId } });
+      if (!chosen) throw new BadRequestException('That package no longer exists.');
+      return chosen;
+    }
+
+    const [trial] = await this.prisma.leadTrial.findMany({
+      where: { leadId, preferredPackage: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      take: 1,
+      select: { preferredPackage: true },
+    });
+    if (!trial?.preferredPackage) return null;
+
+    // Matched by name because that is what the report stores — a package the
+    // academy has since renamed simply falls through to "no invoice yet",
+    // which the coach can see and fix, rather than billing the wrong thing.
+    return this.prisma.package.findFirst({
+      where: { name: trial.preferredPackage, active: true },
+    });
+  }
+
+  private async convert(
+    lead: any,
+    courseCode: string | undefined,
+    actor: Actor,
+    packageId?: string,
+  ) {
     const siblings: { firstName: string; lastName?: string }[] = Array.isArray(lead.siblings)
       ? lead.siblings
       : [];
@@ -1624,6 +1662,45 @@ export class LeadsService implements OnModuleInit {
       },
     });
 
+    /*
+     * First invoice, one per student — Invoice.studentId is singular and each
+     * child enrols on their own terms, so a shared family bill would have to
+     * pick one of them to hang off. The welcome email lists them all together.
+     *
+     * Raised after the transaction and tolerant of failure: a family whose
+     * accounts exist but whose invoice did not generate is recoverable in a
+     * click, whereas rolling the accounts back over a billing hiccup is not.
+     */
+    const pkg = await this.packageForConversion(lead.id, packageId).catch(() => null);
+    const invoices: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[] = [];
+    if (pkg) {
+      for (const student of created) {
+        const invoice = await this.billing
+          .createEnrolmentInvoice({
+            studentId: student.id,
+            label: `${pkg.name} — first month`,
+            amount: Number(pkg.price),
+          })
+          .catch(() => null);
+        if (invoice) invoices.push({ studentName: student.name, ...invoice });
+      }
+      if (invoices.length) {
+        await this.addActivity(
+          lead.id,
+          'INVOICED',
+          `First invoice raised for ${pkg.name} — ${invoices.map((i) => i.number).join(', ')}.`,
+          actor,
+        );
+      }
+    } else {
+      await this.addActivity(
+        lead.id,
+        'INVOICE_PENDING',
+        'No package was recorded, so no first invoice was raised. Raise one from Finance.',
+        actor,
+      );
+    }
+
     const studentCode = created[0].code;
     await this.addActivity(
       lead.id,
@@ -1635,7 +1712,7 @@ export class LeadsService implements OnModuleInit {
     );
 
     // Email the family their new login credentials + in-app alert to staff.
-    this.notifyConverted(lead, created, passwords).catch(() => undefined);
+    this.notifyConverted(lead, created, passwords, pkg, invoices).catch(() => undefined);
     this.notifications
       .createForRoles([Role.ADMIN, Role.ACADEMIC_COACH], {
         type: 'LEAD_CONVERTED',
@@ -1850,6 +1927,8 @@ export class LeadsService implements OnModuleInit {
     lead: any,
     students: { id: string; code: string; name: string; email: string }[],
     passwords: string[],
+    pkg?: { name: string; price: any; classesPerMonth: number } | null,
+    invoices?: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[],
   ) {
     const name = lead.parentName || `${lead.studentFirstName} ${lead.studentLastName}`;
     const block = students
@@ -1863,6 +1942,41 @@ export class LeadsService implements OnModuleInit {
       </table>`,
       )
       .join('');
+
+    const money = (amount: number, currency: string) =>
+      `${currency} ${amount.toFixed(2)}`;
+
+    const packageBlock = pkg
+      ? `
+      <h3 style="margin:22px 0 6px;font-size:15px;">Your package</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border-top:1px solid #e5e7eb;">
+        <tr><td style="padding:6px 0;color:#6b7280;">Package</td><td style="padding:6px 0;font-weight:700;">${pkg.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Classes each month</td><td style="padding:6px 0;font-weight:700;">${pkg.classesPerMonth}</td></tr>
+      </table>`
+      : '';
+
+    /*
+     * Only mention an invoice that actually exists. Telling a family their
+     * bill is attached when none was raised sends them looking for something
+     * that is not in their portal.
+     */
+    const invoiceBlock = invoices?.length
+      ? `
+      <h3 style="margin:22px 0 6px;font-size:15px;">Your first invoice</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border-top:1px solid #e5e7eb;">
+        ${invoices
+          .map(
+            (inv) => `<tr>
+              <td style="padding:6px 0;color:#6b7280;">${inv.studentName}</td>
+              <td style="padding:6px 0;font-weight:700;">${inv.number} — ${money(inv.amount, inv.currency)}${
+                inv.dueAt ? `, due ${inv.dueAt.toISOString().slice(0, 10)}` : ''
+              }</td>
+            </tr>`,
+          )
+          .join('')}
+      </table>
+      <p style="color:#6b7280;">The full invoice is in the student portal under Fees.</p>`
+      : '';
 
     const html = this.trialEmail(
       'Welcome to the Academy 🎉',
@@ -1881,7 +1995,9 @@ export class LeadsService implements OnModuleInit {
         students.length > 1
           ? '<p style="color:#6b7280;">Each child signs in with their own email above; all mail still reaches this inbox.</p>'
           : ''
-      }`,
+      }
+      ${packageBlock}
+      ${invoiceBlock}`,
     );
 
     await this.emails
@@ -1890,7 +2006,12 @@ export class LeadsService implements OnModuleInit {
         'Welcome — your student account is ready',
         students
           .map((s, i) => `${s.name}: ID ${s.code}, login ${s.email} / ${passwords[i]}`)
-          .join('\n') + '\nPlease change the password after first sign-in.',
+          .join('\n') +
+          '\nPlease change the password after first sign-in.' +
+          (pkg ? `\nPackage: ${pkg.name} (${pkg.classesPerMonth} classes a month).` : '') +
+          (invoices?.length
+            ? `\nFirst invoice: ${invoices.map((i) => `${i.number} ${money(i.amount, i.currency)}`).join(', ')}.`
+            : ''),
         undefined,
         html,
       )

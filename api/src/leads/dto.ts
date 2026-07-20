@@ -275,6 +275,11 @@ export class CoachDecisionDto {
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiPropertyOptional({ description: 'LmsCourse code to enrol into on conversion' })
   @IsOptional() @IsString() courseCode?: string;
+  @ApiPropertyOptional({
+    description:
+      'Package to bill the first invoice for. Defaults to the one the trial report captured.',
+  })
+  @IsOptional() @IsString() packageId?: string;
 }
 
 export class ListLeadsDto {

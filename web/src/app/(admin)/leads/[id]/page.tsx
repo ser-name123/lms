@@ -47,11 +47,13 @@ import {
   submitLeadTrialFeedback,
   sendLeadTrialReminder,
   requestTrialInfo,
+  fetchTrialOptions,
   leadCoachDecision,
   type Lead,
   type LeadActivity,
   type LeadRecommendation,
   type LeadTrial,
+  type TrialOptions,
 } from "@/lib/api";
 import {
   ALL_LEAD_STATUSES,
@@ -874,18 +876,36 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const converted = !!lead.convertedStudentId;
 
+  /*
+   * The package decides the first invoice. Left blank the server falls back to
+   * whatever the family chose — on the trial or afterwards on the info-form
+   * link — so the coach only touches this when overriding them.
+   */
+  const [packages, setPackages] = useState<TrialOptions["packages"]>([]);
+  const [packageId, setPackageId] = useState("");
+  useEffect(() => {
+    if (converted) return;
+    fetchTrialOptions().then((o) => setPackages(o.packages)).catch(() => undefined);
+  }, [converted]);
+
   const decide = async (decision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
     if (decision === "ENROLL") {
       const ok = await Swal.fire({
         title: "Convert to student?",
-        text: "This creates an active student account and emails login credentials to the family.",
+        text:
+          "This creates an active student account, raises the first invoice, and emails the family their login, package and invoice." +
+          (packageId ? "" : " No package selected — the one the family chose will be used, if there is one."),
         icon: "question", showCancelButton: true, confirmButtonText: "Yes, enrol", background: swalBg(),
       });
       if (!ok.isConfirmed) return;
     }
     setBusy(true);
     try {
-      await leadCoachDecision(lead.id, { decision, notes: notes || undefined });
+      await leadCoachDecision(lead.id, {
+        decision,
+        notes: notes || undefined,
+        ...(decision === "ENROLL" && packageId ? { packageId } : {}),
+      });
       Swal.fire({ toast: true, position: "top-end", icon: "success", title: decision === "ENROLL" ? "Converted to student 🎉" : "Decision recorded", showConfirmButton: false, timer: 2200 });
       onChange();
     } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() }); }
@@ -916,6 +936,21 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
           <h3 className="text-sm font-bold text-ink">Coach Decision</h3>
         </div>
         <p className="mb-4 text-xs text-ink-3">Record the outcome after the trial. Enrolling converts this lead into an active student and sends login credentials.</p>
+
+        <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Package to bill</label>
+        <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
+          className="mb-1.5 h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+          <option value="">Use the package the family chose</option>
+          {packages.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} — {p.classesPerMonth} classes/month
+            </option>
+          ))}
+        </select>
+        <p className="mb-4 text-[11px] text-ink-3">
+          The first invoice is raised from this, one per child, and goes out with the welcome
+          email. With no package on record none is raised and the timeline says so.
+        </p>
 
         <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Decision notes (optional)</label>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Summary of the decision…"

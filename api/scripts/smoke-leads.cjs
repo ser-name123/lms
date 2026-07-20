@@ -100,6 +100,9 @@ const isoDay = (offsetDays) =>
 
   const createdLeadIds = [];
   const createdUserEmails = [];
+  // Conversion now raises invoices, so the run owns finance rows too.
+  const createdInvoiceIds = [];
+  const createdPackageIds = [];
 
   try {
     // ── Availability ─────────────────────────────────────────────────────────
@@ -1030,6 +1033,28 @@ const isoDay = (offsetDays) =>
       JSON.stringify(familyRow.siblings),
     );
 
+    /*
+     * The package is deliberately NOT passed to the decision: the family
+     * chose it on the trial, and the coach should not have to re-enter what
+     * the teacher already recorded. This proves the fallback works.
+     */
+    const smokePkg = (
+      await db.query(
+        // Package has no updatedAt column — only createdAt.
+        `INSERT INTO "Package" (id,name,description,price,"classesPerMonth",active)
+         VALUES (gen_random_uuid(),$1,'smoke',40.00,8,true) RETURNING id, name, price`,
+        [`${MARKER}-package`],
+      )
+    ).rows[0];
+    createdPackageIds.push(smokePkg.id);
+    const familyTrial = (
+      await db.query(`SELECT id FROM "LeadTrial" WHERE "leadId"=$1 LIMIT 1`, [withSiblings.body.id])
+    ).rows[0];
+    await db.query(`UPDATE "LeadTrial" SET "preferredPackage"=$1 WHERE id=$2`, [
+      smokePkg.name,
+      familyTrial.id,
+    ]);
+
     const decided = await req(
       'POST',
       `/leads/${withSiblings.body.id}/decision`,
@@ -1069,9 +1094,68 @@ const isoDay = (offsetDays) =>
       realUsers.rows.length === emails.length,
       `${realUsers.rows.length} of ${emails.length} found`,
     );
+
+    // ── The first invoice ────────────────────────────────────────────────────
+    const studentIds = (converted.convertedStudents ?? []).map((s) => s.id);
+    const raised = (
+      await db.query(
+        `SELECT i.id, i.number, i.amount, i.status, i."studentId", i."dueAt",
+                (SELECT count(*) FROM "InvoiceItem" it WHERE it."invoiceId" = i.id) AS items
+           FROM "Invoice" i WHERE i."studentId" = ANY($1::text[]) ORDER BY i.number`,
+        [studentIds],
+      )
+    ).rows;
+    for (const r of raised) createdInvoiceIds.push(r.id);
+
+    check(
+      'converting raises the first invoice, one per child',
+      raised.length === studentIds.length,
+      `${raised.length} invoices for ${studentIds.length} students`,
+    );
+    check(
+      'it bills the package the family chose, without the coach re-entering it',
+      raised.length > 0 && raised.every((r) => Number(r.amount) === 40),
+      raised.map((r) => r.amount).join(', '),
+    );
+    check(
+      'it is SENT, not a draft — the welcome email tells the family it exists',
+      raised.length > 0 && raised.every((r) => r.status === 'SENT'),
+      raised.map((r) => r.status).join(', '),
+    );
+    check(
+      'each carries a line item and a due date',
+      raised.length > 0 && raised.every((r) => Number(r.items) === 1 && r.dueAt),
+    );
+    check(
+      'invoice numbers come from the finance sequence, not a second one',
+      raised.length > 0 &&
+        raised.every((r) => /^INV-\d{4}-\d+$/.test(r.number)) &&
+        new Set(raised.map((r) => r.number)).size === raised.length,
+      raised.map((r) => r.number).join(', '),
+    );
+
+    const invoicedNote = (
+      await db.query(
+        `SELECT message FROM "LeadActivity" WHERE "leadId"=$1 AND type='INVOICED'`,
+        [withSiblings.body.id],
+      )
+    ).rows[0];
+    check('and the coach sees it on the timeline', Boolean(invoicedNote), 'no INVOICED activity');
   } finally {
     // ── Cleanup ──────────────────────────────────────────────────────────────
     console.log('\n── Cleanup ──');
+
+    /*
+     * Invoices before students: Invoice.studentId is SetNull on delete, so
+     * removing the students first would leave orphaned invoices with no owner
+     * and nothing tying them back to this run.
+     */
+    if (createdInvoiceIds.length) {
+      await db.query(`DELETE FROM "Invoice" WHERE id = ANY($1::text[])`, [createdInvoiceIds]);
+    }
+    if (createdPackageIds.length) {
+      await db.query(`DELETE FROM "Package" WHERE id = ANY($1::text[])`, [createdPackageIds]);
+    }
 
     // Students created by the conversion, and their profiles.
     if (createdUserEmails.length) {
@@ -1138,13 +1222,21 @@ const isoDay = (offsetDays) =>
                  WHERE n.link LIKE '/leads/%'
                    AND NOT EXISTS (
                      SELECT 1 FROM "Lead" l WHERE n.link = '/leads/' || l.id
-                   )) AS orphan_notifications`,
+                   )) AS orphan_notifications,
+              /*
+               * Counted by name, not by the id list the delete used — a check
+               * that shares the delete's predicate can only ever agree with it.
+               */
+              (SELECT count(*)::int FROM "Package" WHERE name ILIKE $1) AS packages,
+              (SELECT count(*)::int FROM "Invoice"
+                 WHERE notes = 'First invoice on enrolment' AND "studentId" IS NULL) AS orphan_invoices`,
       [`${MARKER}%`],
     );
     console.log(
       `Cleanup: ${rows[0].leads} stray leads · ${rows[0].users} stray users · ` +
         `${rows[0].orphan_trials} orphaned trials · ` +
-        `${rows[0].orphan_notifications} orphaned notifications remaining`,
+        `${rows[0].orphan_notifications} orphaned notifications · ` +
+        `${rows[0].packages} stray packages · ${rows[0].orphan_invoices} orphaned invoices remaining`,
     );
     await db.end();
   }
