@@ -756,6 +756,184 @@ const isoDay = (offsetDays) =>
       );
     }
 
+    // ── Missing information, collected from the family afterwards ────────────
+    console.log('\n── Missing-info form ──');
+    {
+      /*
+       * Deliberately the trial whose report is already submitted and locked.
+       * The four preference fields are exactly the ones that arrive late, so
+       * the family's link has to write through that lock — while the teacher
+       * still cannot touch anything.
+       */
+      const infoTrialId = originalTrial.id;
+
+      const issued = await req(
+        'POST',
+        `/leads/trials/${infoTrialId}/info-request`,
+        ownerToken,
+        undefined,
+        201,
+      );
+      check('the coach can send the family a link', issued.ok, `status ${issued.status}`);
+      check(
+        'the link is returned once so it can also go over WhatsApp',
+        issued.ok && typeof issued.body.url === 'string' && issued.body.url.includes('/trial-details/'),
+        issued.body?.url,
+      );
+
+      const infoToken = String(issued.body.url).split('/trial-details/')[1];
+      const stored = (
+        await db.query(
+          `SELECT "infoTokenHash", "infoRequestedAt", "infoSubmittedAt" FROM "LeadTrial" WHERE id=$1`,
+          [infoTrialId],
+        )
+      ).rows[0];
+      const expectedHash = require('crypto').createHash('sha256').update(infoToken).digest('hex');
+      check(
+        'only the hash is stored — a leaked database hands out no working links',
+        stored.infoTokenHash === expectedHash && stored.infoTokenHash !== infoToken,
+      );
+      check('and the request is stamped', Boolean(stored.infoRequestedAt));
+
+      const strangerIssues = await req(
+        'POST',
+        `/leads/trials/${infoTrialId}/info-request`,
+        strangerToken,
+        undefined,
+        403,
+      );
+      check('another coach cannot issue one', strangerIssues.ok, `status ${strangerIssues.status}`);
+
+      // ── The public half ──
+      const open = await req('GET', `/leads/info-form/${infoToken}`, null);
+      check('the family can open the link without logging in', open.ok, `status ${open.status}`);
+      check(
+        'it shows what to fill in and nothing more',
+        open.ok &&
+          open.body.studentName &&
+          Array.isArray(open.body.packages) &&
+          !('email' in open.body) &&
+          !('mobile' in open.body) &&
+          !('assessedLevel' in open.body),
+        'the public form leaks more than it should',
+      );
+
+      const badToken = await req(
+        'GET',
+        `/leads/info-form/${'z'.repeat(43)}`,
+        null,
+        undefined,
+        404,
+      );
+      check('a guessed token opens nothing', badToken.ok, `status ${badToken.status}`);
+
+      const empty = await req('POST', `/leads/info-form/${infoToken}`, null, {}, 400);
+      check('an empty submission is refused', empty.ok, `status ${empty.status}`);
+
+      const startDate = isoDay(21);
+      const sent = await req(
+        'POST',
+        `/leads/info-form/${infoToken}`,
+        null,
+        {
+          preferredPackage: 'Smoke package choice',
+          preferredDays: ['Tuesday', 'Thursday'],
+          preferredTime: '18:00',
+          preferredStartDate: startDate,
+        },
+        201,
+      );
+      check('the family can submit their preferences', sent.ok, `status ${sent.status}`);
+
+      const afterSubmit = (
+        await db.query(
+          `SELECT "preferredPackage", "preferredDays", "preferredTime", "preferredStartDate",
+                  "infoSubmittedAt", "infoTokenHash"
+             FROM "LeadTrial" WHERE id=$1`,
+          [infoTrialId],
+        )
+      ).rows[0];
+      check(
+        'the answers land on the trial record itself',
+        afterSubmit.preferredPackage === 'Smoke package choice' &&
+          afterSubmit.preferredDays.includes('Thursday') &&
+          afterSubmit.preferredTime === '18:00' &&
+          afterSubmit.preferredStartDate !== null,
+        JSON.stringify(afterSubmit),
+      );
+      check('and the submission is stamped', Boolean(afterSubmit.infoSubmittedAt));
+      check(
+        'the link is spent once used, not reusable forever',
+        afterSubmit.infoTokenHash === null,
+      );
+
+      const reuse = await req(
+        'GET',
+        `/leads/info-form/${infoToken}`,
+        null,
+        undefined,
+        404,
+      );
+      check('the same link cannot be opened again', reuse.ok, `status ${reuse.status}`);
+
+      let infoNotice = 0;
+      for (let i = 0; i < 10 && !infoNotice; i++) {
+        infoNotice = Number(
+          (
+            await db.query(
+              `SELECT count(*) FROM "Notification"
+                WHERE "userId" = $1 AND type = 'TRIAL_INFO_RECEIVED' AND link = $2`,
+              [ownerId, `/leads/${first.body.id}`],
+            )
+          ).rows[0].count,
+        );
+        if (!infoNotice) await new Promise((r) => setTimeout(r, 300));
+      }
+      check('the coach is told the details came in', infoNotice === 1, `${infoNotice} notifications`);
+
+      // An expired link is a different answer from an invalid one.
+      const reissued = await req(
+        'POST',
+        `/leads/trials/${infoTrialId}/info-request`,
+        ownerToken,
+        undefined,
+        201,
+      );
+      const freshToken = String(reissued.body.url).split('/trial-details/')[1];
+      await db.query(
+        `UPDATE "LeadTrial" SET "infoTokenExpiresAt" = now() - interval '1 day' WHERE id=$1`,
+        [infoTrialId],
+      );
+      const expired = await req('GET', `/leads/info-form/${freshToken}`, null, undefined, 400);
+      check(
+        'an expired link says so rather than pretending it never existed',
+        expired.ok && /expired/i.test(JSON.stringify(expired.body)),
+        `status ${expired.status}`,
+      );
+
+      if (teacherRows.length >= 2) {
+        const teacherToken = token(teacherRows[0].userId, 'TEACHER', teacherRows[0].email);
+        const stillLocked = await req(
+          'PATCH',
+          `/leads/trials/${infoTrialId}/report`,
+          teacherToken,
+          { teacherFeedback: 'after the fact' },
+          400,
+        );
+        check(
+          'the family’s answers get through, but the report stays shut to the teacher',
+          stillLocked.ok,
+          `status ${stillLocked.status}`,
+        );
+      }
+
+      const trialsOut = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
+      check(
+        'no trial response ever carries the token hash',
+        trialsOut.ok && trialsOut.body.every((t) => !('infoTokenHash' in t)),
+      );
+    }
+
     // ── Siblings become separate students ────────────────────────────────────
     console.log('\n── Siblings & conversion ──');
     const familySlot = slotList.find((s) => !usedSlots.includes(s));

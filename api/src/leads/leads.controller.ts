@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser, Public, Roles, type AuthUser } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
@@ -23,6 +24,7 @@ import {
   ScheduleTrialDto,
   TrialAttendanceDto,
   TrialFeedbackDto,
+  TrialInfoFormDto,
   TrialReportDto,
   UpdateLeadDto,
   UpdateTrialDto,
@@ -154,6 +156,35 @@ export class LeadsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.submitTrialReport(trialId, dto, actor(user));
+  }
+
+  @Post('trials/:trialId/info-request')
+  @ApiOperation({
+    summary: 'Send the family a link to complete the details the trial did not capture',
+  })
+  requestInfo(@Param('trialId') trialId: string, @CurrentUser() user: AuthUser) {
+    return this.service.requestMissingInfo(trialId, actor(user));
+  }
+
+  /*
+   * The two public halves of that link. Rate limited well below the global
+   * 100/min: nobody legitimately opens this more than a handful of times, and
+   * the only thing an attacker can do with the endpoint is guess tokens.
+   */
+  @Get('info-form/:token')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Public: what the family is being asked to fill in' })
+  infoForm(@Param('token') token: string) {
+    return this.service.getInfoForm(token);
+  }
+
+  @Post('info-form/:token')
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Public: the family submits their preferences' })
+  submitInfoForm(@Param('token') token: string, @Body() dto: TrialInfoFormDto) {
+    return this.service.submitInfoForm(token, dto);
   }
 
   @Post('trials/:trialId/reminder')

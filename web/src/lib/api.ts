@@ -2341,6 +2341,11 @@ export interface LeadTrial {
   /** Null while the report is a draft. */
   reportSubmittedAt: string | null;
 
+  // ── Missing-information form the coach can send the family ──
+  // The token itself is never returned: only its hash is stored.
+  infoRequestedAt: string | null;
+  infoSubmittedAt: string | null;
+
   // Present on the teacher "my trials" view and the report view — the booking
   // the teacher checks the family's answers against.
   lead?: {
@@ -2473,6 +2478,51 @@ export const saveTrialReport = (trialId: string, dto: TrialReportInput) =>
 /** Completes the trial, moves the lead on and alerts the assigned coach. */
 export const submitTrialReport = (trialId: string, dto: TrialReportInput) =>
   api<LeadTrial>(`/leads/trials/${trialId}/report/submit`, {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+// ─── Missing-information form (coach issues, family fills in) ────────────────
+
+export interface TrialInfoRequest {
+  /** Returned once, at issue — only its hash is stored, so it cannot be fetched again. */
+  url: string;
+  expiresAt: string;
+  sentTo: string;
+}
+
+export interface TrialInfoForm {
+  studentName: string;
+  subject: string | null;
+  trialDate: string;
+  alreadySubmitted: boolean;
+  current: {
+    preferredPackage: string | null;
+    preferredDays: string[];
+    preferredTime: string | null;
+    preferredStartDate: string | null;
+  };
+  packages: { id: string; name: string; price: number; classesPerMonth: number }[];
+  weekdays: string[];
+}
+
+export const requestTrialInfo = (trialId: string) =>
+  api<TrialInfoRequest>(`/leads/trials/${trialId}/info-request`, { method: "POST" });
+
+/** Public — reached with the token from the emailed link, not a login. */
+export const fetchTrialInfoForm = (token: string) =>
+  api<TrialInfoForm>(`/leads/info-form/${encodeURIComponent(token)}`);
+
+export const submitTrialInfoForm = (
+  token: string,
+  dto: {
+    preferredPackage?: string;
+    preferredDays?: string[];
+    preferredTime?: string;
+    preferredStartDate?: string;
+  },
+) =>
+  api<{ ok: boolean; message: string }>(`/leads/info-form/${encodeURIComponent(token)}`, {
     method: "POST",
     body: JSON.stringify(dto),
   });

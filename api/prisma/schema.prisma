@@ -1587,6 +1587,19 @@ model LeadTrial {
   // Null while the report is still a draft; stamped once the teacher submits.
   reportSubmittedAt   DateTime?
 
+  // ── Missing-information form ──────────────────────────────────────────────
+  // Families often will not settle on a package or a start date during the
+  // trial itself. The coach sends them a link afterwards and their answers
+  // land straight back on this row.
+  //
+  // Only the SHA-256 of the token is kept: a leaked database should not hand
+  // out working links. The plaintext is shown to the coach once, at issue.
+  infoTokenHash      String?
+  infoTokenExpiresAt DateTime?
+  infoRequestedAt    DateTime?
+  infoRequestedById  String?
+  infoSubmittedAt    DateTime?
+
   notes       String?
   createdById String?
   createdAt   DateTime @default(now())

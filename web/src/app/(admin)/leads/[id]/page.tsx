@@ -24,6 +24,7 @@ import {
   UserPlus,
   Plus,
   BadgeCheck,
+  Link as LinkIcon,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -45,6 +46,7 @@ import {
   markLeadTrialAttendance,
   submitLeadTrialFeedback,
   sendLeadTrialReminder,
+  requestTrialInfo,
   leadCoachDecision,
   type Lead,
   type LeadActivity,
@@ -645,6 +647,8 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
           )}
         </div>
 
+        <MissingInfoRow trial={trial} onChange={onChange} />
+
         {/*
           * The teacher's report, once filed. Read-only here: the coach's
           * enrolment decision rests on it, so it must not change under them —
@@ -673,6 +677,90 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/*
+ * Chasing the four details a trial often cannot pin down: the package, the
+ * days, the time and the start date. Rather than the coach phoning and typing
+ * them in second-hand, the family gets a link and their answers land straight
+ * on the trial record.
+ *
+ * The URL is shown once, here, because only its hash is stored — a leaked
+ * database should not hand out working links. Sending again mints a new one
+ * and kills the old, which the confirmation says out loud.
+ */
+function MissingInfoRow({ trial, onChange }: { trial: LeadTrial; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const missing = [
+    !trial.preferredPackage && "package",
+    !trial.preferredDays?.length && "days",
+    !trial.preferredTime && "time",
+    !trial.preferredStartDate && "start date",
+  ].filter(Boolean) as string[];
+
+  // Nothing to chase and nothing sent — stay out of the way.
+  if (!missing.length && !trial.infoRequestedAt) return null;
+
+  const send = async () => {
+    if (trial.infoRequestedAt && !trial.infoSubmittedAt) {
+      const { isConfirmed } = await Swal.fire({
+        title: "Send a new link?",
+        text: "The link already sent will stop working.",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonText: "Send new link",
+        background: swalBg(),
+      });
+      if (!isConfirmed) return;
+    }
+    setBusy(true);
+    try {
+      const res = await requestTrialInfo(trial.id);
+      await Swal.fire({
+        title: "Link sent",
+        html:
+          `<p style="font-size:13px">Emailed to <b>${res.sentTo}</b>. Copy it now if you also want to send it on WhatsApp — it is not stored and cannot be shown again.</p>` +
+          `<input readonly value="${res.url}" style="width:100%;margin-top:10px;padding:8px;font-size:11px;border:1px solid #d1d5db;border-radius:8px" onclick="this.select()" />`,
+        icon: "success",
+        background: swalBg(),
+      });
+      onChange();
+    } catch (e) {
+      Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-hairline px-3 py-2">
+      <p className="text-[11px] font-semibold text-ink-3">
+        {trial.infoSubmittedAt ? (
+          <>
+            The family completed their details on{" "}
+            {new Date(trial.infoSubmittedAt).toLocaleDateString()}.
+          </>
+        ) : missing.length ? (
+          <>Still missing: {missing.join(", ")}.</>
+        ) : (
+          <>All details are in.</>
+        )}
+        {trial.infoRequestedAt && !trial.infoSubmittedAt && (
+          <> Link sent {new Date(trial.infoRequestedAt).toLocaleDateString()}, not returned yet.</>
+        )}
+      </p>
+      {missing.length > 0 && (
+        <button
+          onClick={send}
+          disabled={busy}
+          className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-[11px] font-bold text-ink-2 hover:border-accent hover:text-accent disabled:opacity-50"
+        >
+          <LinkIcon className="size-3.5" />
+          {trial.infoRequestedAt ? "Send again" : "Ask the family"}
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -235,6 +235,24 @@ export class TrialReportDto {
   @ApiPropertyOptional() @IsOptional() @IsString() reportNotes?: string;
 }
 
+/*
+ * What the family fills in on the link the coach sends them after the trial.
+ *
+ * Only the four preference fields — this form is reached with a token, not a
+ * login, so it can never touch the assessment, the schedule or anything else
+ * on the record.
+ */
+export class TrialInfoFormDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() preferredPackage?: string;
+  @ApiPropertyOptional({ enum: WEEKDAY_OPTIONS, isArray: true })
+  @IsOptional() @IsArray() @IsIn(WEEKDAY_OPTIONS as unknown as string[], { each: true })
+  preferredDays?: string[];
+  @ApiPropertyOptional({ description: 'HH:mm' })
+  @IsOptional() @IsString() preferredTime?: string;
+  @ApiPropertyOptional({ description: 'YYYY-MM-DD' })
+  @IsOptional() @IsString() preferredStartDate?: string;
+}
+
 // Step 13 — coach's final decision; ENROLL converts the lead into a student.
 export class CoachDecisionDto {
   @ApiProperty({ enum: ['ENROLL', 'REJECT', 'FOLLOW_UP'] })

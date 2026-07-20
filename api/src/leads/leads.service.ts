@@ -6,6 +6,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
@@ -29,6 +30,7 @@ import {
   ScheduleTrialDto,
   TrialAttendanceDto,
   TrialFeedbackDto,
+  TrialInfoFormDto,
   TrialReportDto,
   TRIAL_LEVEL_OPTIONS,
   UpdateLeadDto,
@@ -1139,6 +1141,226 @@ export class LeadsService implements OnModuleInit {
     return data;
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // Step 14b — missing information, collected from the family afterwards
+  //
+  // Families routinely will not settle on a package or a start date while the
+  // trial is running. Rather than the coach chasing it by phone and typing it
+  // in themselves, they send a link and the answers land on the trial record.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  private static readonly INFO_LINK_DAYS = 14;
+
+  private hashToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Issue (or re-issue) the link and email it to the family.
+   *
+   * The plaintext token is returned exactly once, here, so the coach can also
+   * send it over WhatsApp. It is not recoverable afterwards — only its hash is
+   * stored — so re-issuing is the way to get another, and that invalidates the
+   * previous link.
+   */
+  async requestMissingInfo(trialId: string, actor: Actor) {
+    const trial = await this.assertTrialAccess(trialId, actor);
+    if (trial.status === 'CANCELLED') {
+      throw new BadRequestException('This trial was cancelled.');
+    }
+
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: trial.leadId },
+      select: { studentFirstName: true, studentLastName: true, email: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(
+      Date.now() + LeadsService.INFO_LINK_DAYS * 24 * 60 * 60 * 1000,
+    );
+
+    await this.prisma.leadTrial.update({
+      where: { id: trialId },
+      data: {
+        infoTokenHash: this.hashToken(token),
+        infoTokenExpiresAt: expiresAt,
+        infoRequestedAt: new Date(),
+        infoRequestedById: actor?.id || null,
+        // Re-issuing reopens the form: the family may have submitted once and
+        // then been asked for something they left blank.
+        infoSubmittedAt: null,
+      },
+    });
+
+    const base = process.env.APP_URL ?? 'http://localhost:3000';
+    const url = `${base}/trial-details/${token}`;
+
+    await this.sendInfoRequestEmail(lead, url, expiresAt).catch(() => undefined);
+    await this.addActivity(
+      trial.leadId,
+      'INFO_REQUESTED',
+      `Sent ${lead.email} a link to complete their preferences.`,
+      actor,
+    );
+
+    return { url, expiresAt: expiresAt.toISOString(), sentTo: lead.email };
+  }
+
+  /** Resolve a token to a trial, or say precisely why it will not open. */
+  private async trialForToken(token: string) {
+    if (!token || token.length < 20) throw new NotFoundException('This link is not valid.');
+
+    const trial = await this.prisma.leadTrial.findFirst({
+      where: { infoTokenHash: this.hashToken(token) },
+      include: {
+        lead: {
+          select: { studentFirstName: true, studentLastName: true, interestedSubject: true },
+        },
+      },
+    });
+    if (!trial) throw new NotFoundException('This link is not valid.');
+    if (trial.infoTokenExpiresAt && trial.infoTokenExpiresAt < new Date()) {
+      throw new BadRequestException(
+        'This link has expired. Ask your academic coach to send a new one.',
+      );
+    }
+    return trial;
+  }
+
+  /**
+   * What the public form may see.
+   *
+   * Deliberately thin: a first name to address them by, the subject, and the
+   * choices they are picking from. Anyone holding the link gets exactly this —
+   * no contact details, no assessment, no pipeline.
+   */
+  async getInfoForm(token: string) {
+    const trial = await this.trialForToken(token);
+    const options = await this.trialOptions();
+
+    return {
+      studentName: `${trial.lead.studentFirstName} ${trial.lead.studentLastName}`.trim(),
+      subject: trial.lead.interestedSubject,
+      trialDate: trial.scheduledAt.toISOString(),
+      alreadySubmitted: Boolean(trial.infoSubmittedAt),
+      current: {
+        preferredPackage: trial.preferredPackage,
+        preferredDays: trial.preferredDays,
+        preferredTime: trial.preferredTime,
+        preferredStartDate: trial.preferredStartDate?.toISOString().slice(0, 10) ?? null,
+      },
+      packages: options.packages,
+      weekdays: options.weekdays,
+    };
+  }
+
+  /** The family's answers, straight onto the trial record. */
+  async submitInfoForm(token: string, dto: TrialInfoFormDto) {
+    const trial = await this.trialForToken(token);
+
+    const data: any = {};
+    if (dto.preferredPackage !== undefined) data.preferredPackage = dto.preferredPackage || null;
+    if (dto.preferredDays !== undefined) data.preferredDays = dto.preferredDays;
+    if (dto.preferredTime !== undefined) data.preferredTime = dto.preferredTime || null;
+    if (dto.preferredStartDate !== undefined) {
+      data.preferredStartDate = this.parseDate(dto.preferredStartDate, 'preferred start date');
+    }
+    if (!Object.keys(data).length) {
+      throw new BadRequestException('Fill in at least one of the four details.');
+    }
+
+    /*
+     * This writes to a submitted report, which is otherwise locked. That is
+     * the point: the report is locked so the *teacher's assessment* cannot
+     * change under the coach, but these four fields are the family's own
+     * preference and the whole reason the link exists is that they were not
+     * known at the time. Nothing else on the row is reachable from here.
+     */
+    const updated = await this.prisma.leadTrial.update({
+      where: { id: trial.id },
+      data: {
+        ...data,
+        infoSubmittedAt: new Date(),
+        // One submission per link. Re-issuing is how a coach reopens it.
+        infoTokenHash: null,
+        infoTokenExpiresAt: null,
+      },
+    });
+
+    // Keep the lead in step, the same way the teacher's report does.
+    const leadPatch: any = {};
+    if (updated.preferredDays.length) leadPatch.preferredDays = updated.preferredDays;
+    if (updated.preferredTime) leadPatch.preferredTimeSlots = [updated.preferredTime];
+    if (Object.keys(leadPatch).length) {
+      await this.prisma.lead.update({ where: { id: trial.leadId }, data: leadPatch });
+    }
+
+    const filled = [
+      updated.preferredPackage ? `package ${updated.preferredPackage}` : null,
+      updated.preferredDays.length ? `days ${updated.preferredDays.join(', ')}` : null,
+      updated.preferredTime ? `time ${updated.preferredTime}` : null,
+      updated.preferredStartDate
+        ? `start ${updated.preferredStartDate.toISOString().slice(0, 10)}`
+        : null,
+    ].filter(Boolean);
+    await this.addActivity(
+      trial.leadId,
+      'INFO_RECEIVED',
+      `The family completed their preferences — ${filled.join(' · ')}.`,
+      { name: 'The family' },
+    );
+
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: trial.leadId },
+      select: { leadNumber: true, studentFirstName: true, studentLastName: true, assignedCoachId: true },
+    });
+    if (lead?.assignedCoachId) {
+      this.notifications
+        .createFor(lead.assignedCoachId, {
+          type: 'TRIAL_INFO_RECEIVED',
+          title: 'Trial details completed',
+          body: `${lead.studentFirstName} ${lead.studentLastName} (${lead.leadNumber}) filled in their remaining preferences.`,
+          link: `/leads/${trial.leadId}`,
+        })
+        .catch(() => undefined);
+    }
+
+    return { ok: true, message: 'Thank you — your details have reached your academic coach.' };
+  }
+
+  private async sendInfoRequestEmail(
+    lead: { studentFirstName: string; studentLastName: string; email: string },
+    url: string,
+    expiresAt: Date,
+  ) {
+    const name = `${lead.studentFirstName} ${lead.studentLastName}`.trim();
+    const html = `
+      <div style="font-family:'Segoe UI',Tahoma,sans-serif;background:#f4f6f8;padding:40px 20px;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e1e4e8;">
+          <div style="background:#133C55;padding:26px;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800;">A few details to finish</h1>
+          </div>
+          <div style="padding:28px;color:#1f2937;font-size:14px;line-height:1.7;">
+            <p>Assalamu alaikum,</p>
+            <p>Thank you for attending the trial class for <strong>${name}</strong>. To set up the regular schedule we still need four things: the package you would like, your preferred days and time, and when you would like to start.</p>
+            <p style="text-align:center;margin:26px 0;">
+              <a href="${url}" style="background:#133C55;color:#fff;text-decoration:none;padding:12px 26px;border-radius:10px;font-weight:700;display:inline-block;">Complete my details</a>
+            </p>
+            <p style="color:#6b7280;font-size:12px;">This link is personal to you and stops working on ${expiresAt.toISOString().slice(0, 10)}. If it expires, your academic coach can send a new one.</p>
+          </div>
+        </div>
+      </div>`;
+
+    await this.emails.sendMail(
+      lead.email,
+      'Please complete your class preferences',
+      `Complete your class preferences for ${name}: ${url}`,
+      undefined,
+      html,
+    );
+  }
+
   private parseDate(value: string | undefined, label: string): Date | null {
     if (!value) return null;
     const d = new Date(value);
@@ -1700,11 +1922,19 @@ export class LeadsService implements OnModuleInit {
     const tMap = new Map(teachers.map((t) => [t.id, `${t.user.firstName} ${t.user.lastName}`]));
     const lMap = new Map(leads.map((l) => [l.id, l]));
 
-    return trials.map((t) => ({
-      ...t,
-      teacherName: t.teacherId ? tMap.get(t.teacherId) || null : null,
-      ...(withLead ? { lead: lMap.get(t.leadId) || null } : {}),
-    }));
+    return trials.map((t) => {
+      /*
+       * The info-form token hash never leaves the server. It is only a hash,
+       * but it is the one field on this row that exists to be secret, and
+       * every trial response in the app goes through here.
+       */
+      const { infoTokenHash: _hash, ...rest } = t;
+      return {
+        ...rest,
+        teacherName: t.teacherId ? tMap.get(t.teacherId) || null : null,
+        ...(withLead ? { lead: lMap.get(t.leadId) || null } : {}),
+      };
+    });
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
