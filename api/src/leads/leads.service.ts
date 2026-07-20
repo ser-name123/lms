@@ -17,6 +17,8 @@ import {
   CourseStatus,
   EnrollmentStatus,
 } from '../generated/prisma/enums';
+import { LeadAvailabilityService } from './availability.service';
+import { ZoomService } from './zoom.service';
 import {
   AssignTeacherLeadDto,
   CoachDecisionDto,
@@ -32,12 +34,17 @@ import {
 
 type Actor = { id?: string; name?: string } | undefined;
 
+/** Points at the coach who received the most recent lead. See nextCoachInRotation. */
+const COACH_ROTATION_KEY = 'LEAD_COACH_ROTATION_LAST';
+
 @Injectable()
 export class LeadsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emails: EmailsService,
     private readonly notifications: NotificationsService,
+    private readonly availability: LeadAvailabilityService,
+    private readonly zoom: ZoomService,
   ) {}
 
   // ── Reminder sweep ──────────────────────────────────────────────────────────
@@ -49,146 +56,67 @@ export class LeadsService implements OnModuleInit {
     setInterval(() => this.sweepReminders().catch(() => undefined), FIVE_MIN);
   }
 
-  // ── Public: duplicate check for the "you already have a trial request" popup ─
-  async checkDuplicate(email?: string, mobile?: string) {
-    const or: any[] = [];
-    if (email) or.push({ email: email.toLowerCase().trim() });
-    if (mobile) or.push({ mobile: mobile.trim() });
-    if (!or.length) return { exists: false };
-
-    const existing = await this.prisma.lead.findFirst({
-      where: { OR: or },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, leadNumber: true, status: true, createdAt: true },
-    });
-    return { exists: !!existing, lead: existing };
-  }
-
-  // Leads awaiting email-OTP verification. The Lead row is only created once the
-  // code is confirmed (mirrors the student/teacher registration OTP flow).
-  private otpPending = new Map<
-    string,
-    { otp: string; expiresAt: Date; attempts: number; dto: CreateLeadDto; ip?: string }
-  >();
-
-  private newOtp() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
-
-  // ── Public: step 1 — submit the form, receive an email OTP ──────────────────
-  async requestOtp(dto: CreateLeadDto, meta: { ip?: string }) {
-    const email = dto.email.toLowerCase().trim();
-    const otp = this.newOtp();
-    this.otpPending.set(email, {
-      otp,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      attempts: 0,
-      dto,
-      ip: meta.ip,
-    });
-
-    this.sendOtpEmail(
-      email,
-      dto.parentName || `${dto.studentFirstName} ${dto.studentLastName}`.trim(),
-      otp,
-    ).catch(() => undefined);
-
-    return {
-      otpRequired: true,
-      email,
-      otp, // shown to the client for now; email is the eventual channel
-      message: 'A verification code has been sent to your email. Enter it to finish.',
-    };
-  }
-
-  // ── Public: step 2 — verify the OTP, then create the lead ───────────────────
-  async verifyOtp(rawEmail: string, code: string) {
-    const email = (rawEmail || '').toLowerCase().trim();
-    const record = this.otpPending.get(email);
-    if (!record) {
-      throw new BadRequestException(
-        'No pending request for this email, or the code expired. Please submit the form again.',
-      );
-    }
-    if (record.expiresAt < new Date()) {
-      this.otpPending.delete(email);
-      throw new BadRequestException('Verification code has expired. Please submit the form again.');
-    }
-    if (record.otp !== code) {
-      record.attempts += 1;
-      if (record.attempts >= 5) {
-        this.otpPending.delete(email);
-        throw new BadRequestException('Too many incorrect attempts. Please submit the form again.');
-      }
-      throw new BadRequestException('Invalid verification code.');
-    }
-
-    this.otpPending.delete(email);
-    return this.persist(record.dto, { ip: record.ip });
-  }
-
-  private async sendOtpEmail(to: string, name: string, otp: string) {
-    const html = `
-      <div style="font-family:'Segoe UI',Tahoma,sans-serif;background:#f4f6f8;padding:40px 20px;">
-        <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e1e4e8;">
-          <div style="background:#133C55;padding:26px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800;">Verify your trial request</h1>
-          </div>
-          <div style="padding:28px;color:#1f2937;font-size:14px;line-height:1.7;">
-            <p>Dear ${name || 'there'},</p>
-            <p>Use the code below to confirm your free-trial request. It is valid for <b>10 minutes</b>.</p>
-            <div style="background:#f0f3ff;border:1px dashed #386FA4;border-radius:12px;padding:16px;text-align:center;margin:16px 0;">
-              <span style="font-family:'Courier New',monospace;font-size:32px;font-weight:900;letter-spacing:8px;color:#133C55;">${otp}</span>
-            </div>
-            <p style="color:#6b7280;">If you did not request this, you can ignore this email.</p>
-          </div>
-        </div>
-      </div>`;
-    await this.emails.sendMail(
-      to,
-      'Your trial request verification code',
-      `Your verification code is: ${otp} (valid for 10 minutes)`,
-      undefined,
-      html,
-    );
-  }
-
-  // Actual Lead creation, run only after the email OTP is confirmed.
-  private async persist(dto: CreateLeadDto, meta: { ip?: string }) {
+  /*
+   * ── Public: book a trial ──────────────────────────────────────────────────
+   *
+   * One step. The visitor picks a date and a 30-minute slot from the merged
+   * teacher availability, and submitting creates the lead, the trial, its Zoom
+   * meeting and the acknowledgement email together.
+   *
+   * There is deliberately no email OTP: the previous flow returned the code in
+   * the HTTP response, so it verified nothing while costing every genuine
+   * visitor an extra step.
+   */
+  async book(dto: CreateLeadDto, meta: { ip?: string }) {
     const email = dto.email.toLowerCase().trim();
     const mobile = dto.mobile.trim();
 
+    // Re-validate the slot server-side. The form only ever offers bookable
+    // slots, but the endpoint is public and nothing stops a direct POST.
+    const date = this.availability.parseBookableDate(dto.preferredDate ?? '');
+    const slot = (dto.preferredSlot ?? '').trim();
+    if (!/^\d{2}:\d{2}$/.test(slot)) {
+      throw new BadRequestException('Please choose a time slot');
+    }
+    const offered = await this.availability.slotsFor(dto.preferredDate!);
+    if (!offered.slots.includes(slot)) {
+      throw new BadRequestException(
+        'That slot has just been taken. Please pick another one.',
+      );
+    }
+
+    const startAt = new Date(
+      date.getTime() + Number(slot.slice(0, 2)) * 3_600_000 + Number(slot.slice(3)) * 60_000,
+    );
+
+    const siblings = (dto.siblings ?? [])
+      .filter((s) => s && (s.firstName ?? '').trim())
+      .map((s) => ({
+        firstName: (s.firstName ?? '').trim(),
+        lastName: (s.lastName ?? '').trim(),
+      }));
+
     const leadNumber = await this.nextLeadNumber();
+    const coachId = await this.nextCoachInRotation();
 
     const lead = await this.prisma.lead.create({
       data: {
         leadNumber,
-        studentFirstName: dto.studentFirstName,
-        studentLastName: dto.studentLastName,
-        gender: dto.gender || null,
-        dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
-        currentGrade: dto.currentGrade || null,
-        currentSchool: dto.currentSchool || null,
+        studentFirstName: dto.studentFirstName.trim(),
+        studentLastName: dto.studentLastName.trim(),
         country: dto.country || null,
         timeZone: dto.timeZone || null,
-        parentName: dto.parentName || null,
-        relationship: dto.relationship || null,
         email,
         mobile,
-        whatsappNumber: dto.whatsappNumber || null,
+        countryCode: dto.countryCode || null,
         interestedSubject: dto.interestedSubject || null,
-        currentLevel: dto.currentLevel || null,
-        preferredLanguage: dto.preferredLanguage || null,
         preferredTeacherGender: dto.preferredTeacherGender || null,
-        preferredDays: dto.preferredDays || [],
-        preferredTimeSlots: dto.preferredTimeSlots || [],
-        learningGoal: dto.learningGoal || null,
-        previousCoaching: dto.previousCoaching || null,
-        specialRequirements: dto.specialRequirements || null,
-        medicalDisability: dto.medicalDisability || null,
-        acceptPrivacy: dto.acceptPrivacy ?? false,
-        acceptTerms: dto.acceptTerms ?? false,
-        recaptchaToken: dto.recaptchaToken || null,
+        sessionFor: dto.sessionFor || null,
+        howFound: dto.howFound || null,
+        preferredDate: date,
+        preferredSlot: slot,
+        preferredSlotTz: offered.timeZone,
+        siblings: siblings.length ? siblings : undefined,
         leadSource: 'Website',
         ipAddress: meta.ip || null,
         browser: dto.browser || null,
@@ -197,23 +125,166 @@ export class LeadsService implements OnModuleInit {
         utmSource: dto.utmSource || null,
         utmCampaign: dto.utmCampaign || null,
         utmMedium: dto.utmMedium || null,
-        status: LeadStatus.NEW,
+        status: LeadStatus.TRIAL_SCHEDULED,
         priority: LeadPriority.MEDIUM,
+        assignedCoachId: coachId,
+        assignedCoachAt: coachId ? new Date() : null,
       },
     });
 
-    await this.addActivity(lead.id, 'CREATED', 'Lead captured from the website form.');
+    /*
+     * No teacher is assigned yet — the slot came from merged availability, not
+     * from one person's calendar, and picking the teacher is the coach's job.
+     * The trial row exists from the start so the slot is held and the visitor
+     * gets a real appointment rather than "we'll be in touch".
+     */
+    const trial = await this.prisma.leadTrial.create({
+      data: {
+        leadId: lead.id,
+        scheduledAt: startAt,
+        durationMins: 30,
+        timeZone: offered.timeZone,
+        meetingProvider: 'Zoom',
+        status: 'SCHEDULED',
+      },
+    });
 
-    // Step 4 — automatic actions (email + in-app; SMS/WhatsApp stubbed for now)
+    const zoom = await this.zoom.createTrialMeeting({
+      topic: `Free trial — ${lead.studentFirstName} ${lead.studentLastName}`.trim(),
+      startAt,
+      durationMins: 30,
+      timeZone: offered.timeZone,
+      agenda: dto.interestedSubject ? `Trial class: ${dto.interestedSubject}` : undefined,
+    });
+
+    if (zoom.ok && zoom.meeting) {
+      await this.prisma.leadTrial.update({
+        where: { id: trial.id },
+        data: {
+          meetingId: zoom.meeting.meetingId,
+          meetingLink: zoom.meeting.joinUrl,
+          meetingHostUrl: zoom.meeting.hostUrl,
+        },
+      });
+      trial.meetingLink = zoom.meeting.joinUrl;
+    } else {
+      /*
+       * The booking still stands. The coach is told on the timeline that this
+       * one needs a link added by hand, because the acknowledgement email goes
+       * out without one and the visitor will expect it.
+       */
+      await this.addActivity(
+        lead.id,
+        'TRIAL_SCHEDULED',
+        `Zoom link could not be created (${zoom.reason ?? 'unknown'}). Add a meeting link manually.`,
+      );
+    }
+
+    await this.addActivity(
+      lead.id,
+      'CREATED',
+      `Trial booked from the website for ${startAt.toISOString().slice(0, 16).replace('T', ' ')} UTC.`,
+    );
+    if (offered.fallback) {
+      await this.addActivity(
+        lead.id,
+        'NOTE',
+        'Booked into a default slot — no teacher had published availability for this date. A teacher still needs to be found.',
+      );
+    }
+
+    this.sendBookingAcknowledgement(lead, startAt, trial.meetingLink, siblings).catch(
+      () => undefined,
+    );
     this.notifyNewLead(lead).catch(() => undefined);
 
     return {
       id: lead.id,
       leadNumber: lead.leadNumber,
+      scheduledAt: startAt.toISOString(),
+      meetingLink: trial.meetingLink ?? null,
       message:
-        'Thank you! Your trial request has been received. Our academic coach will contact you shortly.',
+        'Your free trial class is booked. Check your email for the joining details.',
     };
   }
+
+  /*
+   * Round-robin across active academic coaches: request 1 goes to coach 1,
+   * request 2 to coach 2, and after the last one it wraps back to the first.
+   *
+   * The pointer stores the *last coach assigned* rather than an index, so
+   * adding or removing a coach shifts the rotation gracefully instead of
+   * silently skipping someone. Coaches are ordered by createdAt so the
+   * sequence is stable across restarts.
+   */
+  private async nextCoachInRotation(): Promise<string | null> {
+    const coaches = await this.prisma.user.findMany({
+      where: { role: Role.ACADEMIC_COACH, status: UserStatus.ACTIVE },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!coaches.length) return null;
+
+    const pointer = await this.prisma.systemSetting.findUnique({
+      where: { key: COACH_ROTATION_KEY },
+    });
+    const lastIndex = coaches.findIndex((c) => c.id === pointer?.value);
+    // -1 (no pointer, or that coach is gone) lands on 0 — the first coach.
+    const next = coaches[(lastIndex + 1) % coaches.length];
+
+    await this.prisma.systemSetting.upsert({
+      where: { key: COACH_ROTATION_KEY },
+      create: { key: COACH_ROTATION_KEY, value: next.id },
+      update: { value: next.id },
+    });
+    return next.id;
+  }
+
+  private async sendBookingAcknowledgement(
+    lead: { studentFirstName: string; studentLastName: string; email: string; interestedSubject: string | null },
+    startAt: Date,
+    meetingLink: string | null,
+    siblings: { firstName: string; lastName: string }[],
+  ) {
+    const when = startAt.toISOString().replace('T', ' ').slice(0, 16);
+    const name = `${lead.studentFirstName} ${lead.studentLastName}`.trim();
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:6px 0;color:#6b7280;">${label}</td><td style="padding:6px 0;font-weight:700;">${value}</td></tr>`;
+
+    const html = `
+      <div style="font-family:'Segoe UI',Tahoma,sans-serif;background:#f4f6f8;padding:40px 20px;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e1e4e8;">
+          <div style="background:#133C55;padding:26px;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800;">Your free trial class is booked</h1>
+          </div>
+          <div style="padding:28px;color:#1f2937;font-size:14px;line-height:1.7;">
+            <p>Assalamu alaikum ${name || 'there'},</p>
+            <p>Thank you for booking a free trial class with us. We are looking forward to meeting you.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              ${row('Date &amp; time (UTC)', when)}
+              ${lead.interestedSubject ? row('Subject', lead.interestedSubject) : ''}
+              ${siblings.length ? row('Also attending', siblings.map((s) => `${s.firstName} ${s.lastName}`.trim()).join(', ')) : ''}
+              ${meetingLink ? row('Zoom link', `<a href="${meetingLink}">${meetingLink}</a>`) : ''}
+            </table>
+            ${
+              meetingLink
+                ? '<p>Just click the Zoom link at the scheduled time — no software setup is needed.</p>'
+                : '<p>We are preparing your joining link and will email it to you shortly, well before the class.</p>'
+            }
+            <p style="color:#6b7280;">Need to change the time? Simply reply to this email and our academic coach will help.</p>
+          </div>
+        </div>
+      </div>`;
+
+    await this.emails.sendMail(
+      lead.email,
+      'Your free trial class is booked',
+      `Your free trial class is booked for ${when} UTC.${meetingLink ? ` Join: ${meetingLink}` : ''}`,
+      undefined,
+      html,
+    );
+  }
+
 
   private async nextLeadNumber(): Promise<string> {
     const year = new Date().getFullYear();
@@ -613,6 +684,28 @@ export class LeadsService implements OnModuleInit {
     if (dto.notes !== undefined) data.notes = dto.notes || null;
     if (dto.status) data.status = dto.status;
 
+    /*
+     * Keep the Zoom room in step with the trial. Without this a rescheduled
+     * trial keeps its original meeting time and a cancelled one leaves a live
+     * room behind that a family could still walk into.
+     */
+    if (trial.meetingId) {
+      if (dto.status === 'CANCELLED') {
+        const gone = await this.zoom.cancelMeeting(trial.meetingId);
+        if (gone) {
+          data.meetingId = null;
+          data.meetingLink = null;
+          data.meetingHostUrl = null;
+        }
+      } else if (rescheduled) {
+        await this.zoom.rescheduleMeeting(
+          trial.meetingId,
+          data.scheduledAt,
+          data.durationMins ?? trial.durationMins,
+        );
+      }
+    }
+
     const updated = await this.prisma.leadTrial.update({ where: { id: trialId }, data });
 
     // Reflect terminal trial states onto the lead pipeline.
@@ -741,99 +834,150 @@ export class LeadsService implements OnModuleInit {
   }
 
   // ── Step 14: conversion — create a real StudentProfile + User ───────────────
+  /*
+   * A booking can carry siblings, and each child needs their own account —
+   * their own progress, attendance and enrolments. So conversion creates one
+   * student per child on the lead, not one per lead.
+   *
+   * Siblings share the family's single email address, which the User table
+   * requires to be unique, so their logins are plus-addressed
+   * (parent+ahmed@example.com). Mail still lands in the same inbox, and the
+   * family gets one email listing every account.
+   */
   private async convert(lead: any, courseCode: string | undefined, actor: Actor) {
-    // Guard against a duplicate account for the same email.
-    const existing = await this.prisma.user.findUnique({ where: { email: lead.email } });
-    if (existing) {
+    const siblings: { firstName: string; lastName?: string }[] = Array.isArray(lead.siblings)
+      ? lead.siblings
+      : [];
+
+    const children = [
+      { firstName: lead.studentFirstName, lastName: lead.studentLastName, email: lead.email },
+      ...siblings.map((s, i) => ({
+        firstName: s.firstName,
+        lastName: s.lastName || lead.studentLastName,
+        email: this.siblingEmail(lead.email, s.firstName, i),
+      })),
+    ];
+
+    // Check every address before creating anything — a half-converted family
+    // is far worse to clean up than a rejected conversion.
+    const clashes = await this.prisma.user.findMany({
+      where: { email: { in: children.map((c) => c.email) } },
+      select: { email: true },
+    });
+    if (clashes.length) {
       throw new BadRequestException(
-        'A user account already exists for this email. Convert manually or use a different email.',
+        `An account already exists for ${clashes.map((c) => c.email).join(', ')}. ` +
+          'Change the email on the lead, or convert this family manually.',
       );
     }
 
     const now = new Date();
-    const studentCount = await this.prisma.studentProfile.count();
-    const studentCode = `ST-${String(studentCount + 1).padStart(5, '0')}`;
+    const codes = await this.nextStudentCodes(children.length);
 
-    // The lead never set a password — generate a temporary one and email it.
-    const tempPassword = this.tempPassword();
-    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    // One password per child, so handing one out never exposes the others.
+    const passwords = children.map(() => this.tempPassword());
+    const hashes = await Promise.all(passwords.map((p) => bcrypt.hash(p, 12)));
 
-    const profile = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.studentProfile.create({
-        data: {
-          studentCode,
-          phone: lead.mobile,
-          gender: lead.gender,
-          dateOfBirth: lead.dateOfBirth,
-          guardianName: lead.parentName || null,
-          joiningDate: now,
-          user: {
-            create: {
-              email: lead.email,
-              passwordHash,
-              firstName: lead.studentFirstName,
-              lastName: lead.studentLastName,
-              country: lead.country,
-              role: Role.STUDENT,
-              status: UserStatus.ACTIVE,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const profiles: { id: string; code: string; name: string; email: string }[] = [];
+
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const profile = await tx.studentProfile.create({
+          data: {
+            studentCode: codes[i],
+            phone: lead.mobile,
+            // Only the primary child's personal details were ever collected;
+            // a sibling's gender and DOB are the coach's to fill in later.
+            gender: i === 0 ? lead.gender : null,
+            dateOfBirth: i === 0 ? lead.dateOfBirth : null,
+            guardianName: lead.parentName || null,
+            joiningDate: now,
+            user: {
+              create: {
+                email: child.email,
+                passwordHash: hashes[i],
+                firstName: child.firstName,
+                lastName: child.lastName ?? '',
+                country: lead.country,
+                role: Role.STUDENT,
+                status: UserStatus.ACTIVE,
+              },
             },
           },
-        },
-        select: { id: true },
-      });
+          select: { id: true },
+        });
 
-      // Enrol into the chosen LmsCourse if one was supplied.
-      if (courseCode) {
-        const lms = await tx.lmsCourse.findUnique({ where: { code: courseCode } });
-        if (lms) {
-          const slug = courseCode.toLowerCase();
-          const course = await tx.course.upsert({
-            where: { slug },
-            update: {},
-            create: {
-              title: lms.title,
-              slug,
-              description: lms.description,
-              price: 0,
-              status: CourseStatus.PUBLISHED,
-            },
-          });
-          await tx.enrollment.create({
-            data: {
-              studentId: created.id,
-              courseId: course.id,
-              status: EnrollmentStatus.ACTIVE,
-              startedAt: now,
-            },
-          });
-          await tx.lmsCourse.update({
-            where: { id: lms.id },
-            data: { studentsCount: { increment: 1 } },
-          });
+        // Enrol into the chosen LmsCourse if one was supplied.
+        if (courseCode) {
+          const lms = await tx.lmsCourse.findUnique({ where: { code: courseCode } });
+          if (lms) {
+            const slug = courseCode.toLowerCase();
+            const course = await tx.course.upsert({
+              where: { slug },
+              update: {},
+              create: {
+                title: lms.title,
+                slug,
+                description: lms.description,
+                price: 0,
+                status: CourseStatus.PUBLISHED,
+              },
+            });
+            await tx.enrollment.create({
+              data: {
+                studentId: profile.id,
+                courseId: course.id,
+                status: EnrollmentStatus.ACTIVE,
+                startedAt: now,
+              },
+            });
+            await tx.lmsCourse.update({
+              where: { id: lms.id },
+              data: { studentsCount: { increment: 1 } },
+            });
+          }
         }
+
+        profiles.push({
+          id: profile.id,
+          code: codes[i],
+          name: `${child.firstName} ${child.lastName ?? ''}`.trim(),
+          // Carried rather than recomputed later: the address was derived from
+          // the first name, so rebuilding it from the full name would print a
+          // login in the welcome email that does not exist.
+          email: child.email,
+        });
       }
-      return created;
+
+      return profiles;
     });
 
     const updated = await this.prisma.lead.update({
       where: { id: lead.id },
       data: {
         status: LeadStatus.CONVERTED,
-        convertedStudentId: profile.id,
-        convertedStudentCode: studentCode,
+        // The singular pair keeps pointing at the primary child so every
+        // existing screen and query carries on working unchanged.
+        convertedStudentId: created[0].id,
+        convertedStudentCode: created[0].code,
+        convertedStudents: created,
         convertedAt: now,
       },
     });
 
+    const studentCode = created[0].code;
     await this.addActivity(
       lead.id,
       'CONVERTED',
-      `Converted to student ${studentCode}. Account activated.`,
+      created.length === 1
+        ? `Converted to student ${studentCode}. Account activated.`
+        : `Converted to ${created.length} students (${created.map((c) => c.code).join(', ')}). Accounts activated.`,
       actor,
     );
 
     // Email the family their new login credentials + in-app alert to staff.
-    this.notifyConverted(lead, studentCode, tempPassword).catch(() => undefined);
+    this.notifyConverted(lead, created, passwords).catch(() => undefined);
     this.notifications
       .createForRoles([Role.ADMIN, Role.ACADEMIC_COACH], {
         type: 'LEAD_CONVERTED',
@@ -1041,29 +1185,100 @@ export class LeadsService implements OnModuleInit {
       .catch(() => undefined);
   }
 
-  private async notifyConverted(lead: any, studentCode: string, tempPassword: string) {
+  /**
+   * One welcome email for the whole family, listing every account created.
+   * `students` and `passwords` are index-aligned by `convert`.
+   */
+  private async notifyConverted(
+    lead: any,
+    students: { id: string; code: string; name: string; email: string }[],
+    passwords: string[],
+  ) {
     const name = lead.parentName || `${lead.studentFirstName} ${lead.studentLastName}`;
+    const block = students
+      .map(
+        (s, i) => `
+      <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;border-top:1px solid #e5e7eb;">
+        <tr><td style="padding:6px 0;color:#6b7280;">Student</td><td style="padding:6px 0;font-weight:700;">${s.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Student ID</td><td style="padding:6px 0;font-weight:700;">${s.code}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Login email</td><td style="padding:6px 0;font-weight:700;">${s.email}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Temporary password</td><td style="padding:6px 0;font-weight:700;">${passwords[i]}</td></tr>
+      </table>`,
+      )
+      .join('');
+
     const html = this.trialEmail(
       'Welcome to the Academy 🎉',
       `
       <p>Dear ${name},</p>
-      <p>Congratulations! <b>${lead.studentFirstName} ${lead.studentLastName}</b> is now enrolled. A student account has been created.</p>
-      <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;">
-        <tr><td style="padding:6px 0;color:#6b7280;">Student ID</td><td style="padding:6px 0;font-weight:700;">${studentCode}</td></tr>
-        <tr><td style="padding:6px 0;color:#6b7280;">Login email</td><td style="padding:6px 0;font-weight:700;">${lead.email}</td></tr>
-        <tr><td style="padding:6px 0;color:#6b7280;">Temporary password</td><td style="padding:6px 0;font-weight:700;">${tempPassword}</td></tr>
-      </table>
-      <p style="color:#b45309;">For your security, please change this password after your first sign-in.</p>`,
+      <p>Congratulations! ${
+        students.length === 1
+          ? `<b>${students[0].name}</b> is now enrolled and a student account has been created.`
+          : `<b>${students.length} student accounts</b> have been created — one for each child.`
+      }</p>
+      ${block}
+      <p style="color:#b45309;">For your security, please change ${
+        students.length === 1 ? 'this password' : 'these passwords'
+      } after the first sign-in.</p>
+      ${
+        students.length > 1
+          ? '<p style="color:#6b7280;">Each child signs in with their own email above; all mail still reaches this inbox.</p>'
+          : ''
+      }`,
     );
+
     await this.emails
       .sendMail(
         lead.email,
         'Welcome — your student account is ready',
-        `Welcome! Student ID ${studentCode}. Login: ${lead.email} / ${tempPassword} (please change after first sign-in).`,
+        students
+          .map((s, i) => `${s.name}: ID ${s.code}, login ${s.email} / ${passwords[i]}`)
+          .join('\n') + '\nPlease change the password after first sign-in.',
         undefined,
         html,
       )
       .catch(() => undefined);
+  }
+
+  /*
+   * A sibling's login address. The User table needs unique emails and a family
+   * has one inbox, so the child's name is plus-addressed onto it. The index
+   * keeps two siblings with the same first name apart.
+   */
+  private siblingEmail(parentEmail: string, firstName: string, index: number): string {
+    const [local, domain] = parentEmail.toLowerCase().trim().split('@');
+    if (!domain) return parentEmail;
+    const tag = (firstName || `child${index + 1}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 20);
+    return `${local}+${tag || `child${index + 1}`}${index + 1}@${domain}`;
+  }
+
+  /**
+   * The next `count` student codes. Derived from the highest existing code
+   * rather than a row count, which would repeat a code after any deletion.
+   */
+  private async nextStudentCodes(count: number): Promise<string[]> {
+    const latest = await this.prisma.studentProfile.findFirst({
+      where: { studentCode: { startsWith: 'ST-' } },
+      orderBy: { studentCode: 'desc' },
+      select: { studentCode: true },
+    });
+    let next = Number(latest?.studentCode?.slice(3)) || 0;
+
+    const codes: string[] = [];
+    while (codes.length < count) {
+      next += 1;
+      const candidate = `ST-${String(next).padStart(5, '0')}`;
+      // Cheap insurance against a gap-filling code already being taken.
+      const clash = await this.prisma.studentProfile.findUnique({
+        where: { studentCode: candidate },
+        select: { id: true },
+      });
+      if (!clash) codes.push(candidate);
+    }
+    return codes;
   }
 
   private async notifyDecision(lead: any, enrolled: boolean) {

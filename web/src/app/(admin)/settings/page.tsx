@@ -13,7 +13,8 @@ import {
   Mail,
   Wifi,
   Image as ImageIcon,
-  Type
+  Type,
+  Video
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
@@ -21,8 +22,9 @@ import { fetchSystemSettings, saveSystemSettings, fetchSmtpConfig, saveSmtpConfi
 import { useSettingsStore } from "@/store/settings";
 import { useAuth } from "@/store/auth";
 import { ImageCropperModal } from "@/components/image-cropper";
+import { ZoomIntegrationCard } from "@/components/admin/zoom-integration";
 
-type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "loader";
+type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "zoom" | "loader";
 
 const POPULAR_FONTS = [
   // Clean / Modern Sans
@@ -601,6 +603,17 @@ export default function SettingsPage() {
               >
                 <Mail className="size-4.5" />
                 SMTP Transporter
+              </button>
+              <button
+                onClick={() => { setActiveTab("zoom"); setStatus(null); }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
+                  activeTab === "zoom"
+                    ? "bg-accent text-white"
+                    : "text-ink-2 hover:bg-surface-2"
+                }`}
+              >
+                <Video className="size-4.5" />
+                Zoom Integration
               </button>
               <button
                 onClick={() => { setActiveTab("scripts"); setStatus(null); }}
@@ -1286,6 +1299,12 @@ export default function SettingsPage() {
                       </Button>
                     </div>
                   </form>
+                )}
+
+                {activeTab === "zoom" && (
+                  <div className="animate-fade-in border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm">
+                    <ZoomIntegrationCard />
+                  </div>
                 )}
 
                 {activeTab === "smtp" && (

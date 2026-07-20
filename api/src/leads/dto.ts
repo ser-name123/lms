@@ -13,47 +13,87 @@ import {
   IsString,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { LeadPriority, LeadStatus } from '../generated/prisma/enums';
 
-// Public website lead form. Only the essentials are required so a genuine
-// inquiry is never blocked by an optional field.
+export const LEARN_OPTIONS = ['Quran', 'Arabic Language', 'Islamic Studies'] as const;
+export const SESSION_FOR_OPTIONS = ['MYSELF', 'FAMILY_MEMBER'] as const;
+export const TEACHER_PREFERENCE_OPTIONS = ['Male', 'Female', 'Either'] as const;
+export const HOW_FOUND_OPTIONS = ['FRIEND', 'SOCIAL_MEDIA', 'EMAIL', 'GOOGLE', 'OTHER'] as const;
+
+/** One extra child attending the same trial slot. */
+export class SiblingDto {
+  @ApiProperty() @IsString() @IsNotEmpty() firstName!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() lastName?: string;
+}
+
+/*
+ * Public trial booking form.
+ *
+ * Deliberately short: name, contact, what they want to learn, and a concrete
+ * date + slot. Everything the old form asked for up front (grade, school, DOB,
+ * level, language, goals, medical notes) is the coach's job to collect once
+ * there is a real conversation — asking a stranger for it costs bookings.
+ */
 export class CreateLeadDto {
-  // Section 1 — Student
   @ApiProperty() @IsString() @IsNotEmpty() studentFirstName!: string;
   @ApiProperty() @IsString() @IsNotEmpty() studentLastName!: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() gender?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() dateOfBirth?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() currentGrade?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() currentSchool?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() country?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() timeZone?: string;
 
-  // Section 2 — Parent
-  @ApiPropertyOptional() @IsOptional() @IsString() parentName?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() relationship?: string;
   @ApiProperty() @IsEmail() email!: string;
-  @ApiProperty() @IsString() @IsNotEmpty() mobile!: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() whatsappNumber?: string;
+  @ApiProperty({ description: 'National number, without the dial code' })
+  @IsString()
+  @IsNotEmpty()
+  mobile!: string;
+  @ApiPropertyOptional({ example: '+91', description: 'Dial code, auto-detected from the visitor' })
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+  @ApiPropertyOptional({ description: 'Auto-detected, visitor may override' })
+  @IsOptional()
+  @IsString()
+  country?: string;
+  @ApiPropertyOptional({ description: 'IANA zone of the visitor' })
+  @IsOptional()
+  @IsString()
+  timeZone?: string;
 
-  // Section 3 — Learning requirements
-  @ApiPropertyOptional() @IsOptional() @IsString() interestedSubject?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() currentLevel?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() preferredLanguage?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() preferredTeacherGender?: string;
-  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @IsString({ each: true }) preferredDays?: string[];
-  @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @IsString({ each: true }) preferredTimeSlots?: string[];
+  @ApiPropertyOptional({ enum: LEARN_OPTIONS })
+  @IsOptional()
+  @IsIn(LEARN_OPTIONS as unknown as string[])
+  interestedSubject?: string;
 
-  // Section 4 — Additional questions
-  @ApiPropertyOptional() @IsOptional() @IsString() learningGoal?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() previousCoaching?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() specialRequirements?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() medicalDisability?: string;
+  @ApiPropertyOptional({ enum: SESSION_FOR_OPTIONS })
+  @IsOptional()
+  @IsIn(SESSION_FOR_OPTIONS as unknown as string[])
+  sessionFor?: string;
 
-  // Section 5 — Consent (must be accepted client-side; captured for audit)
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() acceptPrivacy?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() acceptTerms?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsString() recaptchaToken?: string;
+  @ApiPropertyOptional({ enum: TEACHER_PREFERENCE_OPTIONS })
+  @IsOptional()
+  @IsIn(TEACHER_PREFERENCE_OPTIONS as unknown as string[])
+  preferredTeacherGender?: string;
+
+  @ApiPropertyOptional({ enum: HOW_FOUND_OPTIONS })
+  @IsOptional()
+  @IsIn(HOW_FOUND_OPTIONS as unknown as string[])
+  howFound?: string;
+
+  @ApiProperty({ example: '2026-08-01', description: 'Tomorrow to +30 days' })
+  @IsString()
+  @IsNotEmpty()
+  preferredDate!: string;
+
+  @ApiProperty({ example: '10:30', description: 'One of the offered 30-minute slots' })
+  @IsString()
+  @IsNotEmpty()
+  preferredSlot!: string;
+
+  @ApiPropertyOptional({ type: [SiblingDto], description: 'Extra children on the same slot' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SiblingDto)
+  siblings?: SiblingDto[];
 
   // Tracking (client supplies UTM/referrer/browser/device; IP added server-side)
   @ApiPropertyOptional() @IsOptional() @IsString() browser?: string;
@@ -62,16 +102,6 @@ export class CreateLeadDto {
   @ApiPropertyOptional() @IsOptional() @IsString() utmSource?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() utmCampaign?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() utmMedium?: string;
-}
-
-export class VerifyLeadOtpDto {
-  @ApiProperty() @IsEmail() email!: string;
-  @ApiProperty() @IsString() @IsNotEmpty() otp!: string;
-}
-
-export class CheckLeadDuplicateDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() email?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() mobile?: string;
 }
 
 // Admin/coach update: status move, priority, coach assignment, or a note.

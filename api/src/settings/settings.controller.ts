@@ -13,6 +13,7 @@ import {
   SettingsService,
   SystemSettingsDto,
 } from './settings.service';
+import { ZoomCredentialsDto, ZoomSettingsService } from './zoom-settings.service';
 import { Public, Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 
@@ -22,6 +23,7 @@ export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,
     private readonly billing: AcademyBillingService,
+    private readonly zoom: ZoomSettingsService,
   ) {}
 
   /* Billing routes are declared before the bare '' routes below purely for
@@ -43,6 +45,32 @@ export class SettingsController {
   @ApiOperation({ summary: 'Update academy billing identity (Admin only)' })
   saveBilling(@Body() dto: AcademyBillingDto) {
     return this.billing.save(dto);
+  }
+
+  @Get('integrations/zoom')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Whether Zoom is wired up (never returns the secret)' })
+  getZoom() {
+    return this.zoom.status();
+  }
+
+  @Post('integrations/zoom')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Save Zoom Server-to-Server OAuth credentials (Admin only)' })
+  saveZoom(@Body() dto: ZoomCredentialsDto) {
+    return this.zoom.save(dto);
+  }
+
+  @Post('integrations/zoom/disconnect')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Remove the stored Zoom credentials' })
+  disconnectZoom() {
+    return this.zoom.clear();
   }
 
   @Public() // Allow public access so frontend root layout can fetch logo, favicon, colors, and head scripts on load

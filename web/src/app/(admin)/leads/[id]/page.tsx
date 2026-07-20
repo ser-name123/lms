@@ -196,6 +196,42 @@ export default function LeadDetailPage() {
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
+
+/* The form posts codes; these turn them back into the words the visitor saw. */
+const SESSION_FOR_LABELS: Record<string, string> = {
+  MYSELF: "Myself",
+  FAMILY_MEMBER: "A family member",
+};
+const HOW_FOUND_LABELS: Record<string, string> = {
+  FRIEND: "Friend",
+  SOCIAL_MEDIA: "Social media",
+  EMAIL: "Email",
+  GOOGLE: "Google",
+  OTHER: "Other",
+};
+
+function labelOf(map: Record<string, string>, code: string | null) {
+  if (!code) return null;
+  // Fall back to the raw code rather than blanking it — an unmapped value is
+  // still information, and a silent gap looks like missing data.
+  return map[code] ?? code;
+}
+
+function siblingNames(lead: Lead) {
+  return (lead.siblings ?? [])
+    .map((s) => `${s.firstName} ${s.lastName ?? ""}`.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function requestedSlot(lead: Lead) {
+  if (!lead.preferredDate) return null;
+  const date = new Date(lead.preferredDate).toUTCString().slice(0, 16);
+  return lead.preferredSlot
+    ? `${date} · ${lead.preferredSlot} ${lead.preferredSlotTz ?? "UTC"}`
+    : date;
+}
+
 function OverviewTab({ lead }: { lead: Lead }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -212,14 +248,24 @@ function OverviewTab({ lead }: { lead: Lead }) {
         <Row label="Parent" value={lead.parentName} />
         <Row label="Relationship" value={lead.relationship} />
         <Row label="Email" value={lead.email} />
-        <Row label="Mobile" value={lead.mobile} />
+        <Row
+          label="Mobile"
+          value={[lead.countryCode, lead.mobile].filter(Boolean).join(" ") || null}
+        />
         <Row label="WhatsApp" value={lead.whatsappNumber} />
+        <Row label="Also attending" value={siblingNames(lead) || null} />
       </InfoCard>
       <InfoCard icon={BookOpen} title="Learning Requirements">
         <Row label="Subject" value={lead.interestedSubject} />
+        <Row label="Session for" value={labelOf(SESSION_FOR_LABELS, lead.sessionFor)} />
+        <Row label="Teacher Preference" value={lead.preferredTeacherGender} />
+        <Row label="How they found us" value={labelOf(HOW_FOUND_LABELS, lead.howFound)} />
+        {/* Requested slot, before a coach touches it — the trial row below is
+            the source of truth once one exists. */}
+        <Row label="Requested Slot" value={requestedSlot(lead)} />
         <Row label="Current Level" value={lead.currentLevel} />
         <Row label="Language" value={lead.preferredLanguage} />
-        <Row label="Teacher Gender" value={lead.preferredTeacherGender} />
+        {/* Only meaningful on leads booked through the old form. */}
         <Row label="Preferred Days" value={lead.preferredDays?.join(", ") || null} />
         <Row label="Time Slots" value={lead.preferredTimeSlots?.join(", ") || null} />
       </InfoCard>

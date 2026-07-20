@@ -1409,6 +1409,32 @@ export const saveAcademyBilling = (input: Partial<AcademyBilling>) =>
     body: JSON.stringify(input),
   });
 
+// ─── Zoom integration (admin) ────────────────────────────────────────────────
+
+export type ZoomStatus = {
+  configured: boolean;
+  accountId: string | null;
+  clientId: string | null;
+  /** The secret itself is never sent to the browser — only whether one is stored. */
+  hasSecret: boolean;
+};
+
+export const fetchZoomStatus = () => api<ZoomStatus>("/settings/integrations/zoom");
+
+/** Leave `clientSecret` empty to keep the stored one. */
+export const saveZoomCredentials = (input: {
+  accountId: string;
+  clientId: string;
+  clientSecret?: string;
+}) =>
+  api<ZoomStatus>("/settings/integrations/zoom", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const disconnectZoom = () =>
+  api<ZoomStatus>("/settings/integrations/zoom/disconnect", { method: "POST" });
+
 // ─── Parent links (admin) ────────────────────────────────────────────────────
 
 export type ParentLinkRow = {
@@ -2090,8 +2116,19 @@ export interface Lead {
   currentLevel: string | null;
   preferredLanguage: string | null;
   preferredTeacherGender: string | null;
+  /** Superseded by preferredDate/preferredSlot; still set on older leads. */
   preferredDays: string[];
   preferredTimeSlots: string[];
+  /** The concrete date and 30-minute slot the visitor booked. */
+  preferredDate: string | null;
+  preferredSlot: string | null;
+  preferredSlotTz: string | null;
+  countryCode: string | null;
+  sessionFor: string | null;
+  howFound: string | null;
+  /** Extra children on the same booking; each becomes its own student. */
+  siblings: { firstName: string; lastName?: string }[] | null;
+  convertedStudents: { id: string; code: string; name: string; email: string }[] | null;
   learningGoal: string | null;
   previousCoaching: string | null;
   specialRequirements: string | null;
@@ -2160,26 +2197,38 @@ export interface LeadRecommendation {
   teacher: { id: string; name: string; specialisation: string | null; workload: number } | null;
 }
 
-// Public — no auth (endpoint is @Public).
-// Step 1: submit → returns an OTP challenge (lead not yet created).
+// Public — no auth (endpoints are @Public).
+
+export type TrialSlots = {
+  date: string;
+  slots: string[];
+  /** True when these are default hours, not published teacher availability. */
+  fallback: boolean;
+  timeZone: string;
+};
+
+export type TrialBooking = {
+  id: string;
+  leadNumber: string;
+  scheduledAt: string;
+  meetingLink: string | null;
+  message: string;
+};
+
+/** Bookable 30-minute slots for one date, merged across all teachers. */
+export const fetchTrialSlots = (date: string) =>
+  api<TrialSlots>(`/leads/availability?date=${encodeURIComponent(date)}`);
+
+/**
+ * Books the trial outright: the lead, the trial and its Zoom meeting are all
+ * created by this one call. There is no OTP step — the old one returned the
+ * code in its own response, so it verified nothing.
+ */
 export const createLead = (dto: Record<string, unknown>) =>
-  api<OtpChallenge>("/leads", {
+  api<TrialBooking>("/leads", {
     method: "POST",
     body: JSON.stringify(dto),
   });
-
-// Step 2: verify the OTP → the lead is created.
-export const verifyLeadOtp = (email: string, otp: string) =>
-  api<{ id: string; leadNumber: string; message: string }>("/leads/verify-otp", {
-    method: "POST",
-    body: JSON.stringify({ email, otp }),
-  });
-
-export const checkLeadDuplicate = (email?: string, mobile?: string) =>
-  api<{ exists: boolean; lead?: { id: string; leadNumber: string; status: LeadStatus; createdAt: string } }>(
-    "/leads/check-duplicate",
-    { method: "POST", body: JSON.stringify({ email, mobile }) },
-  );
 
 export const fetchLeads = (params: {
   page: number;

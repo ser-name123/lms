@@ -13,9 +13,9 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Public, Roles, type AuthUser } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 import { LeadsService } from './leads.service';
+import { LeadAvailabilityService } from './availability.service';
 import {
   AssignTeacherLeadDto,
-  CheckLeadDuplicateDto,
   CoachDecisionDto,
   CreateLeadDto,
   EvaluateLeadDto,
@@ -25,7 +25,6 @@ import {
   TrialFeedbackDto,
   UpdateLeadDto,
   UpdateTrialDto,
-  VerifyLeadOtpDto,
 } from './dto';
 
 @ApiTags('leads')
@@ -33,27 +32,25 @@ import {
 @Controller('leads')
 @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
 export class LeadsController {
-  constructor(private readonly service: LeadsService) {}
+  constructor(
+    private readonly service: LeadsService,
+    private readonly availabilityService: LeadAvailabilityService,
+  ) {}
 
   @Post()
   @Public()
-  @ApiOperation({ summary: 'Public: submit a website lead, receive an email OTP' })
+  @ApiOperation({ summary: 'Public: book a free trial class (creates lead + trial + Zoom link)' })
   create(@Body() dto: CreateLeadDto, @Ip() ip: string) {
-    return this.service.requestOtp(dto, { ip });
+    return this.service.book(dto, { ip });
   }
 
-  @Post('verify-otp')
+  @Get('availability')
   @Public()
-  @ApiOperation({ summary: 'Public: verify the OTP to finalise the lead' })
-  verifyOtp(@Body() dto: VerifyLeadOtpDto) {
-    return this.service.verifyOtp(dto.email, dto.otp);
-  }
-
-  @Post('check-duplicate')
-  @Public()
-  @ApiOperation({ summary: 'Public: check if an email/mobile already has a lead' })
-  checkDuplicate(@Body() dto: CheckLeadDuplicateDto) {
-    return this.service.checkDuplicate(dto.email, dto.mobile);
+  @ApiOperation({
+    summary: 'Public: bookable 30-minute slots for one date, merged across teachers',
+  })
+  availability(@Query('date') date: string) {
+    return this.availabilityService.slotsFor(date);
   }
 
   @Get()

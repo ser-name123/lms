@@ -404,11 +404,18 @@ async function send(method, path, userId, payload, expect = 200) {
     ]);
     await db.query(`DELETE FROM "RoleWidgetSetting" WHERE "widgetKey"='st.achievements'`);
 
+    /*
+     * Scoped to the users this run touched. Counting every UserWidgetLayout row
+     * reported real admins' saved dashboards as leftovers — a cleanup check
+     * that cries wolf gets ignored, and then hides an actual leak.
+     */
     const { rows: leftovers } = await db.query(
       `SELECT (SELECT count(*)::int FROM "User" WHERE role='PARENT' AND email LIKE 'smoke-parent-%') AS parents,
               (SELECT count(*)::int FROM "Announcement" WHERE title='Smoke test notice') AS announcements,
               (SELECT count(*)::int FROM "Notification" WHERE title='Smoke test notice') AS notifications,
-              (SELECT count(*)::int FROM "UserWidgetLayout") AS layouts`,
+              (SELECT count(*)::int FROM "UserWidgetLayout"
+                WHERE "userId" = ANY($1::text[])) AS layouts`,
+      [Object.values(roleUser).map((u) => u.id)],
     );
     console.log(
       `\nCleanup: ${leftovers[0].parents} stray parents · ${leftovers[0].announcements} stray announcements · ` +

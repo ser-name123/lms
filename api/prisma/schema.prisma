@@ -1417,12 +1417,33 @@ model Lead {
   whatsappNumber String?
 
   // Section 3 — Learning requirements
+  // `interestedSubject` doubles as "What would you like to learn?"
+  // (Quran / Arabic Language / Islamic Studies).
   interestedSubject     String?
   currentLevel          String?  // Beginner / Intermediate / Advanced
   preferredLanguage     String?
-  preferredTeacherGender String? // optional
+  preferredTeacherGender String? // Male / Female / Either
+  // Superseded by preferredDate + preferredSlot. Kept because leads booked
+  // under the old form still carry them and the detail page still reads them.
   preferredDays         String[] @default([])
   preferredTimeSlots    String[] @default([])
+
+  // The visitor picks one concrete date and one 30-minute slot, chosen from
+  // merged teacher availability rather than typing a free-text preference.
+  preferredDate DateTime?
+  preferredSlot String?   // "HH:mm" in preferredSlotTz
+  preferredSlotTz String? // IANA zone the slot was displayed in
+
+  sessionFor String? // MYSELF / FAMILY_MEMBER
+  howFound   String? // FRIEND / SOCIAL_MEDIA / EMAIL / GOOGLE / OTHER
+
+  // Dial code kept apart from `mobile` so the number stays comparable across
+  // countries — "+91 98765" and "98765" are the same person.
+  countryCode String?
+
+  // Extra children on the same booking: [{ firstName, lastName }].
+  // They share this lead's slot; conversion creates one Student account each.
+  siblings Json?
 
   // Section 4 — Additional questions
   learningGoal        String?
@@ -1474,9 +1495,13 @@ model Lead {
   coachDecisionNotes String?
   coachDecisionAt    DateTime?
 
-  // Conversion (Phase 4) — a real StudentProfile is created on ENROLL
+  // Conversion (Phase 4) — a real StudentProfile is created on ENROLL.
+  // The singular pair points at the primary student; with siblings on the
+  // booking, every created account is listed in `convertedStudents`
+  // ([{ id, code, name }]) so none of them is lost.
   convertedStudentId   String?
   convertedStudentCode String?
+  convertedStudents    Json?
   convertedAt          DateTime?
 
   createdAt DateTime @default(now())
@@ -1506,6 +1531,10 @@ model LeadTrial {
   timeZone        String?
   meetingProvider String?  // Zoom / Google Meet
   meetingLink     String?
+  // Zoom's own ids, kept so the meeting can be updated or deleted when the
+  // trial is rescheduled or cancelled instead of leaking orphaned meetings.
+  meetingId       String?
+  meetingHostUrl  String?
   status          LeadTrialStatus @default(SCHEDULED)
 
   // Reminders (Step 10) — the sweep stamps these when a reminder is dispatched
