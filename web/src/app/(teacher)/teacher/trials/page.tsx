@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   CalendarClock,
   ClipboardList,
@@ -36,8 +37,39 @@ const STATUS_TONE: Record<string, string> = {
   CANCELLED: "text-ink-3 bg-surface-2 border-hairline",
 };
 
+/*
+ * useSearchParams opts the tree below it out of prerendering, so the page
+ * shell stays static and only the list waits on the query string.
+ */
 export default function TeacherTrialsPage() {
-  const [scope, setScope] = useState<(typeof SCOPES)[number]["key"]>("upcoming");
+  return (
+    <Suspense
+      fallback={
+        <>
+          <Topbar title="Trial Classes" subtitle="Your scheduled demo classes with prospective students" />
+          <div className="flex items-center gap-2 p-6 text-sm font-bold text-ink-3">
+            <Loader2 className="size-5 animate-spin text-accent" /> Loading trials…
+          </div>
+        </>
+      }
+    >
+      <TrialsList />
+    </Suspense>
+  );
+}
+
+function TrialsList() {
+  /*
+   * The dashboard's "File Trial Reports" task links here with ?scope=all,
+   * because an unwritten report is by definition in the past and the default
+   * "upcoming" view would show the teacher an empty page.
+   */
+  const initialScope = useSearchParams().get("scope");
+  const [scope, setScope] = useState<(typeof SCOPES)[number]["key"]>(
+    SCOPES.some((s) => s.key === initialScope)
+      ? (initialScope as (typeof SCOPES)[number]["key"])
+      : "upcoming",
+  );
   const [trials, setTrials] = useState<LeadTrial[]>([]);
   const [loading, setLoading] = useState(true);
 

@@ -31,7 +31,12 @@ export class CoachDashboardService {
     });
     const studentIds = students.map((s) => s.id);
 
-    // A coach with an empty roster still gets a well-formed payload.
+    /*
+     * A coach with an empty roster still gets a well-formed payload — and
+     * still gets their trial tasks. A coach whose work is all leads has no
+     * students yet by definition, so returning an empty task list here left
+     * exactly the people who most needed the reminder with a blank dashboard.
+     */
     if (!studentIds.length) {
       return {
         range: range.key,
@@ -46,7 +51,7 @@ export class CoachDashboardService {
         },
         performance: { topPerformers: [], needAttention: [], weakStudents: [], newAdmissions: [] },
         charts: { progress: [], assessment: [], assignment: [], attendance: [] },
-        upcomingTasks: [],
+        upcomingTasks: await this.upcomingTasks(coachUserId, []),
         generatedAt: new Date().toISOString(),
       };
     }
@@ -67,6 +72,7 @@ export class CoachDashboardService {
       generatedAt: new Date().toISOString(),
     };
   }
+
 
   // ── Cards ──────────────────────────────────────────────────────────────────
 
@@ -316,11 +322,19 @@ export class CoachDashboardService {
         take: 10,
         select: { id: true, studentId: true, nextReviewAt: true },
       }),
-      // Trials this coach owns that have happened but have no decision yet.
+      /*
+       * Trials this coach owns that have happened but have no decision yet.
+       *
+       * WAITING_PARENT_DECISION belongs here as much as TRIAL_COMPLETED: that
+       * is the status a trial moves to the moment the teacher files their
+       * report, which is precisely when the coach can finally decide. Listing
+       * only TRIAL_COMPLETED inverted the task — it nagged while the coach
+       * could do nothing, then vanished when they could.
+       */
       this.prisma.lead.findMany({
         where: {
           assignedCoachId: coachUserId,
-          status: LeadStatus.TRIAL_COMPLETED,
+          status: { in: [LeadStatus.TRIAL_COMPLETED, LeadStatus.WAITING_PARENT_DECISION] },
           coachDecision: null,
         },
         orderBy: { updatedAt: 'desc' },
@@ -377,7 +391,9 @@ export class CoachDashboardService {
         title: `Trial decision — ${l.studentFirstName} ${l.studentLastName}`.trim(),
         detail: l.leadNumber,
         at: l.updatedAt.toISOString(),
-        link: `/leads`,
+        // The lead itself, like every sibling task — not a hundred-row list
+        // the coach then has to search for the name they just clicked.
+        link: `/leads/${l.id}`,
       })),
       ...counseling.map((f) => ({
         kind: 'STUDENT_COUNSELING' as const,

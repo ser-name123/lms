@@ -884,32 +884,22 @@ export class LeadsService implements OnModuleInit {
     return this.attachTrialNames([updated]).then((r) => r[0]);
   }
 
-  // ── Step 11: mark attendance ────────────────────────────────────────────────
+  /**
+   * Step 11 — mark attendance.
+   *
+   * Attendance and status are one fact, so this is the same operation as
+   * setTrialStatus under an older name and delegates to it rather than
+   * writing the two columns itself. Kept apart they drifted: this route wrote
+   * status with none of the rules setTrialStatus enforces, so a teacher could
+   * mark a coach-cancelled trial "present" to revive it, or flip a trial with
+   * a filed report back to a no-show — both of which the other route refuses.
+   */
   async markAttendance(trialId: string, dto: TrialAttendanceDto, actor: Actor) {
-    const trial = await this.assertTrialAccess(trialId, actor);
-
-    const present = dto.attendance === 'PRESENT';
-    const updated = await this.prisma.leadTrial.update({
-      where: { id: trialId },
-      data: {
-        attendance: dto.attendance,
-        attendedAt: new Date(),
-        status: present ? 'COMPLETED' : 'NO_SHOW',
-      },
-    });
-
-    await this.prisma.lead.update({
-      where: { id: trial.leadId },
-      data: present ? { status: LeadStatus.TRIAL_COMPLETED } : {},
-    });
-    await this.addActivity(
-      trial.leadId,
-      present ? 'TRIAL_ATTENDED' : 'TRIAL_NO_SHOW',
-      present ? 'Student attended the trial class.' : 'Student did not show up for the trial.',
+    return this.setTrialStatus(
+      trialId,
+      { status: dto.attendance === 'PRESENT' ? 'COMPLETED' : 'NO_SHOW' },
       actor,
     );
-
-    return this.attachTrialNames([updated]).then((r) => r[0]);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1131,7 +1121,13 @@ export class LeadsService implements OnModuleInit {
     if (dto.guardianRelation !== undefined) data.guardianRelation = dto.guardianRelation || null;
     if (dto.guardianPhone !== undefined) data.guardianPhone = dto.guardianPhone || null;
     if (dto.guardianEmail !== undefined) data.guardianEmail = dto.guardianEmail || null;
-    if (dto.preferredPackage !== undefined) data.preferredPackage = dto.preferredPackage || null;
+    // Same check as the family's own form: an unrecognised package name is
+    // what conversion bills from, and a typo silently suppresses the invoice.
+    if (dto.preferredPackage !== undefined) {
+      data.preferredPackage = dto.preferredPackage
+        ? (await this.knownPackage(dto.preferredPackage)).name
+        : null;
+    }
     if (dto.preferredDays !== undefined) data.preferredDays = dto.preferredDays;
     if (dto.preferredTime !== undefined) data.preferredTime = dto.preferredTime || null;
     if (dto.assessedLevel !== undefined) data.assessedLevel = dto.assessedLevel || null;
@@ -1267,9 +1263,12 @@ export class LeadsService implements OnModuleInit {
         infoTokenExpiresAt: expiresAt,
         infoRequestedAt: new Date(),
         infoRequestedById: actor?.id || null,
-        // Re-issuing reopens the form: the family may have submitted once and
-        // then been asked for something they left blank.
-        infoSubmittedAt: null,
+        /*
+         * infoSubmittedAt is deliberately left alone. Clearing it made the
+         * form's own "you have answered this before" warning unreachable —
+         * submitting nulls the hash, so the only way back in is a fresh link,
+         * which used to arrive claiming the family had never answered.
+         */
       },
     });
 
@@ -1340,7 +1339,20 @@ export class LeadsService implements OnModuleInit {
     const trial = await this.trialForToken(token);
 
     const data: any = {};
-    if (dto.preferredPackage !== undefined) data.preferredPackage = dto.preferredPackage || null;
+    if (dto.preferredPackage !== undefined) {
+      /*
+       * Checked against the live catalogue, not taken on trust.
+       *
+       * This endpoint is reached with a token rather than a login, and the
+       * package name it returns is what conversion bills the first invoice
+       * from. Storing the string verbatim would let anyone holding the link
+       * name the cheapest package — or a nonexistent one, which silently
+       * suppresses the invoice altogether.
+       */
+      data.preferredPackage = dto.preferredPackage
+        ? (await this.knownPackage(dto.preferredPackage)).name
+        : null;
+    }
     if (dto.preferredDays !== undefined) data.preferredDays = dto.preferredDays;
     if (dto.preferredTime !== undefined) data.preferredTime = dto.preferredTime || null;
     if (dto.preferredStartDate !== undefined) {
@@ -1512,6 +1524,16 @@ export class LeadsService implements OnModuleInit {
    * link. Falling back to the report means the coach does not have to
    * re-enter something the family already told the teacher.
    */
+  /** A package name is only ever stored after the catalogue confirms it exists. */
+  private async knownPackage(name: string) {
+    const known = await this.prisma.package.findFirst({
+      where: { name, active: true },
+      select: { name: true },
+    });
+    if (!known) throw new BadRequestException('Choose one of the packages listed.');
+    return known;
+  }
+
   private async packageForConversion(leadId: string, packageId?: string) {
     if (packageId) {
       const chosen = await this.prisma.package.findUnique({ where: { id: packageId } });
@@ -1545,12 +1567,26 @@ export class LeadsService implements OnModuleInit {
       ? lead.siblings
       : [];
 
+    /*
+     * Every child gets a plus-addressed login, including the first.
+     *
+     * The bare family address used to become the eldest child's student login,
+     * which quietly made a parent account impossible: ParentLink refuses an
+     * address that already belongs to a STUDENT, and that address is the only
+     * one the family gave us. The whole parent portal was unreachable for
+     * anyone who came through this pipeline. The inbox belongs to the parent,
+     * so it stays theirs.
+     */
     const children = [
-      { firstName: lead.studentFirstName, lastName: lead.studentLastName, email: lead.email },
+      {
+        firstName: lead.studentFirstName,
+        lastName: lead.studentLastName,
+        email: this.siblingEmail(lead.email, lead.studentFirstName, 0),
+      },
       ...siblings.map((s, i) => ({
         firstName: s.firstName,
         lastName: s.lastName || lead.studentLastName,
-        email: this.siblingEmail(lead.email, s.firstName, i),
+        email: this.siblingEmail(lead.email, s.firstName, i + 1),
       })),
     ];
 
@@ -1570,6 +1606,19 @@ export class LeadsService implements OnModuleInit {
     const now = new Date();
     const codes = await this.nextStudentCodes(children.length);
 
+    /*
+     * Everything the trial learned about this family, carried onto the student
+     * record. Without this the coach reopens the lead to find out what level
+     * the teacher placed the student at and which days they asked for — and
+     * the parent's own contact details, collected in the report precisely so a
+     * parent account could be created, never leave the trial row.
+     */
+    const [report] = await this.prisma.leadTrial.findMany({
+      where: { leadId: lead.id, reportSubmittedAt: { not: null } },
+      orderBy: { reportSubmittedAt: 'desc' },
+      take: 1,
+    });
+
     // One password per child, so handing one out never exposes the others.
     const passwords = children.map(() => this.tempPassword());
     const hashes = await Promise.all(passwords.map((p) => bcrypt.hash(p, 12)));
@@ -1586,9 +1635,25 @@ export class LeadsService implements OnModuleInit {
             // Only the primary child's personal details were ever collected;
             // a sibling's gender and DOB are the coach's to fill in later.
             gender: i === 0 ? lead.gender : null,
-            dateOfBirth: i === 0 ? lead.dateOfBirth : null,
-            guardianName: lead.parentName || null,
-            joiningDate: now,
+            dateOfBirth: i === 0 ? (report?.studentDob ?? lead.dateOfBirth) : null,
+            guardianName: report?.guardianName || lead.parentName || null,
+
+            // The parent's own details, so an admin can create their login
+            // without hunting through the lead — and so ParentLink has the
+            // address it insists on.
+            parentName: report?.guardianName || lead.parentName || null,
+            parentEmail: lead.email,
+            parentRelationship: report?.guardianRelation || lead.relationship || null,
+            parentMobile: report?.guardianPhone || lead.mobile || null,
+            parentWhatsapp: lead.whatsappNumber || null,
+
+            // What the teacher assessed, not what the family guessed.
+            learningLevel: report?.assessedLevel || lead.recommendedLevel || lead.currentLevel || null,
+            preferredLanguage: lead.preferredLanguage || null,
+            coachId: lead.assignedCoachId || null,
+            // A family that asked to start next month should not be dated as
+            // having joined today.
+            joiningDate: report?.preferredStartDate ?? now,
             user: {
               create: {
                 email: child.email,
@@ -1603,6 +1668,31 @@ export class LeadsService implements OnModuleInit {
           },
           select: { id: true },
         });
+
+        /*
+         * Enrol them into the course the teacher recommended.
+         *
+         * Without this a family pays the invoice, signs in, and finds "My
+         * Courses" empty — the recommendation was captured, validated and
+         * shown to the coach, then dropped on the floor at the one moment it
+         * was meant to take effect. An explicit courseCode still wins.
+         */
+        if (!courseCode && report?.recommendedCourseId) {
+          const exists = await tx.course.findUnique({
+            where: { id: report.recommendedCourseId },
+            select: { id: true },
+          });
+          if (exists) {
+            await tx.enrollment.create({
+              data: {
+                studentId: profile.id,
+                courseId: exists.id,
+                status: EnrollmentStatus.ACTIVE,
+                startedAt: report.preferredStartDate ?? now,
+              },
+            });
+          }
+        }
 
         // Enrol into the chosen LmsCourse if one was supplied.
         if (courseCode) {
@@ -1649,19 +1739,6 @@ export class LeadsService implements OnModuleInit {
       return profiles;
     });
 
-    const updated = await this.prisma.lead.update({
-      where: { id: lead.id },
-      data: {
-        status: LeadStatus.CONVERTED,
-        // The singular pair keeps pointing at the primary child so every
-        // existing screen and query carries on working unchanged.
-        convertedStudentId: created[0].id,
-        convertedStudentCode: created[0].code,
-        convertedStudents: created,
-        convertedAt: now,
-      },
-    });
-
     /*
      * First invoice, one per student — Invoice.studentId is singular and each
      * child enrols on their own terms, so a shared family bill would have to
@@ -1684,6 +1761,14 @@ export class LeadsService implements OnModuleInit {
           .catch(() => null);
         if (invoice) invoices.push({ studentName: student.name, ...invoice });
       }
+      /*
+       * The monthly fee on the student record, so Finance and the student's
+       * own Fees page agree with the package they were just sold.
+       */
+      await this.prisma.studentProfile.updateMany({
+        where: { id: { in: created.map((c) => c.id) } },
+        data: { fees: pkg.price, nextPaymentDate: invoices[0]?.dueAt ?? null },
+      });
       if (invoices.length) {
         await this.addActivity(
           lead.id,
@@ -1700,6 +1785,32 @@ export class LeadsService implements OnModuleInit {
         actor,
       );
     }
+
+    /*
+     * The invoice number rides along on each child, so the coach's own screen
+     * can say whether billing actually happened. The alternative — a timeline
+     * entry on another tab — hides the one outcome most worth checking.
+     */
+    const byName = new Map(invoices.map((i) => [i.studentName, i]));
+    const withInvoices = created.map((c) => ({
+      ...c,
+      invoiceNumber: byName.get(c.name)?.number ?? null,
+      invoiceAmount: byName.get(c.name)?.amount ?? null,
+      invoiceCurrency: byName.get(c.name)?.currency ?? null,
+    }));
+
+    const updated = await this.prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        status: LeadStatus.CONVERTED,
+        // The singular pair keeps pointing at the primary child so every
+        // existing screen and query carries on working unchanged.
+        convertedStudentId: created[0].id,
+        convertedStudentCode: created[0].code,
+        convertedStudents: withInvoices,
+        convertedAt: now,
+      },
+    });
 
     const studentCode = created[0].code;
     await this.addActivity(
@@ -1784,12 +1895,17 @@ export class LeadsService implements OnModuleInit {
       return { stage, reached };
     });
 
-    // Trial + rating stats.
+    /*
+     * Trial + rating stats, through the same scope as the lead counts above.
+     * Without it a coach saw their own funnel beside academy-wide attendance
+     * and ratings — two different populations presented as one report.
+     */
+    const trialScope = { lead: this.scopeFor(user) };
     const [trialAgg, trialByStatus, tRating, pRating] = await Promise.all([
-      this.prisma.leadTrial.count(),
-      this.prisma.leadTrial.groupBy({ by: ['status'], _count: { _all: true } }),
-      this.prisma.leadTrial.aggregate({ _avg: { teacherRating: true } }),
-      this.prisma.leadTrial.aggregate({ _avg: { parentRating: true } }),
+      this.prisma.leadTrial.count({ where: trialScope }),
+      this.prisma.leadTrial.groupBy({ by: ['status'], where: trialScope, _count: { _all: true } }),
+      this.prisma.leadTrial.aggregate({ where: trialScope, _avg: { teacherRating: true } }),
+      this.prisma.leadTrial.aggregate({ where: trialScope, _avg: { parentRating: true } }),
     ]);
     const trialStatusCounts: Record<string, number> = {};
     trialByStatus.forEach((r) => (trialStatusCounts[r.status] = r._count._all));

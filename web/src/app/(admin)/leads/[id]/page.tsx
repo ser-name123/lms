@@ -923,6 +923,27 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
             An active student account was created and login credentials were emailed to {lead.email}
             {lead.convertedAt ? ` on ${new Date(lead.convertedAt).toLocaleDateString()}` : ""}.
           </p>
+
+          {/*
+            * Billing outcome, on the screen the coach is already looking at.
+            * "No invoice was raised" is the failure this most needs to be
+            * loud about, and it was only ever written to another tab.
+            */}
+          <div className="mt-3 w-full max-w-sm space-y-1.5">
+            {(lead.convertedStudents ?? []).map((s) => (
+              <div key={s.id} className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-surface px-3 py-2 text-[11px]">
+                <span className="font-bold text-ink-2">{s.name}</span>
+                {s.invoiceNumber ? (
+                  <span className="font-bold text-emerald-600">
+                    {s.invoiceNumber}
+                    {s.invoiceAmount != null ? ` · ${s.invoiceCurrency} ${s.invoiceAmount.toFixed(2)}` : ""}
+                  </span>
+                ) : (
+                  <span className="font-bold text-amber-600">No invoice — raise one in Finance</span>
+                )}
+              </div>
+            ))}
+          </div>
         </CardBody>
       </Card>
     );

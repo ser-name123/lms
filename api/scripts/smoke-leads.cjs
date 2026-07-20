@@ -105,6 +105,21 @@ const isoDay = (offsetDays) =>
   const createdPackageIds = [];
 
   try {
+    /*
+     * A package both the info form and the conversion can name. Created up
+     * front because the family submits a package choice long before the coach
+     * enrols them, and an unknown name is now rejected outright.
+     */
+    const smokePkg = (
+      await db.query(
+        // Package has no updatedAt column — only createdAt.
+        `INSERT INTO "Package" (id,name,description,price,"classesPerMonth",active)
+         VALUES (gen_random_uuid(),$1,'smoke',40.00,8,true) RETURNING id, name, price`,
+        [`${MARKER}-package`],
+      )
+    ).rows[0];
+    createdPackageIds.push(smokePkg.id);
+
     // ── Availability ─────────────────────────────────────────────────────────
     console.log('\n── Availability & date rules ──');
 
@@ -587,6 +602,46 @@ const isoDay = (offsetDays) =>
         `status ${badOutcome.status}`,
       );
 
+      /*
+       * The older attendance route writes the same two columns. Kept as a
+       * separate code path it enforced none of the rules above, so a teacher
+       * could revive a coach-cancelled trial by marking it "present".
+       */
+      const cancelledTrial = await req(
+        'POST',
+        `/leads/${first.body.id}/trials`,
+        ownerToken,
+        {
+          scheduledAt: new Date(Date.parse(`${slotDate}T18:00:00.000Z`)).toISOString(),
+          durationMins: 30,
+          teacherId: mine.id,
+        },
+        201,
+      );
+      await req('PATCH', `/leads/trials/${cancelledTrial.body.id}`, ownerToken, {
+        status: 'CANCELLED',
+      });
+      const revive = await req(
+        'POST',
+        `/leads/trials/${cancelledTrial.body.id}/attendance`,
+        teacherToken,
+        { attendance: 'PRESENT' },
+        400,
+      );
+      check(
+        'attendance cannot revive a trial the coach cancelled',
+        revive.ok,
+        `status ${revive.status}`,
+      );
+      const stillCancelled = (
+        await db.query(`SELECT status FROM "LeadTrial" WHERE id=$1`, [cancelledTrial.body.id])
+      ).rows[0];
+      check(
+        'and the cancelled trial is left as it was',
+        stillCancelled.status === 'CANCELLED',
+        stillCancelled.status,
+      );
+
       const report = await req('GET', `/leads/trials/${originalTrial.id}/report`, teacherToken);
       check('the assigned teacher can open the report', report.ok, `status ${report.status}`);
       check(
@@ -772,6 +827,19 @@ const isoDay = (offsetDays) =>
       );
       check('the same report cannot be submitted twice', twice.ok, `status ${twice.status}`);
 
+      const flipAfterReport = await req(
+        'POST',
+        `/leads/trials/${originalTrial.id}/attendance`,
+        teacherToken,
+        { attendance: 'ABSENT' },
+        400,
+      );
+      check(
+        'nor flip a trial with a filed report back to a no-show',
+        flipAfterReport.ok,
+        `status ${flipAfterReport.status}`,
+      );
+
       const editAfter = await req(
         'PATCH',
         `/leads/trials/${originalTrial.id}/report`,
@@ -898,13 +966,32 @@ const isoDay = (offsetDays) =>
       const empty = await req('POST', `/leads/info-form/${infoToken}`, null, {}, 400);
       check('an empty submission is refused', empty.ok, `status ${empty.status}`);
 
+      /*
+       * The link is reached with a token, not a login, and the package it
+       * names is what conversion bills. An unchecked string here lets whoever
+       * holds the link pick the price — or suppress the invoice with a name
+       * that matches nothing.
+       */
+      const madeUpPackage = await req(
+        'POST',
+        `/leads/info-form/${infoToken}`,
+        null,
+        { preferredPackage: 'Free Forever Plan' },
+        400,
+      );
+      check(
+        'the family cannot invent the package they will be billed for',
+        madeUpPackage.ok,
+        `status ${madeUpPackage.status}`,
+      );
+
       const startDate = isoDay(21);
       const sent = await req(
         'POST',
         `/leads/info-form/${infoToken}`,
         null,
         {
-          preferredPackage: 'Smoke package choice',
+          preferredPackage: smokePkg.name,
           preferredDays: ['Tuesday', 'Thursday'],
           preferredTime: '18:00',
           preferredStartDate: startDate,
@@ -923,7 +1010,7 @@ const isoDay = (offsetDays) =>
       ).rows[0];
       check(
         'the answers land on the trial record itself',
-        afterSubmit.preferredPackage === 'Smoke package choice' &&
+        afterSubmit.preferredPackage === smokePkg.name &&
           afterSubmit.preferredDays.includes('Thursday') &&
           afterSubmit.preferredTime === '18:00' &&
           afterSubmit.preferredStartDate !== null,
@@ -1038,22 +1125,26 @@ const isoDay = (offsetDays) =>
      * chose it on the trial, and the coach should not have to re-enter what
      * the teacher already recorded. This proves the fallback works.
      */
-    const smokePkg = (
-      await db.query(
-        // Package has no updatedAt column — only createdAt.
-        `INSERT INTO "Package" (id,name,description,price,"classesPerMonth",active)
-         VALUES (gen_random_uuid(),$1,'smoke',40.00,8,true) RETURNING id, name, price`,
-        [`${MARKER}-package`],
-      )
-    ).rows[0];
-    createdPackageIds.push(smokePkg.id);
     const familyTrial = (
       await db.query(`SELECT id FROM "LeadTrial" WHERE "leadId"=$1 LIMIT 1`, [withSiblings.body.id])
     ).rows[0];
-    await db.query(`UPDATE "LeadTrial" SET "preferredPackage"=$1 WHERE id=$2`, [
-      smokePkg.name,
-      familyTrial.id,
-    ]);
+    /*
+     * A filed report on the family's trial, so the conversion has a level, a
+     * recommended course and a start date to carry across — the things the
+     * teacher captured and the student record used to lose.
+     */
+    const aCourse = (
+      await db.query(`SELECT id FROM "Course" WHERE status='PUBLISHED' ORDER BY id LIMIT 1`)
+    ).rows[0];
+    const wantedStart = isoDay(30);
+    await db.query(
+      `UPDATE "LeadTrial"
+          SET "preferredPackage"=$1, "assessedLevel"='Advanced', "recommendedCourseId"=$2,
+              "preferredStartDate"=$3::date, "reportSubmittedAt"=now(),
+              "guardianName"='Smoke Parent', "guardianRelation"='Mother'
+        WHERE id=$4`,
+      [smokePkg.name, aCourse?.id ?? null, wantedStart, familyTrial.id],
+    );
 
     const decided = await req(
       'POST',
@@ -1133,6 +1224,77 @@ const isoDay = (offsetDays) =>
         new Set(raised.map((r) => r.number)).size === raised.length,
       raised.map((r) => r.number).join(', '),
     );
+
+    // ── What the conversion carried across ───────────────────────────────────
+    const profiles = (
+      await db.query(
+        `SELECT sp.id, sp."parentEmail", sp."coachId", sp."learningLevel", sp.fees, u.email
+           FROM "StudentProfile" sp JOIN "User" u ON u.id = sp."userId"
+          WHERE sp.id = ANY($1::text[])`,
+        [studentIds],
+      )
+    ).rows;
+
+    /*
+     * The family's inbox belongs to the parent. It used to become the eldest
+     * child's student login, which made a parent account impossible: ParentLink
+     * refuses an address already held by a STUDENT, and it is the only address
+     * the family gave us.
+     */
+    check(
+      'no child takes the family email as their login',
+      profiles.length > 0 && profiles.every((p) => p.email !== `${MARKER}-family@example.test`),
+      profiles.map((p) => p.email).join(', '),
+    );
+    check(
+      'so the parent account can still be created from it',
+      profiles.length > 0 && profiles.every((p) => p.parentEmail === `${MARKER}-family@example.test`),
+      profiles.map((p) => p.parentEmail).join(', '),
+    );
+    check(
+      'the coach who owned the lead owns the students',
+      profiles.length > 0 && profiles.every((p) => p.coachId),
+      'coachId missing on a converted student',
+    );
+    check(
+      'the package price lands on the student record too',
+      profiles.length > 0 && profiles.every((p) => Number(p.fees) === 40),
+      profiles.map((p) => p.fees).join(', '),
+    );
+
+    check(
+      'the level the teacher assessed reaches the student record',
+      profiles.length > 0 && profiles.every((p) => p.learningLevel === 'Advanced'),
+      profiles.map((p) => p.learningLevel).join(', '),
+    );
+
+    const joined = (
+      await db.query(
+        `SELECT "joiningDate"::date::text AS d FROM "StudentProfile" WHERE id = ANY($1::text[])`,
+        [studentIds],
+      )
+    ).rows;
+    check(
+      'a family that asked to start next month is not dated as joining today',
+      joined.length > 0 && joined.every((r) => r.d === wantedStart),
+      joined.map((r) => r.d).join(', '),
+    );
+
+    if (aCourse) {
+      const enrolled = (
+        await db.query(
+          `SELECT "studentId" FROM "Enrollment" WHERE "studentId" = ANY($1::text[]) AND "courseId"=$2`,
+          [studentIds, aCourse.id],
+        )
+      ).rows;
+      check(
+        'the course the teacher recommended is what they are actually enrolled in',
+        enrolled.length === studentIds.length,
+        `${enrolled.length} of ${studentIds.length} enrolled`,
+      );
+    } else {
+      console.log('  skip  no published course to test the recommendation against');
+    }
 
     const invoicedNote = (
       await db.query(

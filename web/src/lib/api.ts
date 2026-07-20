@@ -2128,7 +2128,18 @@ export interface Lead {
   howFound: string | null;
   /** Extra children on the same booking; each becomes its own student. */
   siblings: { firstName: string; lastName?: string }[] | null;
-  convertedStudents: { id: string; code: string; name: string; email: string }[] | null;
+  convertedStudents:
+    | {
+        id: string;
+        code: string;
+        name: string;
+        email: string;
+        /** Null when no package was on record, so no first invoice was raised. */
+        invoiceNumber?: string | null;
+        invoiceAmount?: number | null;
+        invoiceCurrency?: string | null;
+      }[]
+    | null;
   learningGoal: string | null;
   previousCoaching: string | null;
   specialRequirements: string | null;

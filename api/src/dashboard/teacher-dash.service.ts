@@ -170,7 +170,7 @@ export class TeacherDashboardService {
   // ── Pending work queue ─────────────────────────────────────────────────────
 
   private async pendingWork(teacherId: string) {
-    const [assignments, assessments, attendance, recentClasses] = await Promise.all([
+    const [assignments, assessments, attendance, recentClasses, trialReports] = await Promise.all([
       this.prisma.submission.count({
         where: { assignment: { teacherId }, status: { in: PENDING_SUBMISSION } },
       }),
@@ -193,6 +193,20 @@ export class TeacherDashboardService {
           actualEndAt: { gte: new Date(Date.now() - 7 * 86_400_000) },
         },
         select: { id: true },
+      }),
+      /*
+       * Trials this teacher has taught but not written up.
+       *
+       * The trials page defaults to "upcoming", so a class from three days ago
+       * with no report was not on any screen a teacher looks at — the coach
+       * was left waiting on something nobody was being reminded of.
+       */
+      this.prisma.leadTrial.count({
+        where: {
+          teacherId,
+          status: 'COMPLETED',
+          reportSubmittedAt: null,
+        },
       }),
     ]);
 
@@ -220,6 +234,7 @@ export class TeacherDashboardService {
       { key: 'evaluate-tests', label: 'Evaluate Tests', count: assessments, link: '/teacher/assessments' },
       { key: 'take-attendance', label: 'Take Attendance', count: attendance, link: '/teacher/attendance' },
       { key: 'give-feedback', label: 'Give Feedback', count: feedbackDue, link: '/teacher/progress' },
+      { key: 'trial-reports', label: 'File Trial Reports', count: trialReports, link: '/teacher/trials?scope=all' },
     ].filter((t) => t.count > 0);
   }
 
