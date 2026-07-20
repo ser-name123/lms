@@ -51,6 +51,18 @@ export const LEAD_STATUS_TONE: Record<LeadStatus, Tone> = {
   CLOSED: "neutral",
 };
 
+/*
+ * Has this trial been closed out?
+ *
+ * One definition, because the coach's page and the teacher's page each had
+ * their own and they disagreed on a no-show: the teacher saw a finished class,
+ * the coach was still offered Present / No-show / Reschedule, and pressing
+ * Present quietly turned the teacher's no-show into a completed class.
+ */
+export function isTrialClosed(trial: { status: string }) {
+  return trial.status === "COMPLETED" || trial.status === "NO_SHOW";
+}
+
 export const LEAD_PRIORITIES: LeadPriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 
 export const LEAD_PRIORITY_TONE: Record<LeadPriority, Tone> = {

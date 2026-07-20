@@ -18,6 +18,7 @@ import Swal from "sweetalert2";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
 import { TrialReportPanel } from "@/components/leads/trial-report";
+import { isTrialClosed } from "@/components/leads/lead-meta";
 import { fetchMyTrials, setTrialStatus, type LeadTrial } from "@/lib/api";
 
 const swalBg = () =>
@@ -125,7 +126,7 @@ function TrialsList() {
 
 function TeacherTrialCard({ trial, onChange }: { trial: LeadTrial; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const done = trial.status === "COMPLETED" || trial.status === "NO_SHOW";
+  const done = isTrialClosed(trial);
   const hasReport = Boolean(trial.reportSubmittedAt || trial.assessedLevel);
   const [reportOpen, setReportOpen] = useState(done || hasReport);
   const studentName = trial.lead ? `${trial.lead.studentFirstName} ${trial.lead.studentLastName}` : "Student";

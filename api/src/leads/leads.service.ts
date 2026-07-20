@@ -631,6 +631,44 @@ export class LeadsService implements OnModuleInit {
     };
   }
 
+  /*
+   * Where a status sits in the pipeline. Shared by the funnel and by every
+   * write that should only ever move a lead forward — a lead that has sat a
+   * trial must not be dragged back to "Teacher Assigned" by an edit.
+   *
+   * Every status the enum can hold is listed. One missing from here ranks -1,
+   * which used to drop those leads out of the funnel entirely: the top bar
+   * then disagreed with the "Total Requests" tile printed right above it.
+   */
+  private static readonly STAGE_ORDER: LeadStatus[] = [
+    LeadStatus.NEW,
+    LeadStatus.CONTACT_PENDING,
+    LeadStatus.CONTACTED,
+    LeadStatus.EVALUATION_SCHEDULED,
+    LeadStatus.EVALUATION_COMPLETED,
+    LeadStatus.TEACHER_ASSIGNED,
+    LeadStatus.TRIAL_SCHEDULED,
+    LeadStatus.TRIAL_COMPLETED,
+    LeadStatus.WAITING_PARENT_DECISION,
+    LeadStatus.CONVERTED,
+  ];
+
+  private stageRank(status: string) {
+    return LeadsService.STAGE_ORDER.indexOf(status as LeadStatus);
+  }
+
+  /** Part of the day a preference falls in, whether it reads "16:30" or "Evening 4-7". */
+  private batchLabel(slot?: string | null) {
+    if (!slot) return 'Flexible Batch';
+    const clock = /^(\d{1,2}):(\d{2})/.exec(slot);
+    if (!clock) return `${slot.split(' ')[0]} Batch`;
+    const hour = Number(clock[1]);
+    if (hour < 12) return 'Morning Batch';
+    if (hour < 16) return 'Afternoon Batch';
+    if (hour < 20) return 'Evening Batch';
+    return 'Night Batch';
+  }
+
   private recommendFromScore(score: number | null, lead: any) {
     let level = 'Beginner';
     if (score != null) {
@@ -642,8 +680,14 @@ export class LeadsService implements OnModuleInit {
       level = lead.currentLevel;
     }
 
-    const slot = (lead.preferredTimeSlots || [])[0];
-    const batch = slot ? `${slot.split(' ')[0]} Batch` : 'Flexible Batch';
+    /*
+     * `preferredTimeSlots` used to hold the old form's coarse labels ("Morning
+     * 9-12"), which is what taking the first word was for. The trial report and
+     * the family's info form now write a clock time into it, so that same line
+     * printed "16:30 Batch". Read the hour and name the part of the day.
+     */
+    const slot = (lead.preferredTimeSlots || [])[0] as string | undefined;
+    const batch = this.batchLabel(slot);
 
     return { level, batch };
   }
@@ -702,14 +746,49 @@ export class LeadsService implements OnModuleInit {
       data: {
         assignedTeacherId: teacherId,
         assignedTeacherAt: new Date(),
-        status: LeadStatus.TEACHER_ASSIGNED,
+        /*
+         * Only forward. A lead whose trial has already happened must not drop
+         * back to "Teacher Assigned" because somebody changed the teacher —
+         * that reads as a regression on the badge and pulls the lead back a
+         * stage in the funnel.
+         */
+        ...(this.stageRank(lead.status) < this.stageRank(LeadStatus.TEACHER_ASSIGNED)
+          ? { status: LeadStatus.TEACHER_ASSIGNED }
+          : {}),
       },
     });
+
+    /*
+     * The trials go with them.
+     *
+     * Assigning a teacher to the lead used to leave every already-scheduled
+     * trial on `teacherId: null` — and a website booking always starts that
+     * way. The coach saw "Currently assigned: X" on one tab and "Unassigned
+     * teacher" on the next, while X's own trials page stayed empty and the
+     * report endpoint refused them. Nobody was assigned where it counted.
+     */
+    const openTrials = await this.prisma.leadTrial.findMany({
+      where: { leadId: id, status: { in: ['SCHEDULED', 'RESCHEDULED'] } },
+      select: { id: true, teacherId: true, scheduledAt: true },
+    });
+    const adopted = openTrials.filter((t) => t.teacherId !== teacherId);
+    if (adopted.length) {
+      await this.prisma.leadTrial.updateMany({
+        where: { id: { in: adopted.map((t) => t.id) } },
+        data: { teacherId },
+      });
+      for (const t of adopted) {
+        this.notifyTrialScheduled(lead, { ...t, teacherId }, teacherId).catch(() => undefined);
+      }
+    }
 
     await this.addActivity(
       id,
       'TEACHER_ASSIGNED',
-      `Teacher ${teacherName} assigned${dto.auto ? ' (auto)' : ''}.`,
+      `Teacher ${teacherName} assigned${dto.auto ? ' (auto)' : ''}` +
+        (adopted.length
+          ? ` and put on ${adopted.length} scheduled trial${adopted.length > 1 ? 's' : ''}.`
+          : '.'),
       actor,
     );
 
@@ -837,7 +916,22 @@ export class LeadsService implements OnModuleInit {
     if (dto.meetingProvider !== undefined) data.meetingProvider = dto.meetingProvider || null;
     if (dto.meetingLink !== undefined) data.meetingLink = dto.meetingLink || null;
     if (dto.notes !== undefined) data.notes = dto.notes || null;
-    if (dto.status) data.status = dto.status;
+    if (dto.status) {
+      data.status = dto.status;
+      /*
+       * Status and attendance are one fact — setTrialStatus keeps them in step
+       * and this route must not be the way round it. Marking a trial COMPLETED
+       * here with attendance still null leaves a class that happened with
+       * nobody recorded as present.
+       */
+      if (dto.status === 'COMPLETED') {
+        data.attendance = 'PRESENT';
+        data.attendedAt = trial.attendedAt ?? new Date();
+      } else if (dto.status === 'NO_SHOW') {
+        data.attendance = 'ABSENT';
+        data.attendedAt = null;
+      }
+    }
 
     /*
      * Keep the Zoom room in step with the trial. Without this a rescheduled
@@ -983,23 +1077,9 @@ export class LeadsService implements OnModuleInit {
   async getTrialReport(trialId: string, user: Actor) {
     await this.assertTrialAccess(trialId, user);
 
-    const trial = await this.prisma.leadTrial.findUnique({
-      where: { id: trialId },
-      include: {
-        lead: {
-          select: {
-            id: true, leadNumber: true, studentFirstName: true, studentLastName: true,
-            gender: true, dateOfBirth: true, currentGrade: true, country: true,
-            timeZone: true, parentName: true, relationship: true, email: true,
-            mobile: true, countryCode: true, whatsappNumber: true,
-            interestedSubject: true, currentLevel: true, preferredLanguage: true,
-            preferredDate: true, preferredSlot: true, sessionFor: true,
-            learningGoal: true, previousCoaching: true, specialRequirements: true,
-            medicalDisability: true, siblings: true, status: true,
-          },
-        },
-      },
-    });
+    // The lead block comes from attachTrialNames, the one place that decides
+    // what a trial's lead looks like.
+    const trial = await this.prisma.leadTrial.findUnique({ where: { id: trialId } });
     if (!trial) throw new NotFoundException(`Trial ${trialId} not found`);
 
     const [withName] = await this.attachTrialNames([trial]);
@@ -1196,7 +1276,9 @@ export class LeadsService implements OnModuleInit {
       data: {
         status: dto.status as any,
         attendance: present ? 'PRESENT' : 'ABSENT',
-        attendedAt: trial.attendedAt ?? new Date(),
+        // Only somebody who turned up has an "attended at". A no-show carrying
+        // a timestamp is a record that contradicts itself.
+        attendedAt: present ? trial.attendedAt ?? new Date() : null,
         ...(dto.note ? { notes: dto.note } : {}),
       },
     });
@@ -1647,8 +1729,12 @@ export class LeadsService implements OnModuleInit {
             parentMobile: report?.guardianPhone || lead.mobile || null,
             parentWhatsapp: lead.whatsappNumber || null,
 
-            // What the teacher assessed, not what the family guessed.
-            learningLevel: report?.assessedLevel || lead.recommendedLevel || lead.currentLevel || null,
+            /*
+             * Only the child who actually sat the trial. Siblings ride the same
+             * booking but were never assessed — stamping the eldest's level on
+             * all of them puts a teacher's judgement on a student they never met.
+             */
+            learningLevel: i === 0 ? report?.assessedLevel || lead.recommendedLevel || lead.currentLevel || null : null,
             preferredLanguage: lead.preferredLanguage || null,
             coachId: lead.assignedCoachId || null,
             // A family that asked to start next month should not be dated as
@@ -1876,21 +1962,22 @@ export class LeadsService implements OnModuleInit {
     const converted = statusCounts[LeadStatus.CONVERTED] || 0;
     const rejected = statusCounts[LeadStatus.REJECTED] || 0;
 
-    // Cumulative funnel: each stage counts leads that reached at least that far.
-    const order = [
-      LeadStatus.NEW,
-      LeadStatus.CONTACTED,
-      LeadStatus.EVALUATION_COMPLETED,
-      LeadStatus.TEACHER_ASSIGNED,
-      LeadStatus.TRIAL_SCHEDULED,
-      LeadStatus.TRIAL_COMPLETED,
-      LeadStatus.WAITING_PARENT_DECISION,
-      LeadStatus.CONVERTED,
-    ];
-    const rank = (s: string) => order.indexOf(s as any);
+    /*
+     * Cumulative funnel: each stage counts leads that reached at least that
+     * far. The stage list is the full pipeline order, so no status can fall
+     * through and go uncounted — CONTACT_PENDING and EVALUATION_SCHEDULED both
+     * used to, which made the first bar smaller than the "Total Requests" tile
+     * printed directly above it over the same population.
+     */
+    const order = LeadsService.STAGE_ORDER;
     const funnel = order.map((stage, i) => {
       const reached = byStatus
-        .filter((r) => rank(r.status) >= i && r.status !== LeadStatus.REJECTED && r.status !== LeadStatus.CLOSED)
+        .filter(
+          (r) =>
+            this.stageRank(r.status) >= i &&
+            r.status !== LeadStatus.REJECTED &&
+            r.status !== LeadStatus.CLOSED,
+        )
         .reduce((a, r) => a + r._count._all, 0);
       return { stage, reached };
     });
@@ -1913,6 +2000,15 @@ export class LeadsService implements OnModuleInit {
     const scheduled = trialAgg;
     const attended = trialStatusCounts['COMPLETED'] || 0;
     const noShow = trialStatusCounts['NO_SHOW'] || 0;
+    /*
+     * The rate is out of trials that have actually happened, not out of every
+     * trial ever booked. With the total as the denominator a coach with eight
+     * upcoming trials and two attended read "Scheduled 10 · Attended 2 ·
+     * No-shows 0 · Attendance 20%" — four numbers that cannot be reconciled,
+     * because the percentage was drawn from a population the tiles beside it
+     * were not.
+     */
+    const concluded = attended + noShow;
 
     return {
       total,
@@ -1924,7 +2020,10 @@ export class LeadsService implements OnModuleInit {
         scheduled,
         attended,
         noShow,
-        attendanceRate: scheduled ? Math.round((attended / scheduled) * 100) : 0,
+        // Trials still to come — so `scheduled` is visibly the sum of the three.
+        upcoming: Math.max(0, scheduled - concluded - (trialStatusCounts['CANCELLED'] || 0)),
+        cancelled: trialStatusCounts['CANCELLED'] || 0,
+        attendanceRate: concluded ? Math.round((attended / concluded) * 100) : 0,
         avgTeacherRating: tRating._avg.teacherRating ? Math.round(tRating._avg.teacherRating * 10) / 10 : 0,
         avgParentRating: pRating._avg.parentRating ? Math.round(pRating._avg.parentRating * 10) / 10 : 0,
       },
@@ -2204,7 +2303,17 @@ export class LeadsService implements OnModuleInit {
   }
 
   // Resolve teacherId -> name (and optionally the lead summary for teacher views).
-  private async attachTrialNames(trials: any[], withLead = false) {
+  /*
+   * One shape for every trial the API returns.
+   *
+   * `withLead` used to default to false and only `myTrials` passed true, so
+   * the same row came back three different ways depending on the route. The
+   * `lead` block is optional in the client type, which meant a component
+   * reading `trial.lead.studentFirstName` type-checked everywhere and only
+   * worked on one endpoint — held together by both pages happening to refetch
+   * rather than trusting a mutation's response. It is always attached now.
+   */
+  private async attachTrialNames(trials: any[], withLead = true) {
     const teacherIds = [...new Set(trials.map((t) => t.teacherId).filter(Boolean))];
     const leadIds = withLead ? [...new Set(trials.map((t) => t.leadId))] : [];
 
@@ -2229,6 +2338,10 @@ export class LeadsService implements OnModuleInit {
               currentLevel: true, preferredLanguage: true, sessionFor: true,
               learningGoal: true, specialRequirements: true, medicalDisability: true,
               siblings: true,
+              // Folded in from getTrialReport's own bespoke select, which was a
+              // second definition of "the lead, as a trial sees it".
+              countryCode: true, preferredDate: true, preferredSlot: true,
+              previousCoaching: true, status: true,
             },
           })
         : [],

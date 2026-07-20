@@ -50,11 +50,18 @@ export default function LeadsPage() {
   const [status, setStatus] = useState("All");
   const [priority, setPriority] = useState("All");
   const [search, setSearch] = useState("");
+  /*
+   * The table used to ask for one page of 100 and print "Total Requests 340"
+   * above it, with no way to reach lead 101. Paged properly now.
+   */
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, totalPages: 1 });
+  const PAGE_SIZE = 25;
 
   const load = () => {
     setLoading(true);
-    fetchLeads({ page: 1, limit: 100, status, priority, search: search || undefined })
-      .then((res) => setItems(res.items))
+    fetchLeads({ page, limit: PAGE_SIZE, status, priority, search: search || undefined })
+      .then((res) => { setItems(res.items); setMeta({ total: res.meta.total, totalPages: res.meta.totalPages }); })
       .catch((e) => console.error("Failed to load leads", e))
       .finally(() => setLoading(false));
     fetchLeadStats().then(setStats).catch(() => undefined);
@@ -62,7 +69,11 @@ export default function LeadsPage() {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [status, priority]);
+  useEffect(() => { load(); }, [status, priority, page]);
+
+  // A filter change makes the current page number meaningless.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1); }, [status, priority]);
 
   const kpis = [
     { label: "Total Requests", value: stats?.total ?? 0, icon: Users, color: "text-ink-2 bg-surface-3" },
@@ -85,6 +96,9 @@ export default function LeadsPage() {
     { label: "Trials Scheduled", value: tr?.scheduled ?? 0, icon: CalendarClock, color: "text-accent bg-accent/10" },
     { label: "Attended", value: tr?.attended ?? 0, icon: UserCheck, color: "text-emerald-500 bg-emerald-500/10" },
     { label: "No-shows", value: tr?.noShow ?? 0, icon: UserX, color: "text-rose-500 bg-rose-500/10" },
+    // Out of trials that have actually concluded, which is why "Upcoming" is
+    // shown too — otherwise the four tiles cannot be added up by the reader.
+    { label: "Upcoming", value: tr?.upcoming ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10" },
     { label: "Attendance %", value: `${tr?.attendanceRate ?? 0}%`, icon: TrendingUp, color: "text-blue-500 bg-blue-500/10" },
     { label: "Avg Teacher ★", value: tr?.avgTeacherRating ?? 0, icon: Star, color: "text-amber-500 bg-amber-500/10" },
     { label: "Avg Parent ★", value: tr?.avgParentRating ?? 0, icon: Star, color: "text-violet-500 bg-violet-500/10" },
@@ -237,6 +251,25 @@ export default function LeadsPage() {
               </table>
             )}
           </div>
+
+          {meta.totalPages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3.5">
+              <p className="text-[11px] font-bold text-ink-3">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, meta.total)} of {meta.total}
+              </p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+                  className="h-8 rounded-lg border border-hairline px-3 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-40">
+                  Previous
+                </button>
+                <span className="text-[11px] font-bold text-ink-3">Page {page} of {meta.totalPages}</span>
+                <button onClick={() => setPage((p) => Math.min(meta.totalPages, p + 1))} disabled={page >= meta.totalPages}
+                  className="h-8 rounded-lg border border-hairline px-3 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-40">
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
     </>

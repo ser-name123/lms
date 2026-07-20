@@ -2369,9 +2369,12 @@ export interface LeadTrial {
   infoRequestedAt: string | null;
   infoSubmittedAt: string | null;
 
-  // Present on the teacher "my trials" view and the report view — the booking
-  // the teacher checks the family's answers against.
-  lead?: {
+  /*
+   * The booking behind this trial. Present on every endpoint that returns a
+   * trial — it used to come back only from "my trials", so a component reading
+   * it type-checked everywhere and worked in one place.
+   */
+  lead: {
     id: string;
     leadNumber: string;
     studentFirstName: string;
@@ -2394,6 +2397,11 @@ export interface LeadTrial {
     specialRequirements?: string | null;
     medicalDisability?: string | null;
     siblings?: { firstName?: string; lastName?: string }[] | null;
+    countryCode?: string | null;
+    preferredDate?: string | null;
+    preferredSlot?: string | null;
+    previousCoaching?: string | null;
+    status?: LeadStatus;
   } | null;
 }
 
@@ -2439,6 +2447,9 @@ export interface LeadFunnel {
     scheduled: number;
     attended: number;
     noShow: number;
+    /** Still to come — scheduled = attended + noShow + cancelled + upcoming. */
+    upcoming: number;
+    cancelled: number;
     attendanceRate: number;
     avgTeacherRating: number;
     avgParentRating: number;

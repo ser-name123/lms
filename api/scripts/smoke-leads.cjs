@@ -468,6 +468,27 @@ const isoDay = (offsetDays) =>
       );
       check('the coach can assign a teacher', assign.ok, `status ${assign.status}`);
 
+      /*
+       * The lead's teacher and the trial's teacher were two separate columns
+       * with nothing keeping them in step. A website booking creates the trial
+       * with no teacher, so assigning one on the lead left the coach reading
+       * "Currently assigned: X" on one tab and "Unassigned teacher" on the
+       * next — while X's own trials page stayed empty and the report endpoint
+       * refused them.
+       */
+      const trialTeachers = (
+        await db.query(
+          `SELECT "teacherId" FROM "LeadTrial"
+            WHERE "leadId"=$1 AND status IN ('SCHEDULED','RESCHEDULED')`,
+          [first.body.id],
+        )
+      ).rows;
+      check(
+        'assigning a teacher to the lead puts them on its open trials too',
+        trialTeachers.length > 0 && trialTeachers.every((r) => r.teacherId === someTeacher[0].id),
+        trialTeachers.map((r) => r.teacherId).join(', ') || 'no open trials',
+      );
+
       const reassign = await req(
         'POST',
         `/leads/${first.body.id}/assign-teacher`,
@@ -590,6 +611,56 @@ const isoDay = (offsetDays) =>
       403,
     );
     check('nor reschedule them', strangerMoves.ok, `status ${strangerMoves.status}`);
+
+    // ── Numbers that have to agree with each other ───────────────────────────
+    console.log('\n── Consistency ──');
+    {
+      const funnel = await req('GET', '/leads/funnel', adminToken);
+      const stats = await req('GET', '/leads/stats', adminToken);
+      /*
+       * Two statuses were missing from the funnel's stage list, so leads
+       * parked there fell out of every bar — the first bar then read lower
+       * than the "Total Requests" tile printed directly above it.
+       */
+      const topBar = funnel.body.funnel?.[0]?.reached ?? 0;
+      const live = (stats.body.total ?? 0) - (funnel.body.rejected ?? 0) - (stats.body.closed ?? 0);
+      check(
+        'no lead falls out of the funnel — the top bar covers every live lead',
+        funnel.ok && stats.ok && topBar >= live,
+        `top bar ${topBar} vs ${live} live leads`,
+      );
+      check(
+        'the funnel lists the whole pipeline, not a subset of it',
+        funnel.ok && funnel.body.funnel?.length === 10,
+        `${funnel.body.funnel?.length} stages`,
+      );
+
+      const t = funnel.body.trials ?? {};
+      check(
+        'the trial tiles add up — scheduled is the sum of the rest',
+        funnel.ok &&
+          t.scheduled === (t.attended ?? 0) + (t.noShow ?? 0) + (t.cancelled ?? 0) + (t.upcoming ?? 0),
+        `${t.scheduled} vs ${(t.attended ?? 0) + (t.noShow ?? 0) + (t.cancelled ?? 0) + (t.upcoming ?? 0)}`,
+      );
+      check(
+        'attendance % is out of trials that actually happened',
+        funnel.ok &&
+          t.attendanceRate ===
+            (t.attended + t.noShow ? Math.round((t.attended / (t.attended + t.noShow)) * 100) : 0),
+        `${t.attendanceRate}%`,
+      );
+
+      /*
+       * The same trial used to come back in three shapes depending on the
+       * route, and the client type made `lead` optional so nothing caught it.
+       */
+      const listed = await req('GET', `/leads/${first.body.id}/trials`, ownerToken);
+      check(
+        'every endpoint returns a trial with its lead attached, not just one of them',
+        listed.ok && listed.body.every((t2) => t2.lead && t2.lead.studentFirstName),
+        'a trial came back without its lead',
+      );
+    }
 
     // ── The teacher's trial report ───────────────────────────────────────────
     console.log('\n── Teacher trial report ──');
@@ -949,6 +1020,18 @@ const isoDay = (offsetDays) =>
         'a student marked absent cannot be reported on',
         absentReport.ok,
         `status ${absentReport.status}`,
+      );
+
+      const noShowState = (
+        await db.query(
+          `SELECT attendance, "attendedAt" FROM "LeadTrial" WHERE id=$1`,
+          [second.body.id],
+        )
+      ).rows[0];
+      check(
+        'a no-show carries no "attended at" — the record cannot contradict itself',
+        noShowState.attendance === 'ABSENT' && noShowState.attendedAt === null,
+        `${noShowState.attendance} / ${noShowState.attendedAt}`,
       );
     }
 
@@ -1322,10 +1405,21 @@ const isoDay = (offsetDays) =>
       profiles.map((p) => p.fees).join(', '),
     );
 
+    /*
+     * The level goes only to the child who sat the trial. Siblings ride the
+     * same booking but were never assessed — stamping the eldest's level on
+     * all of them puts a teacher's judgement on students they never met.
+     */
+    const primaryId = converted.convertedStudents[0].id;
     check(
-      'the level the teacher assessed reaches the student record',
-      profiles.length > 0 && profiles.every((p) => p.learningLevel === 'Advanced'),
-      profiles.map((p) => p.learningLevel).join(', '),
+      'the level the teacher assessed reaches the student who was assessed',
+      profiles.find((p) => p.id === primaryId)?.learningLevel === 'Advanced',
+      profiles.find((p) => p.id === primaryId)?.learningLevel,
+    );
+    check(
+      'and is not stamped on the siblings who were not',
+      profiles.filter((p) => p.id !== primaryId).every((p) => p.learningLevel === null),
+      profiles.filter((p) => p.id !== primaryId).map((p) => p.learningLevel).join(', '),
     );
 
     const joined = (

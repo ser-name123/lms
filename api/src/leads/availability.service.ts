@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { LeadStatus } from '../generated/prisma/enums';
 
 /*
  * Which 30-minute slots a visitor may book a trial in, for one date.
@@ -261,8 +262,20 @@ export class LeadAvailabilityService {
         },
         select: { scheduledAt: true, durationMins: true },
       }),
+      /*
+       * A lead's requested slot only holds the room while it is still waiting
+       * for a trial. Once a trial exists the trial itself is the booking, and
+       * a coach who cancels or moves it is deliberately freeing that time —
+       * without this the lead's original request went on blocking the slot for
+       * everyone, forever, with nothing in the UI to explain why.
+       */
       this.prisma.lead.findMany({
-        where: { preferredDate: date, preferredSlot: { not: null } },
+        where: {
+          preferredDate: date,
+          preferredSlot: { not: null },
+          trials: { none: {} },
+          status: { notIn: [LeadStatus.REJECTED, LeadStatus.CLOSED, LeadStatus.CONVERTED] },
+        },
         select: { preferredSlot: true },
       }),
     ]);

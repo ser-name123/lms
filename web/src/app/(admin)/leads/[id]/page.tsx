@@ -64,6 +64,7 @@ import {
   LEAD_PRIORITY_TONE,
   LEAD_STATUS_LABEL,
   LEAD_STATUS_TONE,
+  isTrialClosed,
 } from "@/components/leads/lead-meta";
 import { TeacherAvailabilityPanel } from "@/components/leads/teacher-availability";
 import { SubmittedReport } from "@/components/leads/trial-report";
@@ -785,7 +786,13 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
 
 function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const done = trial.status === "COMPLETED" || trial.attendance === "PRESENT";
+  /*
+   * Same definition as the teacher's own screen. The coach used to treat a
+   * NO_SHOW as still open, so it kept offering Present / No-show / Reschedule
+   * on a trial the teacher had already closed — and clicking Present silently
+   * turned their no-show into a completed class.
+   */
+  const done = isTrialClosed(trial);
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
