@@ -234,7 +234,7 @@ export class TeacherDashboardService {
       { key: 'evaluate-tests', label: 'Evaluate Tests', count: assessments, link: '/teacher/assessments' },
       { key: 'take-attendance', label: 'Take Attendance', count: attendance, link: '/teacher/attendance' },
       { key: 'give-feedback', label: 'Give Feedback', count: feedbackDue, link: '/teacher/progress' },
-      { key: 'trial-reports', label: 'File Trial Reports', count: trialReports, link: '/teacher/trials?scope=all' },
+      { key: 'trial-reports', label: 'File Trial Reports', count: trialReports, link: '/teacher/live-class' },
     ].filter((t) => t.count > 0);
   }
 

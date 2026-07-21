@@ -1002,8 +1002,15 @@ function MissingInfoRow({ trial, onChange }: { trial: LeadTrial; onChange: () =>
     !trial.preferredStartDate && "start date",
   ].filter(Boolean) as string[];
 
-  // Nothing to chase and nothing sent — stay out of the way.
-  if (!missing.length && !trial.infoRequestedAt) return null;
+  // These four are enrollment preferences the family settles around the trial —
+  // the website booking never captures them, so a freshly scheduled trial is
+  // *expected* to be missing all four. Chasing them only makes sense once the
+  // trial has actually happened; before that (SCHEDULED/RESCHEDULED) or when it
+  // never will (NO_SHOW/CANCELLED) the prompt is just noise. If a link was
+  // already sent, keep showing its status regardless of state.
+  if (!trial.infoRequestedAt && (trial.status !== "COMPLETED" || !missing.length)) {
+    return null;
+  }
 
   const send = async () => {
     if (trial.infoRequestedAt && !trial.infoSubmittedAt) {

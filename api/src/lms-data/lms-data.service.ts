@@ -2,13 +2,60 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { bulkDelete } from '../common/bulk-delete';
 
 @Injectable()
-export class LmsDataService {
+export class LmsDataService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit() {
+    try {
+      const lmsPackages = await this.prisma.lmsPackage.findMany();
+      for (const lp of lmsPackages) {
+        const exists = await this.prisma.package.findUnique({ where: { id: lp.id } });
+        if (!exists) {
+          console.log(`[LmsDataService] Syncing missing Package: ${lp.title}`);
+          await this.prisma.package.create({
+            data: {
+              id: lp.id,
+              name: lp.title,
+              description: lp.description,
+              price: lp.price,
+              classesPerMonth: parseClassesPerMonth(lp.features, lp.title),
+              active: lp.status === 'Active',
+            }
+          });
+        }
+      }
+
+      // Clean up stale trials for converted/rejected/closed leads
+      const staleTrials = await this.prisma.leadTrial.findMany({
+        where: {
+          status: { in: ['SCHEDULED', 'RESCHEDULED'] },
+          lead: {
+            status: { in: ['CONVERTED', 'REJECTED', 'CLOSED'] }
+          }
+        },
+        include: { lead: true }
+      });
+      for (const t of staleTrials) {
+        const isFuture = t.scheduledAt && new Date(t.scheduledAt) > new Date();
+        const newStatus = t.lead.status === 'CONVERTED'
+          ? (isFuture ? 'CANCELLED' : 'COMPLETED')
+          : 'CANCELLED';
+        console.log(`[LmsDataService] Cleaning up stale trial ${t.id} for lead ${t.lead.leadNumber} (${t.lead.status}) -> ${newStatus}`);
+        await this.prisma.leadTrial.update({
+          where: { id: t.id },
+          data: { status: newStatus }
+        });
+      }
+    } catch (err) {
+      console.error('[LmsDataService] Failed to sync packages/clean up trials on init:', err);
+    }
+  }
 
   // 1. Courses
   async getCourses() {
@@ -189,18 +236,57 @@ export class LmsDataService {
   }
 
   async createPackage(dto: any) {
-    return this.prisma.lmsPackage.create({
+    const lmsPkg = await this.prisma.lmsPackage.create({
       data: this.normalisePackage(dto),
     });
+    try {
+      await this.prisma.package.create({
+        data: {
+          id: lmsPkg.id,
+          name: lmsPkg.title,
+          description: lmsPkg.description,
+          price: lmsPkg.price,
+          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          active: lmsPkg.status === 'Active',
+        },
+      });
+    } catch (err) {
+      console.error('Failed to sync Package creation:', err);
+    }
+    return lmsPkg;
   }
   async updatePackage(id: string, dto: any) {
     const { id: _, ...data } = dto;
-    return this.prisma.lmsPackage.update({
+    const lmsPkg = await this.prisma.lmsPackage.update({
       where: { id },
       data: this.normalisePackage(data),
     });
+    try {
+      await this.prisma.package.upsert({
+        where: { id },
+        create: {
+          id: lmsPkg.id,
+          name: lmsPkg.title,
+          description: lmsPkg.description,
+          price: lmsPkg.price,
+          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          active: lmsPkg.status === 'Active',
+        },
+        update: {
+          name: lmsPkg.title,
+          description: lmsPkg.description,
+          price: lmsPkg.price,
+          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          active: lmsPkg.status === 'Active',
+        },
+      });
+    } catch (err) {
+      console.error('Failed to sync Package update:', err);
+    }
+    return lmsPkg;
   }
   async deletePackage(id: string) {
+    await this.prisma.package.delete({ where: { id } }).catch(() => null);
     return this.prisma.lmsPackage.delete({ where: { id } });
   }
 
@@ -323,8 +409,38 @@ export class LmsDataService {
             'Deleting it would leave those families billed for something that no longer exists.',
         );
       }
+      await this.prisma.package.delete({ where: { id } }).catch(() => null);
       await this.prisma.lmsPackage.delete({ where: { id } });
       return pkg.title;
     });
   }
+}
+
+function parseClassesPerMonth(features: string[] = [], title: string = ''): number {
+  const textToSearch = `${title} ${features.join(' ')}`.toLowerCase();
+  
+  // Search for "X classes/week" or "X classes per week" or "X/week"
+  const weekMatch = textToSearch.match(/(\d+)\s*(?:classes|sessions|hours|days)?\s*(?:\/|per)\s*week/);
+  if (weekMatch) {
+    const val = parseInt(weekMatch[1], 10);
+    if (!isNaN(val)) return val * 4;
+  }
+  
+  // Search for "X classes/month" or "X classes per month" or "X/month"
+  const monthMatch = textToSearch.match(/(\d+)\s*(?:classes|sessions|hours|days)?\s*(?:\/|per)\s*month/);
+  if (monthMatch) {
+    const val = parseInt(monthMatch[1], 10);
+    if (!isNaN(val)) return val;
+  }
+
+  // Fallback: search for any number in features or title
+  const numberMatches = textToSearch.match(/\b\d+\b/g);
+  if (numberMatches) {
+    for (const numStr of numberMatches) {
+      const val = parseInt(numStr, 10);
+      if (val >= 4 && val <= 30) return val; // if it looks like a classes count
+    }
+  }
+
+  return 8; // Default fallback to 8 classes per month (2 classes per week)
 }

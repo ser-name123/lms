@@ -2048,6 +2048,19 @@ export class LeadsService implements OnModuleInit {
         });
       }
 
+      // Automatically resolve any pending trials when a lead is converted
+      const pendingTrials = await tx.leadTrial.findMany({
+        where: { leadId: lead.id, status: { in: ['SCHEDULED', 'RESCHEDULED'] } },
+        select: { id: true, scheduledAt: true },
+      });
+      for (const t of pendingTrials) {
+        const isFuture = t.scheduledAt && new Date(t.scheduledAt) > new Date();
+        await tx.leadTrial.update({
+          where: { id: t.id },
+          data: { status: isFuture ? 'CANCELLED' : 'COMPLETED' },
+        });
+      }
+
       return profiles;
     });
 
@@ -2189,22 +2202,13 @@ export class LeadsService implements OnModuleInit {
     const rejected = statusCounts[LeadStatus.REJECTED] || 0;
 
     /*
-     * Cumulative funnel: each stage counts leads that reached at least that
-     * far. The stage list is the full pipeline order, so no status can fall
-     * through and go uncounted — CONTACT_PENDING and EVALUATION_SCHEDULED both
-     * used to, which made the first bar smaller than the "Total Requests" tile
-     * printed directly above it over the same population.
+     * Status distribution funnel: each stage counts leads currently in that
+     * specific status. The stage list is the full pipeline order, so no status
+     * can fall through and go uncounted.
      */
     const order = LeadsService.STAGE_ORDER;
-    const funnel = order.map((stage, i) => {
-      const reached = byStatus
-        .filter(
-          (r) =>
-            this.stageRank(r.status) >= i &&
-            r.status !== LeadStatus.REJECTED &&
-            r.status !== LeadStatus.CLOSED,
-        )
-        .reduce((a, r) => a + r._count._all, 0);
+    const funnel = order.map((stage) => {
+      const reached = statusCounts[stage] || 0;
       return { stage, reached };
     });
 

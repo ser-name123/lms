@@ -653,17 +653,17 @@ const isoDay = (offsetDays) =>
     {
       const funnel = await req('GET', '/leads/funnel', adminToken);
       const stats = await req('GET', '/leads/stats', adminToken);
-      /*
-       * Two statuses were missing from the funnel's stage list, so leads
-       * parked there fell out of every bar — the first bar then read lower
-       * than the "Total Requests" tile printed directly above it.
-       */
-      const topBar = funnel.body.funnel?.[0]?.reached ?? 0;
+       /*
+        * All pipeline stages are checked to ensure no status drops out. Since the
+        * funnel is now a non-cumulative status distribution, the sum of all bars
+        * must equal the count of live leads.
+        */
+      const totalBar = funnel.body.funnel?.reduce((sum, f) => sum + (f.reached ?? 0), 0) ?? 0;
       const live = (stats.body.total ?? 0) - (funnel.body.rejected ?? 0) - (stats.body.closed ?? 0);
       check(
-        'no lead falls out of the funnel — the top bar covers every live lead',
-        funnel.ok && stats.ok && topBar >= live,
-        `top bar ${topBar} vs ${live} live leads`,
+        'no lead falls out of the funnel — total bar matches live leads',
+        funnel.ok && stats.ok && totalBar === live,
+        `total bar ${totalBar} vs ${live} live leads`,
       );
       check(
         'the funnel lists the whole pipeline, not a subset of it',
