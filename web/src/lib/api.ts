@@ -2288,7 +2288,14 @@ export const fetchLeads = (params: {
     const v = params[k];
     if (v && v !== "All") q[k] = String(v);
   });
-  return api<{ items: Lead[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(
+  return api<{
+    items: Lead[];
+    meta: {
+      page: number; limit: number; total: number; totalPages: number;
+      /** Converted requests kept out of the default view — they are students now. */
+      hiddenConverted: number;
+    };
+  }>(
     `/leads?${new URLSearchParams(q).toString()}`,
   );
 };
@@ -2300,6 +2307,24 @@ export const fetchLeadRecommendation = (id: string) => api<LeadRecommendation>(`
 
 export const updateLead = (id: string, dto: Record<string, unknown>) =>
   api<Lead>(`/leads/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+
+/** Cancels the trial's Zoom room and clears its staff alerts on the way out. */
+export const deleteLead = (id: string) =>
+  api<{ id: string; leadNumber: string; name: string }>(`/leads/${id}`, { method: "DELETE" });
+
+export interface BulkDeleteResult {
+  deleted: number;
+  failed: number;
+  deletedItems: { id: string; leadNumber: string; name: string }[];
+  /** One entry per request that could not go, with the reason to show. */
+  failures: { id: string; reason: string }[];
+}
+
+export const bulkDeleteLeads = (ids: string[]) =>
+  api<BulkDeleteResult>("/leads/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
 
 export const evaluateLead = (id: string, scores: Record<string, number>, notes?: string) =>
   api<Lead>(`/leads/${id}/evaluate`, { method: "POST", body: JSON.stringify({ scores, notes }) });

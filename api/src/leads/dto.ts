@@ -118,6 +118,43 @@ export class UpdateLeadDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() assignedCoachId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+
+  /*
+   * The family typed all of this themselves on a public form, so typos are a
+   * certainty — and the acknowledgement, the reminders and every later
+   * message go to that address. Until now none of it could be corrected.
+   */
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() studentFirstName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @IsNotEmpty() studentLastName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsEmail() email?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() mobile?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() countryCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() whatsappNumber?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() parentName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() relationship?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() gender?: string;
+  @ApiPropertyOptional({ description: 'YYYY-MM-DD' })
+  @IsOptional() @IsString() dateOfBirth?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() currentGrade?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() currentSchool?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() country?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() timeZone?: string;
+  @ApiPropertyOptional({ enum: LEARN_OPTIONS })
+  @IsOptional() @IsString() interestedSubject?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() currentLevel?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() preferredLanguage?: string;
+  @ApiPropertyOptional({ enum: TEACHER_PREFERENCE_OPTIONS })
+  @IsOptional() @IsIn(TEACHER_PREFERENCE_OPTIONS as unknown as string[])
+  preferredTeacherGender?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() learningGoal?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() specialRequirements?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() medicalDisability?: string;
+}
+
+/** Deleting several trial requests at once from the list. */
+export class BulkDeleteLeadsDto {
+  @ApiProperty({ type: [String] })
+  @IsArray() @IsString({ each: true }) ids!: string[];
 }
 
 export class EvaluateLeadDto {

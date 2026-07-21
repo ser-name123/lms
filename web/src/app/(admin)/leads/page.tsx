@@ -15,7 +15,9 @@ import {
   CalendarClock,
   UserCheck,
   UserX,
+  Trash2,
 } from "lucide-react";
+import Swal from "sweetalert2";
 import {
   BarChart,
   Bar,
@@ -29,7 +31,7 @@ import {
 import { Topbar } from "@/components/layout/topbar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
-import { fetchLeads, fetchLeadStats, fetchLeadFunnel, type Lead, type LeadStats, type LeadFunnel } from "@/lib/api";
+import { fetchLeads, fetchLeadStats, fetchLeadFunnel, bulkDeleteLeads, type Lead, type LeadStats, type LeadFunnel } from "@/lib/api";
 import {
   ALL_LEAD_STATUSES,
   LEAD_PIPELINE,
@@ -38,6 +40,9 @@ import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_TONE,
 } from "@/components/leads/lead-meta";
+
+const swalBg = () =>
+  typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
 
 const BAR_COLORS = ["#386FA4", "#133C55", "#59A5D8", "#84D2F6", "#91E5F6", "#0EA5E9"];
 
@@ -55,13 +60,29 @@ export default function LeadsPage() {
    * above it, with no way to reach lead 101. Paged properly now.
    */
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, totalPages: 1 });
+  const [meta, setMeta] = useState({ total: 0, totalPages: 1, hiddenConverted: 0 });
   const PAGE_SIZE = 25;
+  /*
+   * Selection is by id, not by row index — the list re-sorts and re-pages
+   * under it, and an index-based selection would silently move to whatever
+   * row landed in that position.
+   */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
     fetchLeads({ page, limit: PAGE_SIZE, status, priority, search: search || undefined })
-      .then((res) => { setItems(res.items); setMeta({ total: res.meta.total, totalPages: res.meta.totalPages }); })
+      .then((res) => {
+        setItems(res.items);
+        setMeta({
+          total: res.meta.total,
+          totalPages: res.meta.totalPages,
+          hiddenConverted: res.meta.hiddenConverted ?? 0,
+        });
+        // Never carry a tick across a reload — the rows behind it have changed.
+        setSelected(new Set());
+      })
       .catch((e) => console.error("Failed to load leads", e))
       .finally(() => setLoading(false));
     fetchLeadStats().then(setStats).catch(() => undefined);
@@ -74,6 +95,78 @@ export default function LeadsPage() {
   // A filter change makes the current page number meaningless.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setPage(1); }, [status, priority]);
+
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const allOnPage = items.length > 0 && items.every((l) => selected.has(l.id));
+  const toggleAll = () =>
+    setSelected((prev) => (allOnPage ? new Set() : new Set([...prev, ...items.map((l) => l.id)])));
+
+  /*
+   * Deleting is irreversible and takes the trial, its Zoom room and the whole
+   * timeline with it, so the confirmation names who is going rather than
+   * printing a count and hoping.
+   */
+  const removeSelected = async () => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const names = items
+      .filter((l) => ids.includes(l.id))
+      .slice(0, 5)
+      .map((l) => `${l.studentFirstName} ${l.studentLastName}`);
+    const more = ids.length - names.length;
+
+    const { isConfirmed } = await Swal.fire({
+      title: `Delete ${ids.length} trial request${ids.length > 1 ? "s" : ""}?`,
+      html:
+        `<p style="font-size:13px;text-align:left">${names.join("<br/>")}` +
+        (more > 0 ? `<br/>…and ${more} more` : "") +
+        `</p><p style="font-size:12px;color:#6b7280;text-align:left;margin-top:10px">` +
+        `Their trial classes, Zoom rooms and history go too. This cannot be undone. ` +
+        `Anyone already enrolled as a student will be skipped.</p>`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: `Delete ${ids.length}`,
+      confirmButtonColor: "#e11d48",
+      background: swalBg(),
+    });
+    if (!isConfirmed) return;
+
+    setDeleting(true);
+    try {
+      const res = await bulkDeleteLeads(ids);
+      if (res.failed) {
+        // Say which ones stayed and why, rather than a bare count.
+        await Swal.fire({
+          title: `${res.deleted} deleted, ${res.failed} kept`,
+          html: `<p style="font-size:12px;text-align:left">${res.failures.map((f) => f.reason).join("<br/><br/>")}</p>`,
+          icon: "info",
+          background: swalBg(),
+        });
+      } else {
+        Swal.fire({
+          toast: true, position: "top-end", icon: "success",
+          title: `${res.deleted} deleted`, showConfirmButton: false, timer: 1900,
+        });
+      }
+      load();
+    } catch (e) {
+      Swal.fire({
+        title: "Could not delete",
+        text: e instanceof Error ? e.message : "Failed.",
+        icon: "error",
+        background: swalBg(),
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const kpis = [
     { label: "Total Requests", value: stats?.total ?? 0, icon: Users, color: "text-ink-2 bg-surface-3" },
@@ -200,6 +293,28 @@ export default function LeadsPage() {
           </form>
         </div>
 
+        {/*
+          * Only present while something is ticked. A delete button sitting
+          * permanently above a list of families is an accident waiting for a
+          * mis-click.
+          */}
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-4 py-3">
+            <p className="text-xs font-bold text-ink">
+              {selected.size} selected
+            </p>
+            <button onClick={() => setSelected(new Set())}
+              className="text-[11px] font-bold text-ink-3 hover:text-ink-2">
+              Clear
+            </button>
+            <button onClick={removeSelected} disabled={deleting}
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 text-xs font-bold text-rose-600 hover:bg-rose-500/20 disabled:opacity-50">
+              {deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              Delete selected
+            </button>
+          </div>
+        )}
+
         {/* Table */}
         <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
           <div className="overflow-x-auto min-h-[300px]">
@@ -217,6 +332,11 @@ export default function LeadsPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">
+                    <th className="w-10 px-5 py-4">
+                      <input type="checkbox" checked={allOnPage} onChange={toggleAll}
+                        aria-label="Select every request on this page"
+                        className="size-3.5 cursor-pointer accent-[var(--accent)]" />
+                    </th>
                     <th className="px-5 py-4">Request ID</th>
                     <th className="px-5 py-4">Student</th>
                     <th className="px-5 py-4">Parent</th>
@@ -230,7 +350,13 @@ export default function LeadsPage() {
                 </thead>
                 <tbody className="divide-y divide-hairline">
                   {items.map((l) => (
-                    <tr key={l.id} onClick={() => router.push(`/leads/${l.id}`)} className="cursor-pointer hover:bg-surface-2/30 transition-colors">
+                    <tr key={l.id} onClick={() => router.push(`/leads/${l.id}`)} className={`cursor-pointer transition-colors ${selected.has(l.id) ? "bg-accent/5" : "hover:bg-surface-2/30"}`}>
+                      {/* The row navigates on click, so the tick must not. */}
+                      <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)}
+                          aria-label={`Select ${l.studentFirstName} ${l.studentLastName}`}
+                          className="size-3.5 cursor-pointer accent-[var(--accent)]" />
+                      </td>
                       <td className="px-5 py-3.5 text-xs font-mono font-bold text-accent">{l.leadNumber}</td>
                       <td className="px-5 py-3.5">
                         <p className="text-xs font-bold text-ink">{l.studentFirstName} {l.studentLastName}</p>
@@ -251,6 +377,23 @@ export default function LeadsPage() {
               </table>
             )}
           </div>
+
+          {/*
+            * Said plainly rather than left as a discrepancy between the
+            * "Total Requests" tile and the rows underneath it.
+            */}
+          {status === "All" && meta.hiddenConverted > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-hairline px-5 py-3 text-[11px] text-ink-3">
+              <span>
+                {meta.hiddenConverted} converted request
+                {meta.hiddenConverted > 1 ? "s are" : " is"} not shown — they are students now.
+              </span>
+              <button onClick={() => setStatus("CONVERTED")}
+                className="font-bold text-accent hover:underline">
+                Show them
+              </button>
+            </div>
+          )}
 
           {meta.totalPages > 1 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3.5">

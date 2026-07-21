@@ -1457,6 +1457,277 @@ const isoDay = (offsetDays) =>
       )
     ).rows[0];
     check('and the coach sees it on the timeline', Boolean(invoicedNote), 'no INVOICED activity');
+    // ── Editing and deleting a request ───────────────────────────────────────
+    console.log('\n── Edit & delete ──');
+    {
+      /*
+       * A day of their own. The cases above consume the slots on `slotDate`,
+       * so sharing it meant these bookings failed for lack of a slot and the
+       * failure surfaced two calls later as a confusing 404.
+       */
+      let fixtureDate = null;
+      let fixtureSlots = [];
+      for (let d = 1; d <= 20 && !fixtureDate; d++) {
+        if (isoDay(d) === slotDate) continue;
+        const res = await req('GET', `/leads/availability?date=${isoDay(d)}`, null);
+        if (res.ok && (res.body.slots?.length ?? 0) >= 3) {
+          fixtureDate = isoDay(d);
+          fixtureSlots = res.body.slots;
+        }
+      }
+      if (!fixtureDate) throw new Error('No spare date with slots for the edit/delete cases');
+
+      const bookOn = (email, slot) =>
+        req('POST', '/leads', null, { ...bookingFor(email, slot), preferredDate: fixtureDate }, 201);
+
+      const editable = await bookOn(`${MARKER}-edit@example.test`, fixtureSlots[0]);
+      check('a request can be booked to edit', editable.ok, `status ${editable.status}`);
+      if (!editable.body?.id) throw new Error('Could not book the lead to edit');
+      createdLeadIds.push(editable.body.id);
+
+      const fixed = await req('PATCH', `/leads/${editable.body.id}`, adminToken, {
+        // The family typed this themselves on a public form — mixed case and
+        // all — and everything we send them goes to it.
+        email: `${MARKER}-CORRECTED@example.test`,
+        studentFirstName: 'Corrected',
+        mobile: '9998887777',
+        currentGrade: 'Grade 5',
+      });
+      check('a coach can correct what the family typed', fixed.ok, `status ${fixed.status}`);
+
+      const editedRow = (
+        await db.query(
+          `SELECT email, "studentFirstName", "studentLastName", mobile, "currentGrade"
+             FROM "Lead" WHERE id=$1`,
+          [editable.body.id],
+        )
+      ).rows[0];
+      check(
+        'the correction is stored, and the email is lowercased like booking stores it',
+        editedRow.email === `${MARKER}-corrected@example.test` &&
+          editedRow.studentFirstName === 'Corrected' &&
+          editedRow.mobile === '9998887777',
+        JSON.stringify(editedRow),
+      );
+      check(
+        'a field the form did not send is left alone, not blanked',
+        editedRow.studentLastName === 'Lead',
+        editedRow.studentLastName,
+      );
+
+      const trail = (
+        await db.query(
+          `SELECT message FROM "LeadActivity" WHERE "leadId"=$1 AND type='DETAILS_EDITED'`,
+          [editable.body.id],
+        )
+      ).rows[0];
+      check(
+        'and the timeline records what it used to be',
+        trail && /@example\.test/.test(trail.message) && trail.message.includes('→'),
+        trail?.message,
+      );
+
+      const editOwnerId = (
+        await db.query(`SELECT "assignedCoachId" FROM "Lead" WHERE id=$1`, [editable.body.id])
+      ).rows[0].assignedCoachId;
+      const outsiderId = coaches.find((c) => c !== editOwnerId);
+      if (outsiderId) {
+        const outsider = (
+          await db.query(`SELECT id, email FROM "User" WHERE id=$1`, [outsiderId])
+        ).rows[0];
+        const outsiderToken = token(outsider.id, 'ACADEMIC_COACH', outsider.email);
+        const coachEdits = await req(
+          'PATCH',
+          `/leads/${editable.body.id}`,
+          outsiderToken,
+          { email: 'someone@else.test' },
+          403,
+        );
+        check('a coach who does not own it cannot edit it', coachEdits.ok, `status ${coachEdits.status}`);
+
+        const untouched = (
+          await db.query(`SELECT email FROM "Lead" WHERE id=$1`, [editable.body.id])
+        ).rows[0];
+        check(
+          'and the refused edit changed nothing',
+          untouched.email !== 'someone@else.test',
+          untouched.email,
+        );
+      } else {
+        console.log('  skip  only one coach, nobody to test the refusal with');
+      }
+
+      // ── Delete ──
+      const coachDeletes = await req(
+        'DELETE',
+        `/leads/${editable.body.id}`,
+        ownerToken,
+        undefined,
+        403,
+      );
+      check(
+        'deleting is admin-only — a coach cannot remove a family from the pipeline',
+        coachDeletes.ok,
+        `status ${coachDeletes.status}`,
+      );
+
+      /*
+       * A converted lead is the record of how a paying student arrived, and
+       * the student account survives the delete, so removing it would cut
+       * them loose silently.
+       */
+      const convertedDelete = await req(
+        'DELETE',
+        `/leads/${withSiblings.body.id}`,
+        adminToken,
+        undefined,
+        400,
+      );
+      check(
+        'an enrolled family cannot be deleted out from under their student record',
+        convertedDelete.ok && /enrolled/i.test(JSON.stringify(convertedDelete.body)),
+        `status ${convertedDelete.status}`,
+      );
+
+      for (let i = 0; i < 10; i++) {
+        const n = Number(
+          (
+            await db.query(`SELECT count(*) FROM "Notification" WHERE link=$1`, [
+              `/leads/${editable.body.id}`,
+            ])
+          ).rows[0].count,
+        );
+        if (n > 0) break;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+
+      const gone = await req('DELETE', `/leads/${editable.body.id}`, adminToken);
+      check('an admin can delete a trial request', gone.ok, `status ${gone.status}`);
+
+      const leftovers = (
+        await db.query(
+          `SELECT (SELECT count(*)::int FROM "Lead" WHERE id=$1) AS lead,
+                  (SELECT count(*)::int FROM "LeadTrial" WHERE "leadId"=$1) AS trials,
+                  (SELECT count(*)::int FROM "LeadActivity" WHERE "leadId"=$1) AS activities,
+                  (SELECT count(*)::int FROM "Notification" WHERE link=$2) AS alerts`,
+          [editable.body.id, `/leads/${editable.body.id}`],
+        )
+      ).rows[0];
+      check(
+        'its trials, timeline and staff alerts go with it',
+        leftovers.lead === 0 && leftovers.trials === 0 && leftovers.activities === 0 && leftovers.alerts === 0,
+        JSON.stringify(leftovers),
+      );
+
+      /*
+       * The slot the deleted request was holding has to come back, or a
+       * cleared-out pipeline would keep blocking the calendar.
+       */
+      const freedSlot = await req('GET', `/leads/availability?date=${fixtureDate}`, null);
+      check(
+        'and the slot it was holding is bookable again',
+        freedSlot.ok && freedSlot.body.slots.includes(editable.body.scheduledAt.slice(11, 16)),
+        `slot ${editable.body.scheduledAt.slice(11, 16)} still blocked`,
+      );
+
+      // ── Bulk ──
+      const bulkIds = [];
+      for (let i = 0; i < 2; i++) {
+        const made = await bookOn(`${MARKER}-bulk${i}@example.test`, fixtureSlots[i + 1]);
+        if (made.body?.id) { bulkIds.push(made.body.id); createdLeadIds.push(made.body.id); }
+      }
+
+      if (bulkIds.length === 2) {
+        /*
+         * One deletable and one converted in the same request: the batch must
+         * not roll back the good one because of the bad one.
+         */
+        const mixed = await req(
+          'POST',
+          '/leads/bulk-delete',
+          adminToken,
+          { ids: [...bulkIds, withSiblings.body.id] },
+          201,
+        );
+        check('several requests can be deleted at once', mixed.ok, `status ${mixed.status}`);
+        check(
+          'one that cannot go does not roll back the ones that can',
+          mixed.ok && mixed.body.deleted === 2 && mixed.body.failed === 1,
+          `${mixed.body?.deleted} deleted, ${mixed.body?.failed} failed`,
+        );
+        check(
+          'and the refusal explains itself rather than returning a bare count',
+          mixed.ok && /enrolled/i.test(mixed.body.failures?.[0]?.reason ?? ''),
+          mixed.body?.failures?.[0]?.reason,
+        );
+        const stillThere = (
+          await db.query(`SELECT count(*)::int AS n FROM "Lead" WHERE id = ANY($1::text[])`, [bulkIds])
+        ).rows[0];
+        check('the deleted ones really are gone', stillThere.n === 0, `${stillThere.n} remain`);
+      } else {
+        console.log('  skip  ran out of free slots for the bulk case');
+      }
+
+      /*
+       * A converted request has left this queue. It stays reachable by
+       * filtering for it explicitly — the default view is a work list, not a
+       * restriction on what can be seen.
+       */
+      const defaultList = await req('GET', '/leads?page=1&limit=100', adminToken);
+      check(
+        'a converted request is not in the default list — it is a student now',
+        defaultList.ok && !defaultList.body.items.some((l) => l.id === withSiblings.body.id),
+        'converted lead still in the work queue',
+      );
+      check(
+        'and the list says how many it is holding back',
+        defaultList.ok && defaultList.body.meta.hiddenConverted >= 1,
+        `hiddenConverted ${defaultList.body?.meta?.hiddenConverted}`,
+      );
+      const convertedOnly = await req('GET', '/leads?page=1&limit=100&status=CONVERTED', adminToken);
+      check(
+        'filtering for Converted still finds it',
+        convertedOnly.ok && convertedOnly.body.items.some((l) => l.id === withSiblings.body.id),
+        'converted lead unreachable even when asked for',
+      );
+
+      /*
+       * The guard exists to keep a real student attached to how they joined.
+       * Once that student is gone the link is already dangling, and the lead
+       * is debris an admin should be able to clear rather than a record being
+       * protected on behalf of nobody.
+       */
+      const orphanLead = (
+        await db.query(
+          `INSERT INTO "Lead" ("id","leadNumber","studentFirstName","studentLastName","email","mobile",
+                               "status","convertedStudentId","convertedStudentCode","updatedAt")
+           VALUES (gen_random_uuid(), $1, 'Orphan', 'Lead', $2, '9990001111',
+                   'CONVERTED', gen_random_uuid()::text, 'ST-GONE', now())
+           RETURNING id`,
+          [`LD-SMOKE-${Date.now()}`, `${MARKER}-orphan@example.test`],
+        )
+      ).rows[0];
+      createdLeadIds.push(orphanLead.id);
+      const orphanGone = await req('DELETE', `/leads/${orphanLead.id}`, adminToken);
+      check(
+        'a request whose student no longer exists can be cleared away',
+        orphanGone.ok,
+        `status ${orphanGone.status} ${JSON.stringify(orphanGone.body).slice(0, 120)}`,
+      );
+
+      const coachBulk = await req(
+        'POST',
+        '/leads/bulk-delete',
+        ownerToken,
+        { ids: [withSiblings.body.id] },
+        403,
+      );
+      check('bulk delete is admin-only too', coachBulk.ok, `status ${coachBulk.status}`);
+
+      const empty = await req('POST', '/leads/bulk-delete', adminToken, { ids: [] }, 400);
+      check('an empty selection is refused', empty.ok, `status ${empty.status}`);
+    }
+
   } finally {
     // ── Cleanup ──────────────────────────────────────────────────────────────
     console.log('\n── Cleanup ──');

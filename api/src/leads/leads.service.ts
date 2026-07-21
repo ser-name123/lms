@@ -392,11 +392,22 @@ export class LeadsService implements OnModuleInit {
      * not ask and make the UI look like the other coach has these leads.
      */
     if (scope.assignedCoachId && coachId && coachId !== scope.assignedCoachId) {
-      return { items: [], meta: { page, limit, total: 0, totalPages: 1 } };
+      return { items: [], meta: { page, limit, total: 0, totalPages: 1, hiddenConverted: 0 } };
     }
 
+    /*
+     * A converted request has left this queue — it is a student now, and the
+     * Students section is where it lives. Leaving them here made the list a
+     * mix of work to do and work already finished, and put rows on screen
+     * that deliberately refuse to be deleted.
+     *
+     * Filtering explicitly by "Converted" still reaches them: this is the
+     * default view, not a restriction.
+     */
+    const hideConverted = !status;
+
     const where: any = {
-      ...(status ? { status } : {}),
+      ...(status ? { status } : { status: { not: LeadStatus.CONVERTED } }),
       ...(priority ? { priority } : {}),
       ...(country ? { country: { contains: country, mode: 'insensitive' } } : {}),
       ...(subject ? { interestedSubject: { contains: subject, mode: 'insensitive' } } : {}),
@@ -427,11 +438,28 @@ export class LeadsService implements OnModuleInit {
       this.prisma.lead.count({ where }),
     ]);
 
+    /*
+     * How many are being kept out of view. Said out loud, because a total on
+     * the dashboard that does not match the rows underneath it is the kind of
+     * discrepancy people waste an afternoon on.
+     */
+    const hiddenConverted = hideConverted
+      ? await this.prisma.lead.count({
+          where: { ...where, status: LeadStatus.CONVERTED },
+        })
+      : 0;
+
     const withNames = await this.attachNames(items);
 
     return {
       items: withNames,
-      meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        hiddenConverted,
+      },
     };
   }
 
@@ -506,7 +534,53 @@ export class LeadsService implements OnModuleInit {
       data.assignedCoachAt = dto.assignedCoachId ? new Date() : null;
     }
 
+    /*
+     * The details the family typed in themselves. A blank string clears the
+     * field; a field the caller left out is untouched — the edit form sends
+     * only what changed, and "not sent" must never mean "erase".
+     */
+    const TEXT_FIELDS = [
+      'studentFirstName', 'studentLastName', 'mobile', 'countryCode', 'whatsappNumber',
+      'parentName', 'relationship', 'gender', 'currentGrade', 'currentSchool',
+      'country', 'timeZone', 'interestedSubject', 'currentLevel', 'preferredLanguage',
+      'preferredTeacherGender', 'learningGoal', 'specialRequirements', 'medicalDisability',
+    ] as const;
+    for (const f of TEXT_FIELDS) {
+      if (dto[f] !== undefined) data[f] = dto[f] || null;
+    }
+    // Names are required on the record, so an empty one is a no-op rather
+    // than a null that breaks every screen that prints them.
+    if (!data.studentFirstName) delete data.studentFirstName;
+    if (!data.studentLastName) delete data.studentLastName;
+
+    if (dto.dateOfBirth !== undefined) {
+      data.dateOfBirth = this.parseDate(dto.dateOfBirth, 'date of birth');
+    }
+    if (dto.email !== undefined) {
+      // Stored lowercased, the same way booking stores it — otherwise a
+      // corrected address stops matching the one the family booked with.
+      data.email = dto.email.trim().toLowerCase();
+    }
+
     const updated = await this.prisma.lead.update({ where: { id }, data });
+
+    /*
+     * Corrections are logged with both values. Somebody changing the address
+     * a family's reminders go to should leave a trace of what it used to be.
+     */
+    const changes = [
+      dto.email !== undefined && data.email !== lead.email ? `email ${lead.email} → ${data.email}` : null,
+      dto.mobile !== undefined && data.mobile !== lead.mobile ? `phone ${lead.mobile ?? '—'} → ${data.mobile ?? '—'}` : null,
+      // Compared against what was stored, not merely "a name was sent" —
+      // re-saving the form unchanged should not write a history entry.
+      updated.studentFirstName !== lead.studentFirstName ||
+      updated.studentLastName !== lead.studentLastName
+        ? `name ${lead.studentFirstName} ${lead.studentLastName} → ${updated.studentFirstName} ${updated.studentLastName}`
+        : null,
+    ].filter(Boolean);
+    if (changes.length) {
+      await this.addActivity(id, 'DETAILS_EDITED', `Details corrected — ${changes.join(', ')}.`, actor);
+    }
 
     // Activity log for each meaningful change.
     if (dto.status && dto.status !== lead.status) {
@@ -538,6 +612,98 @@ export class LeadsService implements OnModuleInit {
 
     const [withNames] = await this.attachNames([updated]);
     return withNames;
+  }
+
+  /**
+   * Delete a trial request outright.
+   *
+   * Trials and the activity timeline cascade with it, but three things do not
+   * clean themselves up and each is visible to somebody:
+   *  - a live Zoom room the family could still walk into,
+   *  - staff notifications linking to a lead that now 404s,
+   *  - the slot the request was holding, which frees itself once the rows go.
+   *
+   * A converted lead is refused. The student account it created survives the
+   * delete — `convertedStudentId` is a plain column, not a foreign key — so
+   * deleting the lead would silently sever a paying student from the record of
+   * how they arrived, and nothing on screen would say so.
+   */
+  async remove(id: string, actor: Actor) {
+    const lead = await this.assertAccess(id, actor);
+    if (lead.convertedStudentId) {
+      /*
+       * Refuse only while the student is actually there. The point of the
+       * guard is to keep a real student attached to the record of how they
+       * joined — once that student has been removed, the link is already
+       * dangling and the lead is debris the admin should be able to sweep up.
+       * Checking the column alone made the message insist on protecting
+       * somebody who no longer existed.
+       */
+      const student = await this.prisma.studentProfile.findUnique({
+        where: { id: lead.convertedStudentId },
+        select: { id: true },
+      });
+      if (student) {
+        throw new BadRequestException(
+          `${lead.studentFirstName} ${lead.studentLastName} has already been enrolled as ${lead.convertedStudentCode}. ` +
+            'Deleting the request would cut the student loose from how they joined — archive it instead.',
+        );
+      }
+    }
+
+    const trials = await this.prisma.leadTrial.findMany({
+      where: { leadId: id },
+      select: { meetingId: true },
+    });
+    for (const t of trials) {
+      if (t.meetingId) await this.zoom.cancelMeeting(t.meetingId).catch(() => undefined);
+    }
+
+    await this.prisma.lead.delete({ where: { id } });
+    /*
+     * After the row is gone, not before. Notifications are dispatched
+     * fire-and-forget, so one kicked off just before this call can still be
+     * mid-flight; clearing first left it pointing at a lead that no longer
+     * exists and a colleague clicking through to a 404. Sweeping afterwards
+     * catches everything written up to this moment. A write that lands during
+     * these two statements is still possible and would leave one orphan — rare
+     * enough to accept, and it costs a dead link rather than data.
+     */
+    await this.prisma.notification.deleteMany({ where: { link: `/leads/${id}` } });
+
+    return {
+      id,
+      leadNumber: lead.leadNumber,
+      name: `${lead.studentFirstName} ${lead.studentLastName}`.trim(),
+    };
+  }
+
+  /**
+   * Delete several at once.
+   *
+   * Reports per request rather than failing the batch: rolling back nineteen
+   * deletions because the twentieth was already enrolled would be a worse
+   * outcome than telling the user which one could not go.
+   */
+  async removeMany(ids: string[], actor: Actor) {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length) throw new BadRequestException('Select at least one trial request.');
+    if (unique.length > 100) {
+      throw new BadRequestException('Delete up to 100 requests at a time.');
+    }
+
+    const deleted: { id: string; leadNumber: string; name: string }[] = [];
+    const failed: { id: string; reason: string }[] = [];
+
+    for (const id of unique) {
+      try {
+        deleted.push(await this.remove(id, actor));
+      } catch (e: any) {
+        failed.push({ id, reason: e?.message ?? 'Could not be deleted.' });
+      }
+    }
+
+    return { deleted: deleted.length, failed: failed.length, deletedItems: deleted, failures: failed };
   }
 
   // ── Step 6: evaluation (scores 1–10 → overall %) ────────────────────────────

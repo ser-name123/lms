@@ -25,6 +25,7 @@ import {
   Plus,
   BadgeCheck,
   Link as LinkIcon,
+  Pencil,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -193,7 +194,7 @@ export default function LeadDetailPage() {
           ))}
         </div>
 
-        {tab === "overview" && <OverviewTab lead={lead} />}
+        {tab === "overview" && <OverviewTab lead={lead} onSaved={() => { reload(); refreshActivities(); }} />}
         {tab === "evaluation" && <EvaluationTab lead={lead} onDone={() => { reload(); refreshActivities(); }} />}
         {tab === "recommendation" && <RecommendationTab lead={lead} teachers={teachers} onAssigned={() => { reload(); refreshActivities(); }} />}
         {tab === "trial" && <TrialTab lead={lead} teachers={teachers} onChange={() => { reload(); refreshActivities(); }} />}
@@ -241,54 +242,257 @@ function requestedSlot(lead: Lead) {
     : date;
 }
 
-function OverviewTab({ lead }: { lead: Lead }) {
+/*
+ * The trial request as the family submitted it — and, on Edit, as it should
+ * have been.
+ *
+ * The whole form was read-only until now, which meant a mistyped email could
+ * never be corrected: the acknowledgement, the reminders and every later
+ * message all go to that address, and the coach's only recourse was to ask
+ * the family to book again.
+ *
+ * Marketing fields (source, UTM, device, IP) stay read-only in every mode.
+ * They are a record of how the request arrived, not a description of the
+ * family, and editing them would be falsifying it.
+ */
+function OverviewTab({ lead, onSaved }: { lead: Lead; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>({});
+
+  const start = () => {
+    setForm({
+      studentFirstName: lead.studentFirstName ?? "",
+      studentLastName: lead.studentLastName ?? "",
+      gender: lead.gender ?? "",
+      dateOfBirth: lead.dateOfBirth ? lead.dateOfBirth.slice(0, 10) : "",
+      currentGrade: lead.currentGrade ?? "",
+      currentSchool: lead.currentSchool ?? "",
+      country: lead.country ?? "",
+      timeZone: lead.timeZone ?? "",
+      parentName: lead.parentName ?? "",
+      relationship: lead.relationship ?? "",
+      email: lead.email ?? "",
+      countryCode: lead.countryCode ?? "",
+      mobile: lead.mobile ?? "",
+      whatsappNumber: lead.whatsappNumber ?? "",
+      interestedSubject: lead.interestedSubject ?? "",
+      preferredTeacherGender: lead.preferredTeacherGender ?? "",
+      currentLevel: lead.currentLevel ?? "",
+      preferredLanguage: lead.preferredLanguage ?? "",
+      learningGoal: lead.learningGoal ?? "",
+      specialRequirements: lead.specialRequirements ?? "",
+      medicalDisability: lead.medicalDisability ?? "",
+    });
+    setEditing(true);
+  };
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.studentFirstName?.trim() || !form.studentLastName?.trim()) {
+      Swal.fire({ title: "A name is required", icon: "info", background: swalBg() });
+      return;
+    }
+    if (!form.email?.trim()) {
+      Swal.fire({
+        title: "An email is required",
+        text: "Reminders and the joining link go to this address.",
+        icon: "info",
+        background: swalBg(),
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateLead(lead.id, form);
+      Swal.fire({
+        toast: true, position: "top-end", icon: "success",
+        title: "Details updated", showConfirmButton: false, timer: 1800,
+      });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      Swal.fire({
+        title: "Could not save",
+        text: e instanceof Error ? e.message : "Failed.",
+        icon: "error",
+        background: swalBg(),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <button onClick={start}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-hairline px-3.5 text-xs font-bold text-ink-2 hover:border-accent hover:text-accent">
+            <Pencil className="size-3.5" /> Edit details
+          </button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <InfoCard icon={User} title="Student">
+            <Row label="Request ID" value={lead.leadNumber} />
+            {/* How old the request is decides whether it is still warm. */}
+            <Row label="Requested on" value={new Date(lead.createdAt).toLocaleString()} />
+            <Row label="Name" value={`${lead.studentFirstName} ${lead.studentLastName}`} />
+            <Row label="Gender" value={lead.gender} />
+            <Row label="Date of Birth" value={lead.dateOfBirth ? new Date(lead.dateOfBirth).toLocaleDateString() : null} />
+            <Row label="Current Grade" value={lead.currentGrade} />
+            <Row label="Current School" value={lead.currentSchool} />
+            <Row label="Country" value={lead.country} />
+            <Row label="Time Zone" value={lead.timeZone} />
+          </InfoCard>
+          <InfoCard icon={Users} title="Parent / Contact">
+            <Row label="Parent" value={lead.parentName} />
+            <Row label="Relationship" value={lead.relationship} />
+            <Row label="Email" value={lead.email} />
+            <Row
+              label="Mobile"
+              value={[lead.countryCode, lead.mobile].filter(Boolean).join(" ") || null}
+            />
+            <Row label="WhatsApp" value={lead.whatsappNumber} />
+            <Row label="Also attending" value={siblingNames(lead) || null} />
+            <Row label="Time Zone" value={lead.timeZone} />
+          </InfoCard>
+          <InfoCard icon={BookOpen} title="Learning Requirements">
+            <Row label="Subject" value={lead.interestedSubject} />
+            <Row label="Session for" value={labelOf(SESSION_FOR_LABELS, lead.sessionFor)} />
+            <Row label="Teacher Preference" value={lead.preferredTeacherGender} />
+            <Row label="How they found us" value={labelOf(HOW_FOUND_LABELS, lead.howFound)} />
+            {/* Requested slot, before a coach touches it — the trial row below is
+                the source of truth once one exists. */}
+            <Row label="Requested Slot" value={requestedSlot(lead)} />
+            <Row label="Current Level" value={lead.currentLevel} />
+            <Row label="Language" value={lead.preferredLanguage} />
+            {/* Only meaningful on leads booked through the old form. */}
+            <Row label="Preferred Days" value={lead.preferredDays?.join(", ") || null} />
+            <Row label="Time Slots" value={lead.preferredTimeSlots?.join(", ") || null} />
+          </InfoCard>
+          <InfoCard icon={MessageSquare} title="Additional & Marketing">
+            <Row label="Learning Goal" value={lead.learningGoal} />
+            <Row label="Previous Coaching" value={lead.previousCoaching} />
+            <Row label="Special Requirements" value={lead.specialRequirements} />
+            <Row label="Medical / Disability" value={lead.medicalDisability} />
+            <Row label="Source" value={lead.leadSource} />
+            {/* Captured at submission; worth being able to point at. */}
+            <Row
+              label="Consent"
+              value={
+                lead.acceptPrivacy || lead.acceptTerms
+                  ? [lead.acceptPrivacy && "Privacy", lead.acceptTerms && "Terms"]
+                      .filter(Boolean)
+                      .join(" + ") + " accepted"
+                  : null
+              }
+            />
+            <Row label="UTM" value={[lead.utmSource, lead.utmCampaign, lead.utmMedium].filter(Boolean).join(" / ") || null} />
+            <Row label="Referral" value={lead.referralUrl} />
+            <Row label="Device / Browser" value={[lead.device, lead.browser].filter(Boolean).join(" · ") || null} />
+            <Row label="IP" value={lead.ipAddress} />
+          </InfoCard>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <InfoCard icon={User} title="Student">
-        <Row label="Name" value={`${lead.studentFirstName} ${lead.studentLastName}`} />
-        <Row label="Gender" value={lead.gender} />
-        <Row label="Date of Birth" value={lead.dateOfBirth ? new Date(lead.dateOfBirth).toLocaleDateString() : null} />
-        <Row label="Current Grade" value={lead.currentGrade} />
-        <Row label="Current School" value={lead.currentSchool} />
-        <Row label="Country" value={lead.country} />
-        <Row label="Time Zone" value={lead.timeZone} />
-      </InfoCard>
-      <InfoCard icon={Users} title="Parent / Contact">
-        <Row label="Parent" value={lead.parentName} />
-        <Row label="Relationship" value={lead.relationship} />
-        <Row label="Email" value={lead.email} />
-        <Row
-          label="Mobile"
-          value={[lead.countryCode, lead.mobile].filter(Boolean).join(" ") || null}
-        />
-        <Row label="WhatsApp" value={lead.whatsappNumber} />
-        <Row label="Also attending" value={siblingNames(lead) || null} />
-      </InfoCard>
-      <InfoCard icon={BookOpen} title="Learning Requirements">
-        <Row label="Subject" value={lead.interestedSubject} />
-        <Row label="Session for" value={labelOf(SESSION_FOR_LABELS, lead.sessionFor)} />
-        <Row label="Teacher Preference" value={lead.preferredTeacherGender} />
-        <Row label="How they found us" value={labelOf(HOW_FOUND_LABELS, lead.howFound)} />
-        {/* Requested slot, before a coach touches it — the trial row below is
-            the source of truth once one exists. */}
-        <Row label="Requested Slot" value={requestedSlot(lead)} />
-        <Row label="Current Level" value={lead.currentLevel} />
-        <Row label="Language" value={lead.preferredLanguage} />
-        {/* Only meaningful on leads booked through the old form. */}
-        <Row label="Preferred Days" value={lead.preferredDays?.join(", ") || null} />
-        <Row label="Time Slots" value={lead.preferredTimeSlots?.join(", ") || null} />
-      </InfoCard>
-      <InfoCard icon={MessageSquare} title="Additional & Marketing">
-        <Row label="Learning Goal" value={lead.learningGoal} />
-        <Row label="Previous Coaching" value={lead.previousCoaching} />
-        <Row label="Special Requirements" value={lead.specialRequirements} />
-        <Row label="Medical / Disability" value={lead.medicalDisability} />
-        <Row label="Source" value={lead.leadSource} />
-        <Row label="UTM" value={[lead.utmSource, lead.utmCampaign, lead.utmMedium].filter(Boolean).join(" / ") || null} />
-        <Row label="Referral" value={lead.referralUrl} />
-        <Row label="Device / Browser" value={[lead.device, lead.browser].filter(Boolean).join(" · ") || null} />
-        <Row label="IP" value={lead.ipAddress} />
-      </InfoCard>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-ink-3">
+          Corrections are recorded on the timeline, including what the value was before.
+        </p>
+        <div className="flex gap-2">
+          <button onClick={() => setEditing(false)} disabled={busy}
+            className="inline-flex h-9 items-center rounded-xl border border-hairline px-3.5 text-xs font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-60">
+            Cancel
+          </button>
+          <button onClick={save} disabled={busy}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-60">
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save changes
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <InfoCard icon={User} title="Student">
+          <EditRow label="First name" value={form.studentFirstName} onChange={(v) => set("studentFirstName", v)} required />
+          <EditRow label="Last name" value={form.studentLastName} onChange={(v) => set("studentLastName", v)} required />
+          <EditRow label="Gender" value={form.gender} onChange={(v) => set("gender", v)}
+            options={["", "Male", "Female"]} />
+          <EditRow label="Date of Birth" value={form.dateOfBirth} onChange={(v) => set("dateOfBirth", v)} type="date" />
+          <EditRow label="Current Grade" value={form.currentGrade} onChange={(v) => set("currentGrade", v)} />
+          <EditRow label="Current School" value={form.currentSchool} onChange={(v) => set("currentSchool", v)} />
+          <EditRow label="Country" value={form.country} onChange={(v) => set("country", v)} />
+          <EditRow label="Time Zone" value={form.timeZone} onChange={(v) => set("timeZone", v)} />
+        </InfoCard>
+
+        <InfoCard icon={Users} title="Parent / Contact">
+          <EditRow label="Parent" value={form.parentName} onChange={(v) => set("parentName", v)} />
+          <EditRow label="Relationship" value={form.relationship} onChange={(v) => set("relationship", v)} />
+          <EditRow label="Email" value={form.email} onChange={(v) => set("email", v)} type="email" required
+            hint="Reminders and the joining link go here." />
+          <EditRow label="Dial code" value={form.countryCode} onChange={(v) => set("countryCode", v)} />
+          <EditRow label="Mobile" value={form.mobile} onChange={(v) => set("mobile", v)} />
+          <EditRow label="WhatsApp" value={form.whatsappNumber} onChange={(v) => set("whatsappNumber", v)} />
+        </InfoCard>
+
+        <InfoCard icon={BookOpen} title="Learning Requirements">
+          <EditRow label="Subject" value={form.interestedSubject} onChange={(v) => set("interestedSubject", v)}
+            options={["", "Quran", "Arabic Language", "Islamic Studies"]} />
+          <EditRow label="Teacher Preference" value={form.preferredTeacherGender} onChange={(v) => set("preferredTeacherGender", v)}
+            options={["", "Male", "Female", "Either"]} />
+          <EditRow label="Current Level" value={form.currentLevel} onChange={(v) => set("currentLevel", v)} />
+          <EditRow label="Language" value={form.preferredLanguage} onChange={(v) => set("preferredLanguage", v)} />
+        </InfoCard>
+
+        <InfoCard icon={MessageSquare} title="Additional">
+          <EditRow label="Learning Goal" value={form.learningGoal} onChange={(v) => set("learningGoal", v)} />
+          <EditRow label="Special Requirements" value={form.specialRequirements} onChange={(v) => set("specialRequirements", v)} />
+          <EditRow label="Medical / Disability" value={form.medicalDisability} onChange={(v) => set("medicalDisability", v)} />
+          {/* Source, UTM, device and IP are how the request arrived. Editing
+              them would falsify the record, so they stay read-only. */}
+          <Row label="Source" value={lead.leadSource} />
+          <Row label="Requested Slot" value={requestedSlot(lead)} />
+        </InfoCard>
+      </div>
+    </div>
+  );
+}
+
+function EditRow({
+  label, value, onChange, type = "text", options, required, hint,
+}: {
+  label: string;
+  value?: string;
+  onChange: (v: string) => void;
+  type?: string;
+  options?: string[];
+  required?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 border-b border-hairline/60 py-2 last:border-0 sm:flex-row sm:items-center sm:gap-3">
+      <span className="min-w-36 shrink-0 text-[11px] font-semibold text-ink-3">
+        {label}
+        {required && <span className="text-rose-500"> *</span>}
+      </span>
+      <div className="w-full">
+        {options ? (
+          <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}
+            className="h-9 w-full rounded-lg border border-hairline bg-surface px-2.5 text-xs font-semibold text-ink focus:border-accent focus:outline-none">
+            {options.map((o) => <option key={o} value={o}>{o || "—"}</option>)}
+          </select>
+        ) : (
+          <input type={type} value={value ?? ""} onChange={(e) => onChange(e.target.value)}
+            className="h-9 w-full rounded-lg border border-hairline bg-surface px-2.5 text-xs font-semibold text-ink focus:border-accent focus:outline-none" />
+        )}
+        {hint && <span className="mt-0.5 block text-[10px] text-ink-3">{hint}</span>}
+      </div>
     </div>
   );
 }
@@ -1181,12 +1385,21 @@ function InfoCard({ icon: Icon, title, children }: { icon: React.ElementType; ti
   );
 }
 
+/*
+ * Every field the form has, whether or not the family filled it in.
+ *
+ * This used to drop the whole row when the value was empty, which left the
+ * coach unable to tell "they were asked and did not answer" from "we never
+ * ask this" — and made two requests side by side look like different forms.
+ * An em dash says the question exists and the answer does not.
+ */
 function Row({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
   return (
     <div className="flex items-start justify-between gap-4 border-b border-hairline/50 pb-1.5 text-xs last:border-0">
       <span className="text-ink-3 font-medium shrink-0">{label}</span>
-      <span className="text-ink-2 font-semibold text-right break-words">{value}</span>
+      <span className={`text-right break-words font-semibold ${value ? "text-ink-2" : "text-ink-3/50"}`}>
+        {value || "—"}
+      </span>
     </div>
   );
 }

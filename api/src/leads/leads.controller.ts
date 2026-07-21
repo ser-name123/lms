@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Ip,
   Param,
@@ -17,6 +18,7 @@ import { LeadsService } from './leads.service';
 import { LeadAvailabilityService } from './availability.service';
 import {
   AssignTeacherLeadDto,
+  BulkDeleteLeadsDto,
   CoachDecisionDto,
   CreateLeadDto,
   EvaluateLeadDto,
@@ -99,6 +101,18 @@ export class LeadsController {
   @ApiOperation({ summary: "Teacher: my trial classes (today / upcoming / all)" })
   myTrials(@CurrentUser() user: AuthUser, @Query('scope') scope?: 'today' | 'upcoming' | 'all') {
     return this.service.myTrials(user.id, scope || 'upcoming');
+  }
+
+  /*
+   * Static path, declared with the other static routes so `:id` cannot swallow
+   * it. Admin-only: bulk deletion is the one action here whose blast radius is
+   * larger than the row a coach owns.
+   */
+  @Post('bulk-delete')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Delete several trial requests, reporting each outcome' })
+  bulkDelete(@Body() dto: BulkDeleteLeadsDto, @CurrentUser() user: AuthUser) {
+    return this.service.removeMany(dto.ids, actor(user));
   }
 
   @Get('trial-options')
@@ -235,6 +249,13 @@ export class LeadsController {
   @ApiOperation({ summary: 'Update status / priority / coach / add note' })
   update(@Param('id') id: string, @Body() dto: UpdateLeadDto, @CurrentUser() user: AuthUser) {
     return this.service.update(id, dto, actor(user));
+  }
+
+  @Delete(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Delete a trial request (cancels its Zoom room, clears its alerts)' })
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, actor(user));
   }
 
   @Post(':id/evaluate')
