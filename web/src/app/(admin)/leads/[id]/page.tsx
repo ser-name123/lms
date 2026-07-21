@@ -10,7 +10,6 @@ import {
   BookOpen,
   MessageSquare,
   ClipboardCheck,
-  Sparkles,
   GraduationCap,
   History,
   CalendarClock,
@@ -36,8 +35,6 @@ import {
   fetchLead,
   updateLead,
   evaluateLead,
-  fetchLeadRecommendation,
-  assignLeadTeacher,
   fetchLeadActivities,
   fetchEmployees,
   fetchTeachers,
@@ -53,7 +50,6 @@ import {
   leadCoachDecision,
   type Lead,
   type LeadActivity,
-  type LeadRecommendation,
   type LeadTrial,
   type TrialOptions,
   type TrialDayAvailability,
@@ -70,10 +66,13 @@ import {
 import { TeacherAvailabilityPanel } from "@/components/leads/teacher-availability";
 import { SubmittedReport } from "@/components/leads/trial-report";
 
+// The Recommendation tab is hidden. Teacher assignment still happens — the
+// Schedule Trial form sets assignedTeacherId on the lead, and it picks from
+// teachers who are actually free at that slot. The API endpoints stay in
+// place; only this entry point is gone.
 const TABS = [
   { key: "overview", label: "Overview", icon: User },
   { key: "evaluation", label: "Evaluation", icon: ClipboardCheck },
-  { key: "recommendation", label: "Recommendation", icon: Sparkles },
   { key: "trial", label: "Trial Classes", icon: CalendarClock },
   { key: "decision", label: "Decision", icon: BadgeCheck },
   { key: "timeline", label: "Timeline", icon: History },
@@ -196,7 +195,6 @@ export default function LeadDetailPage() {
 
         {tab === "overview" && <OverviewTab lead={lead} onSaved={() => { reload(); refreshActivities(); }} />}
         {tab === "evaluation" && <EvaluationTab lead={lead} onDone={() => { reload(); refreshActivities(); }} />}
-        {tab === "recommendation" && <RecommendationTab lead={lead} teachers={teachers} onAssigned={() => { reload(); refreshActivities(); }} />}
         {tab === "trial" && <TrialTab lead={lead} teachers={teachers} onChange={() => { reload(); refreshActivities(); }} />}
         {tab === "decision" && <DecisionTab lead={lead} onChange={() => { reload(); refreshActivities(); }} />}
         {tab === "timeline" && <TimelineTab activities={activities} />}
@@ -555,120 +553,6 @@ function EvaluationTab({ lead, onDone }: { lead: Lead; onDone: () => void }) {
         </button>
       </CardBody>
     </Card>
-  );
-}
-
-// ── Recommendation + Teacher assignment (Steps 7 & 8) ─────────────────────────
-function RecommendationTab({ lead, teachers, onAssigned }: { lead: Lead; teachers: { id: string; name: string }[]; onAssigned: () => void }) {
-  const [rec, setRec] = useState<LeadRecommendation | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [teacherId, setTeacherId] = useState(lead.assignedTeacherId || "");
-  const [busy, setBusy] = useState(false);
-
-  const compute = () => {
-    setLoading(true);
-    fetchLeadRecommendation(lead.id).then((r) => { setRec(r); if (r.teacher && !teacherId) setTeacherId(r.teacher.id); })
-      .catch(() => undefined).finally(() => setLoading(false));
-  };
-  useEffect(() => { compute(); /* eslint-disable-next-line */ }, []);
-
-  const assign = async (auto: boolean) => {
-    setBusy(true);
-    try {
-      await assignLeadTeacher(lead.id, auto ? { auto: true } : { teacherId });
-      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Teacher assigned", showConfirmButton: false, timer: 1800 });
-      onAssigned();
-    } catch (e) {
-      Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="border border-hairline bg-surface shadow-sm">
-        <CardBody className="p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <Sparkles className="size-4 text-accent" />
-            <h3 className="text-sm font-bold text-ink">Recommendation Engine</h3>
-          </div>
-          {loading ? (
-            <div className="flex items-center gap-2 py-6 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Computing…</div>
-          ) : rec ? (
-            <div className="space-y-2.5">
-              {/*
-                * A teacher who sat in the room outranks a level derived from
-                * an evaluation score, so their assessment leads and the
-                * heuristic is labelled as the fallback it is.
-                */}
-              {rec.fromTeacher && (
-                <div className="mb-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
-                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wider text-emerald-600">
-                    From the trial teacher
-                  </p>
-                  <RecRow label="Assessed Level" value={rec.fromTeacher.assessedLevel || "—"} />
-                  {rec.fromTeacher.recommendedCourse && (
-                    <RecRow label="Recommended Course" value={rec.fromTeacher.recommendedCourse} />
-                  )}
-                  {rec.fromTeacher.recommendsEnroll != null && (
-                    <RecRow
-                      label="Recommends Enrolment"
-                      value={rec.fromTeacher.recommendsEnroll ? "Yes" : "No"}
-                    />
-                  )}
-                  <p className="pt-1 text-[11px] text-ink-3">
-                    {rec.fromTeacher.teacherName || "The teacher"}
-                    {rec.fromTeacher.submittedAt
-                      ? ` · ${new Date(rec.fromTeacher.submittedAt).toLocaleDateString()}`
-                      : ""}
-                  </p>
-                </div>
-              )}
-              <RecRow label="Recommended Level" value={rec.recommendedLevel} />
-              <RecRow label="Recommended Batch" value={rec.recommendedBatch} />
-              <RecRow label="Best-fit Teacher" value={rec.teacher ? `${rec.teacher.name}${rec.teacher.specialisation ? ` · ${rec.teacher.specialisation}` : ""} (workload ${rec.teacher.workload})` : "No active teacher found"} />
-              <p className="pt-1 text-[11px] text-ink-3">
-                {rec.source === "teacher"
-                  ? "Level taken from the trial report. Batch and best-fit teacher from subject and workload."
-                  : "Based on evaluation score, subject, and teacher workload."}
-              </p>
-            </div>
-          ) : (
-            <button onClick={compute} className="text-xs font-bold text-accent hover:underline">Compute recommendation</button>
-          )}
-        </CardBody>
-      </Card>
-
-      <Card className="border border-hairline bg-surface shadow-sm">
-        <CardBody className="p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <GraduationCap className="size-4 text-accent" />
-            <h3 className="text-sm font-bold text-ink">Teacher Assignment</h3>
-          </div>
-          {lead.assignedTeacherName && (
-            <p className="mb-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-600">
-              Currently assigned: {lead.assignedTeacherName}
-            </p>
-          )}
-          <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Select Teacher</label>
-          <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)}
-            className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
-            <option value="">— Choose a teacher —</option>
-            {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <div className="mt-3 flex gap-2">
-            <button onClick={() => assign(false)} disabled={busy || !teacherId} className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-accent text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <GraduationCap className="size-4" />} Assign
-            </button>
-            <button onClick={() => assign(true)} disabled={busy} className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-hairline text-xs font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-50">
-              <Wand2 className="size-4 text-accent" /> Auto Assign
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-ink-3">Auto = lowest workload teacher matching the subject.</p>
-        </CardBody>
-      </Card>
-    </div>
   );
 }
 
@@ -1400,15 +1284,6 @@ function Row({ label, value }: { label: string; value?: string | null }) {
       <span className={`text-right break-words font-semibold ${value ? "text-ink-2" : "text-ink-3/50"}`}>
         {value || "—"}
       </span>
-    </div>
-  );
-}
-
-function RecRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-hairline bg-surface-2/40 px-3 py-2">
-      <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink-3">{label}</p>
-      <p className="mt-0.5 text-sm font-bold text-ink">{value}</p>
     </div>
   );
 }
