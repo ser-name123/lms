@@ -1105,7 +1105,19 @@ export class LeadsService implements OnModuleInit {
         if (!dto.status) data.status = 'RESCHEDULED';
       }
     }
-    if (dto.teacherId !== undefined) data.teacherId = dto.teacherId || null;
+    /*
+     * Editing may change who teaches, never blank it: a trial with no teacher
+     * shows on nobody's schedule while the family is still sent a reminder for
+     * it. Cancel it or move it, but do not quietly empty it.
+     */
+    if (dto.teacherId !== undefined) {
+      if (!dto.teacherId) {
+        throw new BadRequestException(
+          'A trial needs a teacher. Choose a different one, or cancel the trial.',
+        );
+      }
+      data.teacherId = dto.teacherId;
+    }
     if (dto.durationMins !== undefined) data.durationMins = dto.durationMins;
     if (dto.timeZone !== undefined) data.timeZone = dto.timeZone || null;
     if (dto.meetingProvider !== undefined) data.meetingProvider = dto.meetingProvider || null;
@@ -1151,6 +1163,25 @@ export class LeadsService implements OnModuleInit {
     }
 
     const updated = await this.prisma.leadTrial.update({ where: { id: trialId }, data });
+
+    /*
+     * Keep the teacher on the lead in step, exactly as scheduling does. Without
+     * this, assigning or changing the teacher here moved the trial but left the
+     * lead pointing at the old person — or at nobody — and every screen that
+     * reads the lead rather than the trial disagreed with this one.
+     */
+    if (data.teacherId && data.teacherId !== trial.teacherId) {
+      await this.prisma.lead.update({
+        where: { id: trial.leadId },
+        data: { assignedTeacherId: data.teacherId, assignedTeacherAt: new Date() },
+      });
+      await this.addActivity(
+        trial.leadId,
+        'TEACHER_ASSIGNED',
+        trial.teacherId ? 'Trial teacher changed.' : 'Teacher assigned to the trial.',
+        actor,
+      );
+    }
 
     // Reflect terminal trial states onto the lead pipeline.
     if (dto.status === 'COMPLETED') {

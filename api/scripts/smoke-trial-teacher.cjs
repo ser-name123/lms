@@ -242,10 +242,43 @@ function isoDay(offset) {
     check('a teacher can be assigned to an existing trial', assigned.ok, `status ${assigned.status}`);
 
     const { rows: t3after } = await db.query(
-      `SELECT "teacherId" FROM "LeadTrial" WHERE id = $1`,
+      `SELECT t."teacherId", l."assignedTeacherId" FROM "LeadTrial" t
+       JOIN "Lead" l ON l.id = t."leadId" WHERE t.id = $1`,
       [t3[0].id],
     );
     check('the trial now has that teacher', t3after[0]?.teacherId === teacherIds.male);
+    // Scheduling syncs the lead; editing has to as well, or every screen that
+    // reads the lead rather than the trial disagrees with this one.
+    check(
+      'and the lead is brought into step',
+      t3after[0]?.assignedTeacherId === teacherIds.male,
+      String(t3after[0]?.assignedTeacherId),
+    );
+
+    // Changing to somebody else must move both again.
+    await req('PATCH', `/leads/trials/${t3[0].id}`, adminToken, { teacherId: teacherIds.female });
+    const { rows: swapped } = await db.query(
+      `SELECT t."teacherId", l."assignedTeacherId" FROM "LeadTrial" t
+       JOIN "Lead" l ON l.id = t."leadId" WHERE t.id = $1`,
+      [t3[0].id],
+    );
+    check(
+      'changing the teacher moves the trial and the lead together',
+      swapped[0]?.teacherId === teacherIds.female &&
+        swapped[0]?.assignedTeacherId === teacherIds.female,
+      `${swapped[0]?.teacherId} / ${swapped[0]?.assignedTeacherId}`,
+    );
+
+    // Editing may change who teaches, never empty it.
+    const blanked = await req(
+      'PATCH', `/leads/trials/${t3[0].id}`, adminToken, { teacherId: '' }, 400,
+    );
+    check('the teacher cannot be blanked back out', blanked.ok, `status ${blanked.status}`);
+    const { rows: stillThere } = await db.query(
+      `SELECT "teacherId" FROM "LeadTrial" WHERE id = $1`,
+      [t3[0].id],
+    );
+    check('and the refused edit changed nothing', stillThere[0]?.teacherId === teacherIds.female);
 
     const dash2 = await req('GET', '/dashboard/coach', coachToken);
     check(

@@ -63,7 +63,6 @@ import {
   LEAD_STATUS_TONE,
   isTrialClosed,
 } from "@/components/leads/lead-meta";
-import { TeacherAvailabilityPanel } from "@/components/leads/teacher-availability";
 import { SubmittedReport } from "@/components/leads/trial-report";
 
 // The Recommendation tab is hidden. Teacher assignment still happens — the
@@ -619,11 +618,12 @@ function TrialTab({ lead, teachers, onChange }: { lead: Lead; teachers: { id: st
         />
       )}
 
-      {/* Opens on the date the visitor asked for, so the coach starts where the
-          family expected rather than on an arbitrary day. */}
-      <TeacherAvailabilityPanel
-        defaultDate={lead.preferredDate ? lead.preferredDate.slice(0, 10) : null}
-      />
+      {/*
+        * The day-at-a-glance availability grid used to sit here. Both places a
+        * teacher is actually chosen — the scheduling form and the trial card —
+        * list who is free at the moment of the decision and say when nobody
+        * is, so the grid only pushed the trials themselves down the page.
+        */}
 
       {loading ? (
         <div className="flex items-center gap-2 py-8 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Loading trials…</div>
@@ -879,6 +879,7 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
 
 function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   /*
    * Same definition as the teacher's own screen. The coach used to treat a
    * NO_SHOW as still open, so it kept offering Present / No-show / Reschedule
@@ -930,10 +931,22 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-bold text-rose-600 hover:bg-rose-500/20 disabled:opacity-50">
                 <XCircle className="size-3.5" /> No-show
               </button>
-              <RescheduleButton trial={trial} teachers={teachers} onChange={onChange} />
+              <button onClick={() => setEditing((s) => !s)} disabled={busy}
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-50">
+                <Pencil className="size-3.5" /> {editing ? "Close" : "Edit"}
+              </button>
             </div>
           )}
         </div>
+
+        {editing && (
+          <EditTrialForm
+            trial={trial}
+            teachers={teachers}
+            onCancel={() => setEditing(false)}
+            onSaved={() => { setEditing(false); onChange(); }}
+          />
+        )}
 
         <AssignTeacherRow trial={trial} teachers={teachers} onChange={onChange} />
 
@@ -1062,33 +1075,46 @@ function MissingInfoRow({ trial, onChange }: { trial: LeadTrial; onChange: () =>
  * nobody was free — needs somebody to notice. So it says so loudly and offers
  * the fix in place, rather than leaving "Unassigned teacher" in grey text.
  */
-function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
+/*
+ * Who could teach a trial starting at `whenIso` and running `durationMins` —
+ * free for *every* half-hour it spans, not just the one it starts in. Shared by
+ * the assign row and the edit form so the two can never disagree about who is
+ * available; the edit form re-runs it as the coach changes the time.
+ */
+function useFreeTeachers(whenIso: string, durationMins: number) {
   const [avail, setAvail] = useState<TrialDayAvailability | null>(null);
-  const [teacherId, setTeacherId] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const open = !trial.teacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
-  const date = trial.scheduledAt.slice(0, 10);
+  const date = whenIso ? whenIso.slice(0, 10) : "";
 
   useEffect(() => {
-    if (!open) return;
-    fetchTeacherAvailability(date).then(setAvail).catch(() => setAvail(null));
-  }, [open, date]);
+    if (!date) return;
+    let alive = true;
+    fetchTeacherAvailability(date)
+      .then((a) => { if (alive) setAvail(a); })
+      .catch(() => { if (alive) setAvail(null); });
+    return () => { alive = false; };
+  }, [date]);
 
-  // Only the teachers actually free for the whole trial, same rule the
-  // scheduling form uses.
-  const free = useMemo(() => {
-    if (!avail) return [];
-    const start = new Date(trial.scheduledAt);
+  return useMemo(() => {
+    if (!avail || !whenIso) return [];
+    const start = new Date(whenIso);
+    if (isNaN(start.getTime())) return [];
     const from = start.getUTCHours() * 60 + start.getUTCMinutes();
-    const need = Math.max(1, Math.ceil((trial.durationMins || 30) / 30));
+    const need = Math.max(1, Math.ceil((durationMins || 30) / 30));
     const wanted: string[] = [];
     for (let i = 0; i < need; i++) {
       const m = from + i * 30;
       wanted.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
     }
     return avail.teachers.filter((t) => wanted.every((s) => t.freeSlots.includes(s)));
-  }, [avail, trial.scheduledAt, trial.durationMins]);
+  }, [avail, whenIso, durationMins]);
+}
+
+function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
+  const [teacherId, setTeacherId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const open = !trial.teacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
+  const free = useFreeTeachers(trial.scheduledAt, trial.durationMins);
 
   if (!open) return null;
 
@@ -1141,32 +1167,128 @@ function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; tea
   );
 }
 
-function RescheduleButton({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
-  const reschedule = async () => {
-    const { value } = await Swal.fire({
-      title: "Reschedule trial",
-      html: `<input id="sw-dt" type="datetime-local" class="swal2-input" style="width:auto" />`,
-      background: swalBg(),
-      showCancelButton: true,
-      confirmButtonText: "Reschedule",
-      preConfirm: () => {
-        const v = (document.getElementById("sw-dt") as HTMLInputElement)?.value;
-        if (!v) { Swal.showValidationMessage("Pick a date & time"); return false; }
-        return v;
-      },
-    });
-    if (!value) return;
+
+// datetime-local wants "YYYY-MM-DDTHH:mm" in local time, and the stored value
+// is UTC ISO. Subtracting the offset before slicing keeps the box showing the
+// same clock time the card does.
+function toLocalInput(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
+/*
+ * Editing a booked trial. This replaces a Reschedule button that could only
+ * move the date — it was handed the teacher list and threw it away — so once a
+ * trial existed there was no way to change who taught it, how long it ran, or
+ * where it met, short of cancelling and rebooking.
+ *
+ * Only the fields the coach owns. Status, attendance and the report are set by
+ * the buttons and the teacher, and editing them from here would let a closed
+ * trial be quietly reopened.
+ */
+function EditTrialForm({ trial, teachers, onCancel, onSaved }: {
+  trial: LeadTrial; teachers: { id: string; name: string }[]; onCancel: () => void; onSaved: () => void;
+}) {
+  const [when, setWhen] = useState(() => toLocalInput(trial.scheduledAt));
+  const [duration, setDuration] = useState(trial.durationMins || 30);
+  const [teacherId, setTeacherId] = useState(trial.teacherId || "");
+  const [provider, setProvider] = useState(trial.meetingProvider || "Zoom");
+  const [link, setLink] = useState(trial.meetingLink || "");
+  const [notes, setNotes] = useState(trial.notes || "");
+  const [busy, setBusy] = useState(false);
+
+  const whenIso = when ? new Date(when).toISOString() : trial.scheduledAt;
+  const free = useFreeTeachers(whenIso, duration);
+
+  /*
+   * Free teachers first, but never an empty list: the currently assigned one
+   * has to stay selectable even after a time change makes them "busy" (they
+   * are busy with this very trial), or saving any other field would silently
+   * demand a different teacher.
+   */
+  const options = (() => {
+    const seen = new Set<string>();
+    const out: { id: string; label: string; free: boolean }[] = [];
+    for (const t of free) { seen.add(t.teacherId); out.push({ id: t.teacherId, label: t.name, free: true }); }
+    for (const t of teachers) if (!seen.has(t.id)) out.push({ id: t.id, label: t.name, free: false });
+    return out;
+  })();
+
+  const save = async () => {
+    if (!teacherId) return;
+    setBusy(true);
     try {
-      await updateLeadTrial(trial.id, { scheduledAt: new Date(value as string).toISOString() });
-      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Rescheduled", showConfirmButton: false, timer: 1800 });
-      onChange();
-    } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() }); }
+      await updateLeadTrial(trial.id, {
+        scheduledAt: whenIso,
+        durationMins: duration,
+        teacherId,
+        meetingProvider: provider || undefined,
+        meetingLink: link,
+        notes,
+      });
+      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Trial updated", showConfirmButton: false, timer: 1800 });
+      onSaved();
+    } catch (e) {
+      Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() });
+    } finally { setBusy(false); }
   };
-  void teachers;
+
+  const moved = whenIso !== trial.scheduledAt;
+
   return (
-    <button onClick={reschedule} className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-[11px] font-bold text-ink-2 hover:bg-surface-2">
-      <CalendarClock className="size-3.5" /> Reschedule
-    </button>
+    <div className="mt-4 rounded-xl border border-hairline bg-surface-2/40 p-4">
+      <h4 className="mb-3 text-sm font-bold text-ink">Edit trial</h4>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Date & time">
+          <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} disabled={busy}
+            className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+        </Field>
+        <Field label="Duration (minutes)">
+          <input type="number" min={10} max={240} step={5} value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))} disabled={busy}
+            className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+        </Field>
+        <Field label="Teacher" full>
+          <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={busy}
+            className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+            <option value="">— Select a teacher —</option>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>{o.label}{o.free ? "" : " · not free at this time"}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Platform">
+          <input value={provider} onChange={(e) => setProvider(e.target.value)} disabled={busy}
+            className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+        </Field>
+        <Field label="Meeting link">
+          <input value={link} onChange={(e) => setLink(e.target.value)} disabled={busy} placeholder="Left as is if the room is managed for you"
+            className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+        </Field>
+        <Field label="Notes" full>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} disabled={busy}
+            className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
+        </Field>
+      </div>
+
+      {moved && (
+        <p className="mt-2 text-[11px] font-semibold text-amber-600">
+          Moving the time marks this rescheduled, re-arms the 24h / 1h reminders and updates the meeting room.
+        </p>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button onClick={save} disabled={busy || !when || !teacherId}
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} Save changes
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          className="inline-flex h-9 items-center rounded-xl border border-hairline px-4 text-xs font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-50">
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
