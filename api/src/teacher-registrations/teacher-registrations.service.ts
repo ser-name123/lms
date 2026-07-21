@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import {
   Role,
   UserStatus,
@@ -206,11 +207,47 @@ export class TeacherRegistrationsService {
   }
 
   // ── Admin: list / detail / stats ───────────────────────────────────────────
+
+  // An ACTIVATED row whose profile link is gone is an archived hire: the person
+  // was hired, the account has since been deleted. It must not be counted as a
+  // live teacher, or this list disagrees with All Teachers. The link nulls
+  // itself via ON DELETE SET NULL, so this stays true without anyone
+  // remembering to maintain it.
+  private static readonly LIVE_ACTIVATED = {
+    status: TeacherRegistrationStatus.ACTIVATED,
+    teacherProfileId: { not: null },
+  };
+  private static readonly ARCHIVED = {
+    status: TeacherRegistrationStatus.ACTIVATED,
+    teacherProfileId: null,
+  };
+
+  // ARCHIVED is a view over ACTIVATED, not a stored status — nothing writes it.
+  private statusWhere(status?: string) {
+    if (!status) return {};
+    if (status === 'ARCHIVED') return TeacherRegistrationsService.ARCHIVED;
+    if (status === TeacherRegistrationStatus.ACTIVATED) {
+      return TeacherRegistrationsService.LIVE_ACTIVATED;
+    }
+    return { status };
+  }
+
+  private withAccountState<T extends { status: string; teacherProfileId: string | null }>(
+    reg: T,
+  ) {
+    return {
+      ...reg,
+      accountRemoved:
+        reg.status === TeacherRegistrationStatus.ACTIVATED &&
+        !reg.teacherProfileId,
+    };
+  }
+
   async list(dto: ListTeacherRegistrationsDto) {
     const { page = 1, limit = 20, search, status } = dto;
 
     const where: any = {
-      ...(status ? { status } : {}),
+      ...this.statusWhere(status),
       ...(search
         ? {
             OR: [
@@ -234,7 +271,7 @@ export class TeacherRegistrationsService {
     ]);
 
     return {
-      items,
+      items: items.map((r) => this.withAccountState(r)),
       meta: {
         page,
         limit,
@@ -249,7 +286,7 @@ export class TeacherRegistrationsService {
       where: { id },
     });
     if (!reg) throw new NotFoundException(`Teacher application ${id} not found`);
-    return reg;
+    return this.withAccountState(reg);
   }
 
   // The full application linked to an activated teacher profile (null for
@@ -261,10 +298,13 @@ export class TeacherRegistrationsService {
     });
     if (!profile) throw new NotFoundException(`Teacher ${profileId} not found`);
 
-    return this.prisma.teacherRegistration.findFirst({
+    const reg = await this.prisma.teacherRegistration.findFirst({
       where: { teacherProfileId: profileId },
       orderBy: { createdAt: 'desc' },
     });
+    // Always false here (the profile was just found), but the shape has to
+    // match everywhere the client reads an application.
+    return reg ? this.withAccountState(reg) : null;
   }
 
   // Admin edits the linked application; overlapping fields sync to the live
@@ -316,7 +356,7 @@ export class TeacherRegistrationsService {
         }
       }
 
-      return updated;
+      return this.withAccountState(updated);
     });
   }
 
@@ -331,6 +371,7 @@ export class TeacherRegistrationsService {
       approval,
       training,
       activated,
+      archived,
       rejected,
       needsInfo,
     ] = await Promise.all([
@@ -341,7 +382,12 @@ export class TeacherRegistrationsService {
       this.prisma.teacherRegistration.count({ where: { status: s.DEMO_CLASS } }),
       this.prisma.teacherRegistration.count({ where: { status: s.APPROVAL } }),
       this.prisma.teacherRegistration.count({ where: { status: s.TRAINING } }),
-      this.prisma.teacherRegistration.count({ where: { status: s.ACTIVATED } }),
+      this.prisma.teacherRegistration.count({
+        where: TeacherRegistrationsService.LIVE_ACTIVATED,
+      }),
+      this.prisma.teacherRegistration.count({
+        where: TeacherRegistrationsService.ARCHIVED,
+      }),
       this.prisma.teacherRegistration.count({ where: { status: s.REJECTED } }),
       this.prisma.teacherRegistration.count({ where: { status: s.NEEDS_INFO } }),
     ]);
@@ -359,6 +405,7 @@ export class TeacherRegistrationsService {
       approval,
       training,
       activated,
+      archived,
       rejected,
       needsInfo,
       inPipeline,
@@ -372,7 +419,13 @@ export class TeacherRegistrationsService {
     reviewerId?: string,
   ) {
     const reg = await this.getOne(id);
-    if (reg.status === TeacherRegistrationStatus.ACTIVATED) {
+    // Blocked only while the account is live. An archived hire (activated, then
+    // the account deleted) can be re-activated — that is a re-hire, and it
+    // mints a fresh account rather than resurrecting the old one.
+    if (
+      reg.status === TeacherRegistrationStatus.ACTIVATED &&
+      !reg.accountRemoved
+    ) {
       throw new BadRequestException(
         'This teacher has already been activated.',
       );
@@ -397,10 +450,18 @@ export class TeacherRegistrationsService {
     });
 
     const notification = await this.notify(updated).catch(() => null);
-    return { ...updated, notification };
+    return { ...this.withAccountState(updated), notification };
   }
 
+  // nextTeacherCode() reads the highest code and adds one, so two activations
+  // firing together compute the same code and one dies on the unique index.
   private async activate(reg: any, notes?: string, reviewerId?: string) {
+    return retryOnUniqueClash('teacherCode', () =>
+      this.activateOnce(reg, notes, reviewerId),
+    );
+  }
+
+  private async activateOnce(reg: any, notes?: string, reviewerId?: string) {
     const now = new Date();
     const teacherCode = await this.nextTeacherCode();
 
@@ -454,7 +515,7 @@ export class TeacherRegistrationsService {
     });
 
     const notification = await this.notify(updated).catch(() => null);
-    return { ...updated, notification };
+    return { ...this.withAccountState(updated), notification };
   }
 
   private async nextTeacherCode(): Promise<string> {

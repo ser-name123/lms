@@ -321,6 +321,7 @@ model TeacherProfile {
   batches     Batch[]
   assignments Assignment[]
   assessments Assessment[]
+  registrations TeacherRegistration[]
 }
 
 // ─── Catalogue ────────────────────────────────────────────────────────────────
@@ -1348,8 +1349,12 @@ model TeacherRegistration {
   reviewedAt     DateTime?
   reviewedById   String?
 
-  // Filled in on activation
+  // Filled in on activation. The relation is SetNull on purpose: when the
+  // teacher account is deleted the link must drop itself, otherwise this row
+  // keeps claiming an ACTIVATED teacher that no longer exists. An ACTIVATED
+  // row with a null link is therefore an archived hire, not a live one.
   teacherProfileId    String?
+  teacherProfile      TeacherProfile? @relation(fields: [teacherProfileId], references: [id], onDelete: SetNull)
   approvedTeacherCode String?
 
   createdAt      DateTime                  @default(now())

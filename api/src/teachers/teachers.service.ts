@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeacherDto, ListTeachersDto, UpdateTeacherDto } from './dto';
 import { Role, UserStatus } from '../generated/prisma/enums';
+import { retryOnUniqueClash } from '../common/retry-unique';
 
 const TEACHER_SELECT = {
   id: true,
@@ -170,32 +171,41 @@ export class TeachersService {
 
     const rawPassword = dto.password || 'teacher123';
     const passwordHash = await bcrypt.hash(rawPassword, 12);
-    const teacherCode = await this.nextTeacherCode();
 
-    const newProfile = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email: dto.email,
-          passwordHash,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          role: Role.TEACHER,
-          country: dto.country || null,
-          timezone: dto.timezone || null,
-          status: UserStatus.ACTIVE,
-        },
-      });
+    // nextTeacherCode() reads the highest code and adds one, so two creates
+    // landing together compute the same code and one dies on the unique index.
+    // The same index is also written by teacher-registration activation, so the
+    // two paths can collide with each other, not just with themselves.
+    const newProfile = await retryOnUniqueClash('teacherCode', async () => {
+      // Recomputed per attempt: the retry only helps if it re-reads the code
+      // the winning transaction just committed.
+      const teacherCode = await this.nextTeacherCode();
 
-      return tx.teacherProfile.create({
-        data: {
-          teacherCode,
-          specialisation: dto.specialisation || null,
-          hourlyRate: dto.hourlyRate || null,
-          bio: dto.bio || null,
-          courseId: dto.courseId || null,
-          userId: user.id,
-        },
-        select: TEACHER_SELECT,
+      return this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email: dto.email,
+            passwordHash,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            role: Role.TEACHER,
+            country: dto.country || null,
+            timezone: dto.timezone || null,
+            status: UserStatus.ACTIVE,
+          },
+        });
+
+        return tx.teacherProfile.create({
+          data: {
+            teacherCode,
+            specialisation: dto.specialisation || null,
+            hourlyRate: dto.hourlyRate || null,
+            bio: dto.bio || null,
+            courseId: dto.courseId || null,
+            userId: user.id,
+          },
+          select: TEACHER_SELECT,
+        });
       });
     });
 

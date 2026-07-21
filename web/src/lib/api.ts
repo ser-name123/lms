@@ -1748,6 +1748,9 @@ export interface TeacherRegistration {
   reviewedAt: string | null;
   teacherProfileId: string | null;
   approvedTeacherCode: string | null;
+  // Derived by the API: ACTIVATED, but the teacher account has since been
+  // deleted. Such a row is an archived hire, never a live teacher.
+  accountRemoved: boolean;
   createdAt: string;
   updatedAt: string;
   // Present only on a review response: the update dispatched to the applicant.
@@ -1763,6 +1766,9 @@ export interface TeacherRegistrationStats {
   approval: number;
   training: number;
   activated: number;
+  // Activated hires whose account was later deleted — counted apart so
+  // "Activated" always matches what All Teachers shows.
+  archived: number;
   rejected: number;
   needsInfo: number;
   inPipeline: number;

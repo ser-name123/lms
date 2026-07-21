@@ -300,8 +300,12 @@ export class ListTeacherRegistrationsDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ enum: TeacherRegistrationStatus })
+  // ARCHIVED is a filter, not a stored status: activated hires whose account
+  // has since been deleted. Nothing ever writes it.
+  @ApiPropertyOptional({
+    enum: [...Object.values(TeacherRegistrationStatus), 'ARCHIVED'],
+  })
   @IsOptional()
-  @IsIn(Object.values(TeacherRegistrationStatus))
+  @IsIn([...Object.values(TeacherRegistrationStatus), 'ARCHIVED'])
   status?: string;
 }

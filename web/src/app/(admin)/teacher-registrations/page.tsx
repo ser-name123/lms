@@ -22,6 +22,7 @@ import {
   Wallet,
   FileText,
   Paperclip,
+  Archive,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -47,6 +48,7 @@ const STATUS_TABS = [
   "APPROVAL",
   "TRAINING",
   "ACTIVATED",
+  "ARCHIVED",
   "NEEDS_INFO",
   "REJECTED",
 ] as const;
@@ -62,7 +64,12 @@ const PIPELINE: TeacherRegistrationStatus[] = [
   "ACTIVATED",
 ];
 
-const statusTone: Record<TeacherRegistrationStatus, Tone> = {
+// "Archived" is not a stored status — it is an ACTIVATED application whose
+// teacher account has since been deleted. Showing it under Activated made this
+// list claim teachers that All Teachers could not find.
+type TabStatus = TeacherRegistrationStatus | "ARCHIVED";
+
+const statusTone: Record<TabStatus, Tone> = {
   APPLIED: "neutral",
   SCREENING: "accent",
   INTERVIEW: "warning",
@@ -70,11 +77,12 @@ const statusTone: Record<TeacherRegistrationStatus, Tone> = {
   APPROVAL: "warning",
   TRAINING: "accent",
   ACTIVATED: "good",
+  ARCHIVED: "neutral",
   REJECTED: "critical",
   NEEDS_INFO: "warning",
 };
 
-const statusLabel: Record<TeacherRegistrationStatus, string> = {
+const statusLabel: Record<TabStatus, string> = {
   APPLIED: "Applied",
   SCREENING: "Screening",
   INTERVIEW: "Interview",
@@ -82,9 +90,14 @@ const statusLabel: Record<TeacherRegistrationStatus, string> = {
   APPROVAL: "Approval",
   TRAINING: "Training",
   ACTIVATED: "Activated",
+  ARCHIVED: "Archived",
   REJECTED: "Rejected",
   NEEDS_INFO: "Needs Info",
 };
+
+// What the row should actually say: an archived hire is not "Activated".
+const shownStatus = (r: TeacherRegistration): TabStatus =>
+  r.accountRemoved ? "ARCHIVED" : r.status;
 
 const DOC_FIELDS: { key: keyof TeacherRegistration; label: string }[] = [
   { key: "resumeUrl", label: "Resume / CV" },
@@ -174,6 +187,24 @@ export default function TeacherRegistrationsPage() {
     }
   };
 
+  // Re-hire: the application is ACTIVATED but the account was deleted, so
+  // activating again mints a fresh account rather than restoring the old one.
+  const reactivate = async (reg: TeacherRegistration) => {
+    const r = await Swal.fire({
+      title: `Re-hire ${reg.firstName}?`,
+      text: "Their previous account was deleted. A brand new teacher account and Teacher ID will be created.",
+      icon: "question",
+      input: "textarea",
+      inputPlaceholder: "Optional welcome note for the email…",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Re-hire",
+      confirmButtonColor: "#10b981",
+      background: swalBg(),
+    });
+    if (!r.isConfirmed) return;
+    return applyReview(reg, { status: "ACTIVATED", notes: r.value || undefined });
+  };
+
   const advance = async (reg: TeacherRegistration) => {
     const target = nextStage(reg.status);
     if (!target) return;
@@ -254,6 +285,9 @@ export default function TeacherRegistrationsPage() {
     { label: "In Pipeline", value: stats?.inPipeline ?? 0, icon: Users, color: "text-blue-500 bg-blue-500/10" },
     { label: "Interview", value: stats?.interview ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10" },
     { label: "Activated", value: stats?.activated ?? 0, icon: CheckCircle2, color: "text-emerald-500 bg-emerald-500/10" },
+    // Shown next to Activated so a hire that lost its account is visibly
+    // accounted for rather than looking like it vanished from the count.
+    { label: "Archived", value: stats?.archived ?? 0, icon: Archive, color: "text-ink-3 bg-surface-3" },
     { label: "Rejected", value: stats?.rejected ?? 0, icon: XCircle, color: "text-rose-500 bg-rose-500/10" },
   ];
 
@@ -265,7 +299,7 @@ export default function TeacherRegistrationsPage() {
 
       <div className="animate-fade-up space-y-6 p-4 sm:p-6">
         {/* KPIs */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
           {kpis.map((k) => (
             <Card key={k.label} className="border border-hairline bg-surface shadow-sm">
               <CardBody className="flex items-center gap-3 p-4">
@@ -292,7 +326,7 @@ export default function TeacherRegistrationsPage() {
                   statusFilter === t ? "bg-surface text-accent shadow-sm border border-hairline/80" : "text-ink-3 hover:text-ink-2"
                 }`}
               >
-                {statusLabel[t as TeacherRegistrationStatus]}
+                {statusLabel[t]}
               </button>
             ))}
           </div>
@@ -356,7 +390,10 @@ export default function TeacherRegistrationsPage() {
                         <td className="px-6 py-4 text-xs text-ink-2 max-w-[180px] truncate">{r.subjects || "—"}</td>
                         <td className="px-6 py-4 text-xs text-ink-3">{r.experienceYears ? `${r.experienceYears} yr` : "—"}</td>
                         <td className="px-6 py-4">
-                          <Badge tone={statusTone[r.status]}>{statusLabel[r.status]}</Badge>
+                          <Badge tone={statusTone[shownStatus(r)]}>{statusLabel[shownStatus(r)]}</Badge>
+                          {r.accountRemoved && (
+                            <p className="mt-1 text-[10px] text-ink-3">Account deleted</p>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-xs text-ink-3">
                           {new Date(r.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
@@ -372,6 +409,19 @@ export default function TeacherRegistrationsPage() {
                             >
                               <Eye className="size-4.5" />
                             </Button>
+                            {r.accountRemoved && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => reactivate(r)}
+                                className="h-8 rounded-lg px-2.5 text-[11px] font-bold text-accent hover:bg-accent/10"
+                                title="Create a new account for this hire"
+                              >
+                                Re-hire
+                                <ChevronRight className="ml-0.5 size-3.5" />
+                              </Button>
+                            )}
                             {target && (
                               <Button
                                 variant="ghost"
@@ -421,7 +471,16 @@ export default function TeacherRegistrationsPage() {
 
             <div className="flex-1 space-y-5 overflow-y-auto p-6">
               <div className="flex items-center justify-between">
-                <Badge tone={statusTone[selected.status]}>{statusLabel[selected.status]}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge tone={statusTone[shownStatus(selected)]}>
+                    {statusLabel[shownStatus(selected)]}
+                  </Badge>
+                  {selected.accountRemoved && (
+                    <span className="text-[11px] font-medium text-ink-3">
+                      Teacher account was deleted
+                    </span>
+                  )}
+                </div>
                 {selected.approvedTeacherCode && (
                   <div className="text-right text-[11px] font-bold text-ink-2">
                     <span className="text-ink-3 font-medium">Teacher ID </span>
@@ -527,6 +586,19 @@ export default function TeacherRegistrationsPage() {
                 </div>
               )}
             </div>
+
+            {/* An archived hire is terminal but not a dead end — offer the re-hire. */}
+            {selected.accountRemoved && (
+              <div className="flex gap-2 border-t border-hairline p-4">
+                <Button
+                  onClick={() => reactivate(selected)}
+                  disabled={busy}
+                  className="h-10 flex-1 rounded-xl bg-accent text-xs font-bold text-white hover:opacity-90"
+                >
+                  <ShieldCheck className="mr-1 size-4" /> Re-hire
+                </Button>
+              </div>
+            )}
 
             {!terminal(selected.status) && (
               <div className="flex gap-2 border-t border-hairline p-4">
