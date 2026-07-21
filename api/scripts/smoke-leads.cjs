@@ -568,6 +568,41 @@ const isoDay = (offsetDays) =>
       `${moved.body?.status}`,
     );
 
+    /*
+     * A trial with no teacher shows on nobody's schedule while the family is
+     * still sent a reminder for it, so the coach's own booking path refuses
+     * one. Asserted before the happy path: if this ever stops refusing, the
+     * booking below would pass either way and prove nothing.
+     */
+    // The guard falls back to the lead's assigned teacher, so the refusal only
+    // means anything while the lead has none. Assert that first, or this check
+    // could pass for the wrong reason.
+    const { rows: leadTeacher } = await db.query(
+      `SELECT "assignedTeacherId" FROM "Lead" WHERE id = $1`,
+      [first.body.id],
+    );
+    check(
+      'the lead has no teacher of its own (precondition)',
+      leadTeacher[0]?.assignedTeacherId === null,
+      String(leadTeacher[0]?.assignedTeacherId),
+    );
+
+    const teacherless = await req(
+      'POST',
+      `/leads/${first.body.id}/trials`,
+      ownerToken,
+      {
+        scheduledAt: new Date(Date.parse(`${slotDate}T16:00:00.000Z`)).toISOString(),
+        durationMins: 30,
+      },
+      400,
+    );
+    check(
+      'the coach cannot book a trial with no teacher',
+      teacherless.ok,
+      `status ${teacherless.status}`,
+    );
+
     const second = await req(
       'POST',
       `/leads/${first.body.id}/trials`,
@@ -575,6 +610,7 @@ const isoDay = (offsetDays) =>
       {
         scheduledAt: new Date(Date.parse(`${slotDate}T16:00:00.000Z`)).toISOString(),
         durationMins: 30,
+        teacherId: someTeacher[0].id,
         notes: 'Second trial for the same student',
       },
       201,

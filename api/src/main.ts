@@ -5,6 +5,7 @@ import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { isDroppedConnection } from './common/dropped-connection';
 
 // A browser Origin never carries quotes, whitespace or a trailing slash, so any
 // of those in CORS_ORIGIN silently match nothing — the request is simply refused
@@ -25,6 +26,22 @@ function allowedOrigins(): string[] | true {
 
   return origins.length > 0 ? origins : true;
 }
+
+/*
+ * A dropped pooled connection is survivable — the pool reconnects on the next
+ * query — so it is logged and swallowed. Everything else is rethrown, so an
+ * unhandled rejection still crashes loudly the way Node intends rather than
+ * leaving the process running in an unknown state.
+ */
+process.on('unhandledRejection', (reason) => {
+  if (isDroppedConnection(reason)) {
+    console.warn(
+      `[db] dropped connection, continuing: ${String((reason as any)?.message ?? reason)}`,
+    );
+    return;
+  }
+  throw reason;
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

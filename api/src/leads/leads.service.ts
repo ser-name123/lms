@@ -147,14 +147,25 @@ export class LeadsService implements OnModuleInit {
     });
 
     /*
-     * No teacher is assigned yet — the slot came from merged availability, not
-     * from one person's calendar, and picking the teacher is the coach's job.
-     * The trial row exists from the start so the slot is held and the visitor
-     * gets a real appointment rather than "we'll be in touch".
+     * The slot came from merged availability, so it belongs to no one teacher
+     * — but somebody has to run the class. This used to be left null for the
+     * coach to fill in, and nothing chased it: the trial appeared on no
+     * teacher's screen while the family still got their reminder. Pick the
+     * obvious candidate now; the coach can change it, and if nobody is free
+     * this stays null and the trial is flagged as needing a teacher.
      */
+    const teacherId = await this.availability.pickTeacherFor({
+      date: dto.preferredDate!,
+      slot,
+      durationMins: 30,
+      subject: dto.interestedSubject,
+      preferredGender: dto.preferredTeacherGender,
+    });
+
     const trial = await this.prisma.leadTrial.create({
       data: {
         leadId: lead.id,
+        teacherId,
         scheduledAt: startAt,
         durationMins: 30,
         timeZone: offered.timeZone,
@@ -162,6 +173,13 @@ export class LeadsService implements OnModuleInit {
         status: 'SCHEDULED',
       },
     });
+
+    if (teacherId) {
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: { assignedTeacherId: teacherId, assignedTeacherAt: new Date() },
+      });
+    }
 
     const zoom = await this.zoom.createTrialMeeting({
       topic: `Free trial — ${lead.studentFirstName} ${lead.studentLastName}`.trim(),
@@ -973,7 +991,18 @@ export class LeadsService implements OnModuleInit {
     const when = new Date(dto.scheduledAt);
     if (isNaN(when.getTime())) throw new BadRequestException('Invalid trial date/time.');
 
+    /*
+     * A coach scheduling by hand has a teacher in front of them, so there is no
+     * reason to save a class nobody is going to run. The website flow is the
+     * only place a trial may still start teacherless, and only when literally
+     * nobody is free — there it is flagged instead.
+     */
     const teacherId = dto.teacherId || lead.assignedTeacherId || null;
+    if (!teacherId) {
+      throw new BadRequestException(
+        'Choose a teacher for this trial. If nobody is listed, no teacher has approved availability for that time yet.',
+      );
+    }
 
     const durationMins = dto.durationMins ?? 30;
     const trial = await this.prisma.leadTrial.create({

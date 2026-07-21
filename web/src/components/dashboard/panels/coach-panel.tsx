@@ -214,7 +214,7 @@ export function CoachPanel() {
         // flags carry the date they were raised.
         case "co.tasks":
           return (
-            <WidgetCard title="Upcoming tasks" subtitle="Meetings, reviews, evaluations, counseling">
+            <WidgetCard title="Upcoming tasks" subtitle="Teacher assignment, meetings, reviews, evaluations, counseling">
               {!upcomingTasks.length ? (
                 <EmptyState title="Nothing scheduled" />
               ) : (

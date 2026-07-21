@@ -852,7 +852,14 @@ export type CoachStudentRow = {
 };
 
 export type CoachTask = {
-  kind: "PARENT_MEETING" | "MONTHLY_REVIEW" | "TRIAL_EVALUATION" | "STUDENT_COUNSELING";
+  kind:
+    | "PARENT_MEETING"
+    | "MONTHLY_REVIEW"
+    | "TRIAL_EVALUATION"
+    | "STUDENT_COUNSELING"
+    // An upcoming trial with no teacher on it — it shows on nobody's schedule
+    // while the family is still sent a reminder for it.
+    | "TRIAL_NEEDS_TEACHER";
   id: string;
   title: string;
   detail: string | null;

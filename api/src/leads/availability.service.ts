@@ -250,6 +250,94 @@ export class LeadAvailabilityService {
     };
   }
 
+  /**
+   * The teacher to put on a trial at this exact time, or null if nobody fits.
+   *
+   * A website booking used to create the trial with no teacher at all: the
+   * visitor picks from *merged* availability, so the slot does not belong to
+   * anyone in particular and choosing was left to the coach. In practice
+   * nothing chased it — the trial sat unassigned, appeared on no teacher's
+   * screen, and the family still got their reminder for a class nobody was
+   * going to run. Picking the obvious candidate up front is better than
+   * leaving a hole that only a diligent coach closes; the coach can still
+   * change it, and if nobody fits this returns null and the trial is flagged
+   * rather than silently mis-assigned.
+   *
+   * Order of preference, all within "actually free for every slot this trial
+   * spans": the gender the family asked for, then the subject they enquired
+   * about, then the lightest upcoming workload. Ties break on teacherId so the
+   * same inputs always give the same answer.
+   */
+  async pickTeacherFor(opts: {
+    date: string;
+    slot: string;
+    durationMins?: number;
+    subject?: string | null;
+    preferredGender?: string | null;
+  }): Promise<string | null> {
+    const { teachers } = await this.teacherAvailabilityFor(opts.date);
+    if (!teachers.length) return null;
+
+    const startMins = this.toMinutes(opts.slot);
+    if (startMins === null) return null;
+    const spans = Math.max(
+      1,
+      Math.ceil((opts.durationMins || SLOT_MINUTES) / SLOT_MINUTES),
+    );
+    const needed: string[] = [];
+    for (let i = 0; i < spans; i++) {
+      needed.push(this.toHHmm(startMins + i * SLOT_MINUTES));
+    }
+
+    const free = teachers.filter((t) =>
+      needed.every((s) => t.freeSlots.includes(s)),
+    );
+    if (!free.length) return null;
+
+    const wantGender =
+      opts.preferredGender && opts.preferredGender !== 'Either'
+        ? opts.preferredGender.toLowerCase()
+        : null;
+    const wantSubject = (opts.subject ?? '').trim().toLowerCase();
+
+    // Upcoming committed trials, as the workload tie-break. Counted here rather
+    // than reusing freeSlots.length: a teacher who published one hour and is
+    // free all of it is not "less busy" than one who published eight.
+    const load = await this.prisma.leadTrial.groupBy({
+      by: ['teacherId'],
+      where: {
+        teacherId: { in: free.map((t) => t.teacherId) },
+        scheduledAt: { gte: new Date() },
+        status: { in: ['SCHEDULED', 'RESCHEDULED'] },
+      },
+      _count: { _all: true },
+    });
+    const loadById = new Map(
+      load.map((l) => [l.teacherId as string, l._count._all]),
+    );
+
+    const scored = free.map((t) => ({
+      teacherId: t.teacherId,
+      genderMatch: wantGender && (t.gender ?? '').toLowerCase() === wantGender ? 1 : 0,
+      subjectMatch:
+        wantSubject &&
+        (t.subjects ?? []).some((s) => s.toLowerCase().includes(wantSubject))
+          ? 1
+          : 0,
+      load: loadById.get(t.teacherId) ?? 0,
+    }));
+
+    scored.sort(
+      (a, b) =>
+        b.genderMatch - a.genderMatch ||
+        b.subjectMatch - a.subjectMatch ||
+        a.load - b.load ||
+        a.teacherId.localeCompare(b.teacherId),
+    );
+
+    return scored[0].teacherId;
+  }
+
   /** Slots on this date already held by a live trial or an unprocessed lead. */
   private async takenSlots(date: Date): Promise<Set<string>> {
     const dayEnd = new Date(date.getTime() + 86_400_000);

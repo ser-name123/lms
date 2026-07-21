@@ -815,7 +815,12 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
           <Field label={`Teacher${slot ? ` — free at ${slot}` : ""}`} full>
             <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={!slot}
               className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent disabled:opacity-50">
-              <option value="">— Leave unassigned —</option>
+              {/*
+                * No "leave unassigned" option: a trial with no teacher shows up
+                * on nobody's screen, and the family is still sent a reminder
+                * for it. The API refuses one too.
+                */}
+              <option value="">— Select a teacher —</option>
               {freeTeachers.map((t) => (
                 <option key={t.teacherId} value={t.teacherId}>
                   {t.name}
@@ -862,7 +867,7 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
         </div>
 
         <div className="mt-4 flex gap-2">
-          <button onClick={submit} disabled={busy || !slot} className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
+          <button onClick={submit} disabled={busy || !slot || !teacherId} className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <CalendarClock className="size-4" />} Schedule & Send Invite
           </button>
           <button onClick={onCancel} className="inline-flex h-10 items-center rounded-xl border border-hairline px-4 text-xs font-bold text-ink-2 hover:bg-surface-2">Cancel</button>
@@ -929,6 +934,8 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
             </div>
           )}
         </div>
+
+        <AssignTeacherRow trial={trial} teachers={teachers} onChange={onChange} />
 
         <MissingInfoRow trial={trial} onChange={onChange} />
 
@@ -1042,6 +1049,93 @@ function MissingInfoRow({ trial, onChange }: { trial: LeadTrial; onChange: () =>
           <LinkIcon className="size-3.5" />
           {trial.infoRequestedAt ? "Send again" : "Ask the family"}
         </button>
+      )}
+    </div>
+  );
+}
+
+/*
+ * A trial with no teacher is the quietest failure in this flow: it shows on
+ * nobody's schedule, the Zoom room exists, and the family is still sent their
+ * 24h reminder for a class no one is going to run. Website bookings assign a
+ * teacher automatically now, but one booked before that — or booked when
+ * nobody was free — needs somebody to notice. So it says so loudly and offers
+ * the fix in place, rather than leaving "Unassigned teacher" in grey text.
+ */
+function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
+  const [avail, setAvail] = useState<TrialDayAvailability | null>(null);
+  const [teacherId, setTeacherId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const open = !trial.teacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
+  const date = trial.scheduledAt.slice(0, 10);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchTeacherAvailability(date).then(setAvail).catch(() => setAvail(null));
+  }, [open, date]);
+
+  // Only the teachers actually free for the whole trial, same rule the
+  // scheduling form uses.
+  const free = useMemo(() => {
+    if (!avail) return [];
+    const start = new Date(trial.scheduledAt);
+    const from = start.getUTCHours() * 60 + start.getUTCMinutes();
+    const need = Math.max(1, Math.ceil((trial.durationMins || 30) / 30));
+    const wanted: string[] = [];
+    for (let i = 0; i < need; i++) {
+      const m = from + i * 30;
+      wanted.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+    }
+    return avail.teachers.filter((t) => wanted.every((s) => t.freeSlots.includes(s)));
+  }, [avail, trial.scheduledAt, trial.durationMins]);
+
+  if (!open) return null;
+
+  /*
+   * When nobody is free we still list everyone, labelled. Offering only free
+   * teachers would be the tidier rule, but it leaves the coach with an empty
+   * dropdown and a class that stays teacherless — which is the bug this row
+   * exists to close.
+   */
+  const options = free.length
+    ? free.map((t) => ({ id: t.teacherId, label: t.name, free: true }))
+    : teachers.map((t) => ({ id: t.id, label: t.name, free: false }));
+
+  const assign = async () => {
+    if (!teacherId) return;
+    setBusy(true);
+    try {
+      await updateLeadTrial(trial.id, { teacherId });
+      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Teacher assigned", showConfirmButton: false, timer: 1800 });
+      onChange();
+    } catch (e) {
+      Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+      <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
+        No teacher assigned — this class appears on nobody&apos;s schedule.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={busy}
+          className="h-9 min-w-[220px] rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent">
+          <option value="">— Select a teacher —</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>{o.label}{o.free ? "" : " · not free at this time"}</option>
+          ))}
+        </select>
+        <button onClick={assign} disabled={busy || !teacherId}
+          className="inline-flex h-9 items-center gap-1 rounded-lg bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <GraduationCap className="size-3.5" />} Assign
+        </button>
+      </div>
+      {!free.length && (
+        <p className="mt-1.5 text-[11px] text-amber-700/80 dark:text-amber-400/80">
+          Nobody has approved availability at this time. Assigning anyway is fine — or reschedule to a slot somebody published.
+        </p>
       )}
     </div>
   );

@@ -301,7 +301,7 @@ export class CoachDashboardService {
     const now = new Date();
     const horizon = new Date(now.getTime() + 14 * 86_400_000);
 
-    const [meetings, dueReviews, trialEvaluations, counseling] = await Promise.all([
+    const [meetings, dueReviews, trialEvaluations, counseling, unassignedTrials] = await Promise.all([
       this.prisma.parentMeeting.findMany({
         where: {
           studentId: { in: studentIds },
@@ -358,6 +358,38 @@ export class CoachDashboardService {
         take: 10,
         select: { id: true, studentId: true, level: true, reasons: true, createdAt: true },
       }),
+      /*
+       * Upcoming trials on this coach's leads with nobody to teach them. This
+       * is the failure that used to pass silently: the class shows on no
+       * teacher's screen, but the Zoom room exists and the family still gets
+       * their reminder, so nothing looks wrong until the day itself.
+       *
+       * No horizon filter, unlike the other tasks — a teacherless class three
+       * weeks out is still a task, and hiding it until it is nearly due is how
+       * it got missed in the first place.
+       */
+      this.prisma.leadTrial.findMany({
+        where: {
+          teacherId: null,
+          scheduledAt: { gte: now },
+          status: { in: ['SCHEDULED', 'RESCHEDULED'] },
+          lead: { assignedCoachId: coachUserId },
+        },
+        orderBy: { scheduledAt: 'asc' },
+        take: 10,
+        select: {
+          id: true,
+          scheduledAt: true,
+          lead: {
+            select: {
+              id: true,
+              leadNumber: true,
+              studentFirstName: true,
+              studentLastName: true,
+            },
+          },
+        },
+      }),
     ]);
 
     const names = await this.prisma.studentProfile.findMany({
@@ -384,6 +416,14 @@ export class CoachDashboardService {
         detail: null,
         at: r.nextReviewAt!.toISOString(),
         link: `/students/${r.studentId}`,
+      })),
+      ...unassignedTrials.map((t) => ({
+        kind: 'TRIAL_NEEDS_TEACHER' as const,
+        id: t.id,
+        title: `Assign a teacher — ${t.lead.studentFirstName} ${t.lead.studentLastName}`.trim(),
+        detail: t.lead.leadNumber,
+        at: t.scheduledAt.toISOString(),
+        link: `/leads/${t.lead.id}`,
       })),
       ...trialEvaluations.map((l) => ({
         kind: 'TRIAL_EVALUATION' as const,
