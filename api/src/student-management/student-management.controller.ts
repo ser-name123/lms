@@ -140,12 +140,6 @@ export class StudentManagementController {
     return this.service.assignCoach(id, dto.coachId ?? null, actor(u));
   }
 
-  // ── Parent Dashboard (read-only, admin-viewable) ────────────────────────────
-  @Get(':id/parent-view')
-  parentView(@Param('id') id: string) {
-    return this.service.getParentView(id);
-  }
-
   // ── Transfer approval workflow ──────────────────────────────────────────────
   @Get(':id/transfers')
   transfers(@Param('id') id: string) {

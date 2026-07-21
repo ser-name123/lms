@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Loader2, User, GraduationCap, Users2, CalendarDays, TrendingUp,
   FileText, MessageSquare, ClipboardList, History, ShieldCheck, StickyNote,
-  BookOpen, Snowflake, Play, Send, Plus, Save, Heart, ArrowLeftRight, Award, Upload, Check, X, Star,
+  BookOpen, Snowflake, Play, Send, Plus, Save, ArrowLeftRight, Award, Upload, Check, X, Star,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -24,7 +24,7 @@ import {
   fetchStudentTimeline, fetchStudentAudit, fetchStudentMgmtAttendance,
   fetchStudentMgmtAssignments, fetchStudentMgmtPerformance, fetchStudentAssessmentAttempts,
   fetchStudentsCourses, fetchStudentsTeachers, fetchBatches,
-  fetchCoaches, assignStudentCoach, fetchStudentParentView,
+  fetchCoaches, assignStudentCoach,
   fetchStudentTransfers, requestStudentTransfer, approveTransfer, rejectTransfer,
   issueStudentCertificate, uploadStudentDocument,
   fetchProgressStudentDetail,
@@ -81,7 +81,6 @@ const TABS = [
   { key: "profile", label: "Profile", icon: User },
   { key: "academic", label: "Academic", icon: BookOpen },
   { key: "parent", label: "Parent", icon: Users2 },
-  { key: "parentview", label: "Parent View", icon: Heart },
   { key: "assignment", label: "Course / Batch / Teacher", icon: GraduationCap },
   { key: "transfers", label: "Transfers", icon: ArrowLeftRight },
   { key: "attendance", label: "Attendance", icon: CalendarDays },
@@ -175,7 +174,6 @@ export default function StudentHubPage() {
         {tab === "profile" && <ProfileTab s={s} onSaved={reload} />}
         {tab === "academic" && <AcademicTab s={s} onSaved={reload} />}
         {tab === "parent" && <ParentTab s={s} onSaved={reload} />}
-        {tab === "parentview" && <ParentViewTab studentId={id} />}
         {tab === "assignment" && <AssignmentTab s={s} onSaved={reload} />}
         {tab === "transfers" && <TransfersTab studentId={id} />}
         {tab === "attendance" && <AttendanceTab studentId={id} />}
@@ -725,49 +723,6 @@ function CoachCard({ s, onSaved }: { s: StudentManagement; onSaved: () => void }
         <div className="flex items-end"><p className="text-xs text-ink-3">Current: <b className="text-ink">{s.coach || "Unassigned"}</b></p></div>
       </div>
     </SectionCard>
-  );
-}
-
-// ── Parent View (read-only, what a parent would see) ──────────────────────────
-function ParentViewTab({ studentId }: { studentId: string }) {
-  const [d, setD] = useState<Awaited<ReturnType<typeof fetchStudentParentView>> | null>(null);
-  useEffect(() => { fetchStudentParentView(studentId).then(setD).catch(() => undefined); }, [studentId]);
-  if (!d) return <Loading />;
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-ink-3">Read-only preview of the parent dashboard (parent receives this via email/notification — no separate login).</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Child Attendance" value={`${d.childAttendance.rate}%`} /><Kpi label="Progress" value={`${d.progress}%`} />
-        <Kpi label="Upcoming Classes" value={d.upcomingClasses} /><Kpi label="Fees Due" value={d.feeStatus.dueInvoices} />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Course & Team">
-          <dl className="space-y-2 text-sm">
-            <Row k="Course" v={d.course || "—"} /><Row k="Teacher" v={d.teacher || "—"} /><Row k="Academic Coach" v={d.coach || "—"} />
-            <Row k="Next payment" v={fmt(d.feeStatus.nextPaymentDate)} /><Row k="Last payment" v={fmt(d.feeStatus.lastPaymentDate)} />
-          </dl>
-        </SectionCard>
-        <SectionCard title="Homework">
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div><p className="text-2xl font-black text-ink">{d.homework.pending}</p><p className="text-xs text-ink-3">Pending</p></div>
-            <div><p className="text-2xl font-black text-ink">{d.homework.completed}</p><p className="text-xs text-ink-3">Completed</p></div>
-            <div><p className="text-2xl font-black text-ink">{d.homework.avgMark ?? "—"}</p><p className="text-xs text-ink-3">Avg Mark</p></div>
-          </div>
-        </SectionCard>
-      </div>
-      <SectionCard title="Recent Classes">
-        {d.recentClasses.length === 0 ? <Empty /> : (
-          <div className="space-y-1.5">
-            {d.recentClasses.map((r, i) => (
-              <div key={i} className="flex items-center justify-between rounded-lg border border-hairline px-3 py-2 text-sm">
-                <div><p className="font-semibold text-ink">{r.title}</p><p className="text-xs text-ink-3">{r.course} · {fmtT(r.date)}</p></div>
-                <Badge tone={r.status === "PRESENT" ? "good" : r.status === "LATE" ? "warning" : r.status === "EXCUSED" || r.status === "LEAVE_APPROVED" ? "neutral" : "critical"}>{r.status}</Badge>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-    </div>
   );
 }
 

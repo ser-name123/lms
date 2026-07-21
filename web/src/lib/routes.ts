@@ -12,8 +12,6 @@ export function dashboardPathFor(role: Role): string {
       return "/student/dashboard";
     case "TEACHER":
       return "/teacher/dashboard";
-    case "PARENT":
-      return "/parent/dashboard";
     default:
       return "/dashboard";
   }

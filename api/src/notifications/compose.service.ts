@@ -19,15 +19,20 @@ import { ComposeDto } from './dto';
  * than re-deriving it, so the picker and the guard can never drift apart.
  */
 
-/** Which roles each sender may address at all. */
-const CAN_MESSAGE: Record<Role, Role[]> = {
-  [Role.ADMIN]: [Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH, Role.TEACHER, Role.STUDENT, Role.PARENT],
+/*
+ * Which roles each sender may address at all.
+ *
+ * Partial on purpose: a role absent from this map can compose to nobody, and
+ * both readers already treat a missing entry as an empty list. Claiming
+ * Record<Role, Role[]> would force an empty array for every role that has no
+ * outbox, which reads as an oversight rather than a decision.
+ */
+const CAN_MESSAGE: Partial<Record<Role, Role[]>> = {
+  [Role.ADMIN]: [Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH, Role.TEACHER, Role.STUDENT],
   [Role.SUPERVISOR]: [Role.TEACHER, Role.ACADEMIC_COACH, Role.ADMIN, Role.STUDENT],
   [Role.ACADEMIC_COACH]: [Role.STUDENT, Role.TEACHER, Role.ADMIN, Role.SUPERVISOR],
   [Role.TEACHER]: [Role.STUDENT, Role.ACADEMIC_COACH, Role.SUPERVISOR, Role.ADMIN],
   [Role.STUDENT]: [Role.TEACHER, Role.ACADEMIC_COACH, Role.ADMIN],
-  // Narrowed further below to the staff teaching their own linked children.
-  [Role.PARENT]: [Role.TEACHER, Role.ACADEMIC_COACH, Role.ADMIN],
 };
 
 export interface RecipientOption {
@@ -135,68 +140,6 @@ export class NotificationComposeService {
       return [...students, ...staff.map((u) => shape(u, null))];
     }
 
-    /*
-     * PARENT — the staff teaching their own linked children, nobody else. A
-     * parent with two children reaches the union of both children's staff, and
-     * each option says which child it is about, because "Ms Khan" alone is not
-     * enough for a parent choosing who to write to.
-     */
-    if (user.role === Role.PARENT) {
-      const links = await this.prisma.parentLink.findMany({
-        where: { parentUserId: user.id },
-        select: {
-          student: {
-            select: {
-              coachId: true,
-              user: { select: { firstName: true, lastName: true } },
-              enrollments: {
-                where: { status: { in: ['ACTIVE', 'TRIAL'] }, teacherId: { not: null } },
-                select: {
-                  course: { select: { title: true } },
-                  teacher: {
-                    select: {
-                      user: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-      if (!links.length) return [];
-
-      const coachIds = [...new Set(links.map((l) => l.student.coachId).filter((c): c is string => !!c))];
-      const [coaches, admins] = await Promise.all([
-        coachIds.length
-          ? this.prisma.user.findMany({
-              where: { id: { in: coachIds }, status: 'ACTIVE' },
-              select: { id: true, firstName: true, lastName: true, email: true, role: true },
-            })
-          : Promise.resolve([]),
-        this.prisma.user.findMany({
-          where: { role: Role.ADMIN, status: 'ACTIVE' },
-          select: { id: true, firstName: true, lastName: true, email: true, role: true },
-        }),
-      ]);
-
-      const picked = new Set<string>();
-      const out: RecipientOption[] = [];
-      for (const link of links) {
-        const childName = `${link.student.user.firstName} ${link.student.user.lastName}`.trim();
-        for (const e of link.student.enrollments) {
-          if (!e.teacher || picked.has(e.teacher.user.id)) continue;
-          picked.add(e.teacher.user.id);
-          out.push(shape(e.teacher.user, `${childName}'s teacher · ${e.course.title}`));
-        }
-      }
-      for (const c of coaches) {
-        if (picked.has(c.id)) continue;
-        picked.add(c.id);
-        out.push(shape(c, "Your child's academic coach"));
-      }
-      return [...out, ...admins.map((u) => shape(u, 'Support'))];
-    }
 
     // STUDENT — their own teachers, their coach, and admins for support.
     const profile = await this.prisma.studentProfile.findUnique({

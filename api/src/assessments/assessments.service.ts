@@ -1,6 +1,7 @@
 import {
   BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit,
 } from '@nestjs/common';
+import { bulkDelete } from '../common/bulk-delete';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -270,8 +271,40 @@ export class AssessmentsService implements OnModuleInit {
     return this.getOne(id, actor);
   }
 
+  /** Delete a selection, refusing anything students have already sat. */
+  async removeManyAssessments(ids: string[], actor: Actor) {
+    return bulkDelete(ids, async (id) => {
+      const a = await this.prisma.assessment.findUnique({ where: { id }, select: { title: true } });
+      await this.removeAssessment(id, actor);
+      return a?.title;
+    });
+  }
+
   async removeAssessment(id: string, actor: Actor) {
     await this.assertEditable(id, actor);
+
+    /*
+     * Attempts and their answers cascade with the assessment, so deleting one
+     * students have sat destroys their results — the marks, the ranks and the
+     * certificates that reference them. Archive keeps the record.
+     *
+     * This mirrors what removeQuestion already does for a question that is in
+     * use. It matters most in bulk, where nobody reads twenty rows before
+     * ticking them, but a rule that holds for a selection and not for a single
+     * click is not a rule.
+     */
+    const attempts = await this.prisma.assessmentAttempt.count({ where: { assessmentId: id } });
+    if (attempts > 0) {
+      const a = await this.prisma.assessment.findUnique({
+        where: { id },
+        select: { title: true },
+      });
+      throw new BadRequestException(
+        `"${a?.title ?? 'This assessment'}" has ${attempts} student attempt${attempts > 1 ? 's' : ''}. ` +
+          'Deleting it would destroy those results — archive it instead.',
+      );
+    }
+
     await this.prisma.assessment.delete({ where: { id } });
     return { deleted: true };
   }

@@ -57,6 +57,22 @@ export class AuthService {
       throw new UnauthorizedException('Account is not active');
     }
 
+    /*
+     * The parent portal was removed. `Role.PARENT` remains in the enum because
+     * dropping a Postgres enum value means recreating the type, and nothing
+     * writes it any more — but a leftover parent account must not be able to
+     * sign in to a console that no longer exists. Refused here rather than
+     * left to land on an empty dashboard.
+     *
+     * Parents still receive email about fees, results and progress; those go
+     * to StudentProfile.parentEmail and never needed a login.
+     */
+    if (user.role === Role.PARENT) {
+      throw new UnauthorizedException(
+        'Parent sign-in is no longer available. Academy updates are sent to you by email.',
+      );
+    }
+
     // Generate 6-digit OTP code
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     this.otpStore.set(user.email, {

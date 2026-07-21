@@ -27,7 +27,6 @@ import { globalSearch, type SearchHit } from "@/lib/api";
 const ICON: Record<SearchHit["type"], React.ComponentType<{ className?: string }>> = {
   STUDENT: GraduationCap,
   TEACHER: Users,
-  PARENT: UsersRound,
   BATCH: UsersRound,
   COURSE: BookOpen,
   INVOICE: Receipt,

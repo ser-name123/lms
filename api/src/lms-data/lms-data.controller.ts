@@ -27,6 +27,8 @@ import type { Response } from 'express';
 import { LmsDataService } from './lms-data.service';
 import { Public, Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsString } from 'class-validator';
 
 // Uploaded knowledgebase files live under <api>/uploads/knowledgebase.
 export const UPLOAD_ROOT = join(process.cwd(), 'uploads');
@@ -80,12 +82,41 @@ const kbFileFilter = (
 // ACADEMIC_COACH on classes, both sub-admins on meetings — matching exactly what
 // their panels expose. Previously the class-level granted all three roles full
 // CRUD over everything, so a supervisor/coach could delete the whole catalogue.
+/** The rows a user ticked in a list. */
+export class BulkIdsDto {
+  @ApiProperty({ type: [String] })
+  @IsArray() @IsString({ each: true }) ids!: string[];
+}
+
 @ApiTags('lms-data')
 @ApiBearerAuth()
 @Controller('lms-data')
 @Roles(Role.ADMIN)
 export class LmsDataController {
   constructor(private readonly service: LmsDataService) {}
+
+
+  /*
+   * Bulk delete. Static segments, so they are declared before the `:id`
+   * routes they would otherwise be swallowed by.
+   */
+  @Post('courses/bulk-delete')
+  @ApiOperation({ summary: 'Delete several courses, reporting each outcome' })
+  bulkDeleteCourses(@Body() dto: BulkIdsDto) {
+    return this.service.deleteCourses(dto.ids);
+  }
+
+  @Post('knowledgebase/bulk-delete')
+  @ApiOperation({ summary: 'Delete several knowledgebase items' })
+  bulkDeleteKnowledgebase(@Body() dto: BulkIdsDto) {
+    return this.service.deleteKnowledgebaseMany(dto.ids);
+  }
+
+  @Post('packages/bulk-delete')
+  @ApiOperation({ summary: 'Delete several packages, reporting each outcome' })
+  bulkDeletePackages(@Body() dto: BulkIdsDto) {
+    return this.service.deletePackages(dto.ids);
+  }
 
   // Courses
   // Low-sensitivity catalogue (titles/levels/codes), referenced by many admin

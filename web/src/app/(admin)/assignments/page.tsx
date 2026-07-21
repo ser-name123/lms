@@ -11,9 +11,10 @@ import { Badge } from "@/components/ui/badge";
 import { AssignmentFormModal } from "@/components/assignments/assignment-form-modal";
 import {
   fetchAssignmentAdminDashboard, fetchAssignmentAnalytics, listAssignments, getAssignment,
-  deleteAssignment, assignmentLifecycle, fetchAssignmentReport, fetchAssignmentCalendar, fetchAssignmentMeta,
+  deleteAssignment, bulkDeleteAssignments, assignmentLifecycle, fetchAssignmentReport, fetchAssignmentCalendar, fetchAssignmentMeta,
   type AssignmentListRow, type AssignmentAnalytics, type AssignmentCalendarItem, type AssignmentDetail,
 } from "@/lib/api";
+import { useBulkSelect, SelectAllBox, SelectBox, BulkBar } from "@/components/ui/bulk-select";
 
 const COLORS = ["#386FA4", "#133C55", "#59A5D8", "#84D2F6", "#0EA5E9", "#2563EB", "#7C3AED", "#059669", "#F59E0B", "#EF4444"];
 const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
@@ -111,6 +112,8 @@ function ListTab() {
   const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<AssignmentDetail | null>(null);
+  const { selected, ids, toggle, toggleAll, allShown, clear, busy, confirmAndDelete } =
+    useBulkSelect(rows);
 
   const load = () => {
     setLoading(true);
@@ -151,16 +154,19 @@ function ListTab() {
         <button onClick={() => { setEditing(null); setShowForm(true); }} className="ml-auto inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent px-4 text-xs font-bold text-white"><Plus className="size-4" /> New</button>
       </div>
       {showForm && <AssignmentFormModal editing={editing} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load(); }} />}
+      <BulkBar count={ids.length} busy={busy} noun="assignment" onClear={clear}
+        onDelete={() => confirmAndDelete("assignment", (a) => a.title, bulkDeleteAssignments, load)} />
       {loading ? <Loading /> : (
         <Card className="overflow-hidden border border-hairline bg-surface shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead><tr className="border-b border-hairline bg-surface-2/45 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">
-                <th className="px-4 py-3">Title</th><th className="px-4 py-3">Course</th><th className="px-4 py-3">Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Submissions</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
+                <th className="w-10 px-4 py-3"><SelectAllBox checked={allShown} onChange={toggleAll} /></th><th className="px-4 py-3">Title</th><th className="px-4 py-3">Course</th><th className="px-4 py-3">Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Submissions</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
               </tr></thead>
               <tbody className="divide-y divide-hairline">
-                {rows.length === 0 ? <tr><td colSpan={8} className="py-12 text-center text-ink-3">No assignments.</td></tr> : rows.map((a) => (
-                  <tr key={a.id} className="hover:bg-surface-2/20">
+                {rows.length === 0 ? <tr><td colSpan={9} className="py-12 text-center text-ink-3">No assignments.</td></tr> : rows.map((a) => (
+                  <tr key={a.id} className={selected.has(a.id) ? "bg-accent/5" : "hover:bg-surface-2/20"}>
+                    <td className="px-4 py-3"><SelectBox checked={selected.has(a.id)} onChange={() => toggle(a.id)} label={a.title} /></td>
                     <td className="px-4 py-3"><p className="font-bold text-ink">{a.title}</p><p className="text-[10px] text-ink-3">{a.subject || "—"} · {a.type || "—"}</p></td>
                     <td className="px-4 py-3 text-ink-2">{a.course}</td>
                     <td className="px-4 py-3 text-ink-2">{a.batch || "—"}</td>

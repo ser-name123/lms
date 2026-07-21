@@ -792,24 +792,6 @@ export class StudentManagementService {
     return { coachId: coachId || null, coach: name };
   }
 
-  // ── Parent Dashboard (admin-viewable, read-only; parent has no login) ────────
-  async getParentView(id: string) {
-    const hub = await this.getManagement(id);
-    const [attendance, assignments] = await Promise.all([this.getAttendance(id), this.getAssignments(id)]);
-    return {
-      student: { name: `${hub.user.firstName} ${hub.user.lastName}`, code: hub.studentCode, status: hub.status },
-      course: hub.activeCourse?.title ?? null,
-      teacher: hub.activeCourse?.teacher ?? null,
-      coach: hub.coach,
-      childAttendance: attendance.summary,
-      attendanceTrend: attendance.trend,
-      homework: { pending: assignments.summary.pending, completed: assignments.summary.completed, avgMark: assignments.summary.avgMark },
-      upcomingClasses: hub.cards.upcomingClasses,
-      progress: hub.activeCourse?.progress ?? 0,
-      feeStatus: { dueInvoices: hub.cards.dueInvoices, nextPaymentDate: hub.profile.nextPaymentDate, lastPaymentDate: hub.profile.lastPaymentDate },
-      recentClasses: attendance.recent.slice(0, 10),
-    };
-  }
 
   // ── Transfer approval workflow ──────────────────────────────────────────────
   async requestTransfer(id: string, kind: string, reason: string, payload: Record<string, unknown>, actor: Actor) {

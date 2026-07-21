@@ -13,7 +13,7 @@ import { AuthUser } from '../auth/decorators';
  */
 
 export interface SearchHit {
-  type: 'STUDENT' | 'TEACHER' | 'PARENT' | 'BATCH' | 'COURSE' | 'INVOICE' | 'ASSIGNMENT' | 'ASSESSMENT';
+  type: 'STUDENT' | 'TEACHER' | 'BATCH' | 'COURSE' | 'INVOICE' | 'ASSIGNMENT' | 'ASSESSMENT';
   id: string;
   title: string;
   subtitle: string | null;
@@ -56,7 +56,7 @@ export class DashboardCommonService {
   private async staffSearch(term: string, limit: number): Promise<SearchHit[]> {
     const like = { contains: term, mode: 'insensitive' as const };
 
-    const [students, teachers, parents, batches, courses, invoices, assignments, assessments] =
+    const [students, teachers, batches, courses, invoices, assignments, assessments] =
       await Promise.all([
         this.prisma.studentProfile.findMany({
           where: {
@@ -89,14 +89,6 @@ export class DashboardCommonService {
             teacherCode: true,
             user: { select: { firstName: true, lastName: true, email: true } },
           },
-        }),
-        this.prisma.user.findMany({
-          where: {
-            role: Role.PARENT,
-            OR: [{ firstName: like }, { lastName: like }, { email: like }],
-          },
-          take: limit,
-          select: { id: true, firstName: true, lastName: true, email: true },
         }),
         this.prisma.batch.findMany({
           where: { OR: [{ name: like }, { code: like }] },
@@ -144,13 +136,6 @@ export class DashboardCommonService {
         title: `${t.user.firstName} ${t.user.lastName}`.trim(),
         subtitle: `${t.teacherCode} · ${t.user.email}`,
         link: `/teachers/${t.id}`,
-      })),
-      ...parents.map((p): SearchHit => ({
-        type: 'PARENT',
-        id: p.id,
-        title: `${p.firstName} ${p.lastName}`.trim(),
-        subtitle: p.email,
-        link: `/students`,
       })),
       ...batches.map((b): SearchHit => ({
         type: 'BATCH',
@@ -323,13 +308,6 @@ export class DashboardCommonService {
         select: { id: true },
       });
       return s ? [s.id] : [];
-    }
-    if (user.role === Role.PARENT) {
-      const links = await this.prisma.parentLink.findMany({
-        where: { parentUserId: user.id },
-        select: { studentId: true },
-      });
-      return links.map((l) => l.studentId);
     }
     return [];
   }

@@ -102,8 +102,6 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   LOGIN_ALERT: { category: Cat.SYSTEM, priority: Pri.CRITICAL, channels: IN_APP_EMAIL, label: 'Login alert' },
   PROFILE_UPDATED: { category: Cat.SYSTEM, priority: Pri.LOW, channels: IN_APP, label: 'Profile updated' },
   STUDENT_UPDATE: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Student update' },
-  PARENT_LINKED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Parent account linked' },
-  PARENT_ACCOUNT_LINKED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Parent account linked' },
   LEAVE_REQUESTED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Leave requested' },
   LEAVE_DECISION: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Leave decision' },
   LEAD_NEW: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'New lead' },

@@ -9,8 +9,7 @@ export type Role =
   | "SUPERVISOR"
   | "ACADEMIC_COACH"
   | "TEACHER"
-  | "STUDENT"
-  | "PARENT";
+  | "STUDENT";
 
 export type User = {
   id: string;

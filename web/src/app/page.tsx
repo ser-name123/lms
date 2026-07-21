@@ -2,7 +2,7 @@
 
 /*
  * Root route. It used to redirect everyone to /dashboard, which is only valid
- * for ADMIN / SUPERVISOR / ACADEMIC_COACH — a teacher, student or parent
+ * for ADMIN / SUPERVISOR / ACADEMIC_COACH — a teacher or student
  * landing on "/" was sent straight into a 404. Route by role instead.
  */
 

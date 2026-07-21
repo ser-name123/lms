@@ -66,10 +66,10 @@ const CATEGORY_LABEL: Record<NotificationCategory, string> = {
 
 /*
  * Roles the API gives an outbox. This only decides whether the button is drawn —
- * the API re-derives the same rule per recipient, so a parent still cannot reach
- * a teacher who does not teach their child.
+ * the API re-derives the same rule per recipient, so a student still cannot reach
+ * a teacher who does not teach them.
  */
-const CAN_COMPOSE = ["ADMIN", "SUPERVISOR", "ACADEMIC_COACH", "TEACHER", "STUDENT", "PARENT"];
+const CAN_COMPOSE = ["ADMIN", "SUPERVISOR", "ACADEMIC_COACH", "TEACHER", "STUDENT"];
 
 export function NotificationInbox() {
   const { user } = useAuth();

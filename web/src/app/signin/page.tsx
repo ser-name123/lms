@@ -74,7 +74,7 @@ export default function SignInPage() {
       setTokens(tokens);
 
       const fetchedUser = await fetchMe();
-      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR", "PARENT"];
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
       if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
         throw new ApiError(403, "This console is for authorized users only.");
@@ -105,7 +105,7 @@ export default function SignInPage() {
       setTokens(tokens);
 
       const fetchedUser = await fetchMe();
-      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR", "PARENT"];
+      const allowedRoles = ["ADMIN", "STUDENT", "TEACHER", "ACADEMIC_COACH", "SUPERVISOR"];
       if (!allowedRoles.includes(fetchedUser.role)) {
         clear();
         throw new ApiError(403, "This console is for authorized users only.");

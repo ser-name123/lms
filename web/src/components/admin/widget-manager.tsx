@@ -31,7 +31,6 @@ const ROLES: { role: Role; label: string; detail: string }[] = [
   { role: "ACADEMIC_COACH", label: "Academic Coach", detail: "Assigned roster" },
   { role: "TEACHER", label: "Teacher", detail: "Own classes and work" },
   { role: "STUDENT", label: "Student", detail: "Own learning" },
-  { role: "PARENT", label: "Parent", detail: "Linked children" },
 ];
 
 const CATEGORY_TONE: Record<WidgetCategory, "accent" | "good" | "warning" | "neutral"> = {

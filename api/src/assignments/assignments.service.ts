@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { bulkDelete } from '../common/bulk-delete';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -191,7 +192,7 @@ export class AssignmentsService implements OnModuleInit {
   }
 
   private async assertEditable(id: string, actor: Actor) {
-    const a = await this.prisma.assignment.findUnique({ where: { id }, select: { id: true, teacherId: true, locked: true, status: true } });
+    const a = await this.prisma.assignment.findUnique({ where: { id }, select: { id: true, title: true, teacherId: true, locked: true, status: true } });
     if (!a) throw new NotFoundException('Assignment not found.');
     if (actor.role === Role.TEACHER) {
       const tid = await this.teacherProfileId(actor.id);
@@ -213,9 +214,40 @@ export class AssignmentsService implements OnModuleInit {
   }
 
   async remove(id: string, actor: Actor) {
-    await this.assertEditable(id, actor);
+    const assignment = await this.assertEditable(id, actor);
+
+    /*
+     * Submissions cascade with the assignment, so deleting one that students
+     * have handed work into destroys that work and the grades on it. Archive
+     * exists for "we are done with this" and keeps the record.
+     *
+     * The check lives here rather than only in the bulk path: one rule, one
+     * place. It matters most in bulk — nobody reads twenty rows before
+     * ticking them — but a rule that holds for a selection and not for a
+     * single click is not a rule.
+     */
+    const submissions = await this.prisma.submission.count({ where: { assignmentId: id } });
+    if (submissions > 0) {
+      throw new BadRequestException(
+        `"${assignment.title}" has ${submissions} student submission${submissions > 1 ? 's' : ''}. ` +
+          'Deleting it would destroy that work — archive it instead.',
+      );
+    }
+
     await this.prisma.assignment.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  /** Delete a selection, refusing anything holding student work. */
+  async removeMany(ids: string[], actor: Actor) {
+    return bulkDelete(ids, async (id) => {
+      const a = await this.prisma.assignment.findUnique({
+        where: { id },
+        select: { title: true },
+      });
+      await this.remove(id, actor);
+      return a?.title;
+    });
   }
 
   async publish(id: string) {

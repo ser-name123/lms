@@ -1,8 +1,8 @@
 "use client";
 
-import { authHeader } from "@/lib/api";
+import { authHeader, bulkDeleteKnowledgebase } from "@/lib/api";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   Plus, 
   Search, 
@@ -33,6 +33,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { useBulkSelect, SelectAllBox, SelectBox, BulkBar } from "@/components/ui/bulk-select";
 import { cn } from "@/lib/utils";
 
 // Initial Mock Resources Data (30 items with independent knowledgebase categories)
@@ -98,14 +99,18 @@ export default function KnowledgebasePage() {
 
   const [availableCourses, setAvailableCourses] = useState<any[]>([]);
 
-  // Fetch resources on mount
-  useEffect(() => {
+  const loadResources = useCallback(() => {
     fetch(`${apiBase}/lms-data/knowledgebase`)
       .then(res => res.json())
       .then((data: any[]) => {
         setResources(data);
       })
       .catch(console.error);
+  }, [apiBase]);
+
+  // Fetch resources on mount
+  useEffect(() => {
+    loadResources();
 
     fetch(`${apiBase}/lms-data/courses`)
       .then(res => res.json())
@@ -116,7 +121,7 @@ export default function KnowledgebasePage() {
         }
       })
       .catch(console.error);
-  }, [apiBase]);
+  }, [apiBase, loadResources]);
 
   // Filters, sorting, and pagination
   const [searchQuery, setSearchQuery] = useState("");
@@ -216,6 +221,9 @@ export default function KnowledgebasePage() {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedResources = filteredResources.slice(startIndex, startIndex + pageSize);
+
+  const { selected, ids, toggle, toggleAll, allShown, clear, busy, confirmAndDelete } =
+    useBulkSelect(paginatedResources);
 
   // CRUD handlers
   const handleDelete = (id: string, name: string) => {
@@ -638,11 +646,22 @@ export default function KnowledgebasePage() {
               </div>
             </div>
 
+            <BulkBar
+              count={ids.length}
+              busy={busy}
+              onClear={clear}
+              noun="resource"
+              onDelete={() => confirmAndDelete("resource", (r) => r.title, bulkDeleteKnowledgebase, loadResources)}
+            />
+
             {/* Resources Table Grid */}
             <div className="overflow-x-auto border border-hairline rounded-xl">
               <table className="w-full border-collapse text-left text-sm text-ink-2">
                 <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
                   <tr>
+                    <th scope="col" className="px-6 py-4 w-10">
+                      <SelectAllBox checked={allShown} onChange={toggleAll} />
+                    </th>
                     <th scope="col" className="px-6 py-4">Resource Detail</th>
                     <th scope="col" className="px-6 py-4">Course Name (Code) & Students Count</th>
                     <th scope="col" className="px-6 py-4">File Format & Size</th>
@@ -657,10 +676,20 @@ export default function KnowledgebasePage() {
                       const FormatIcon = formatIcons[res.format] || FileText;
 
                       return (
-                        <tr 
-                          key={res.id} 
-                          className="hover:bg-surface-2/60 transition-colors"
+                        <tr
+                          key={res.id}
+                          className={cn(
+                            "hover:bg-surface-2/60 transition-colors",
+                            selected.has(res.id) && "bg-accent/5"
+                          )}
                         >
+                          <td className="px-6 py-4">
+                            <SelectBox
+                              checked={selected.has(res.id)}
+                              onChange={() => toggle(res.id)}
+                              label={res.title}
+                            />
+                          </td>
                           <td className="px-6 py-4 max-w-xs">
                             <div className="font-semibold text-ink">{res.title}</div>
                             <div className="mt-1">
@@ -744,7 +773,7 @@ export default function KnowledgebasePage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-ink-3">
+                      <td colSpan={7} className="px-6 py-12 text-center text-ink-3">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <ClipboardList className="size-8 text-ink-3/60" />
                           <p className="font-semibold text-sm">No knowledgebase resources matched the search parameters.</p>

@@ -73,29 +73,6 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
     roleUser[role] = rows[0];
   }
 
-  /*
-   * There is no PARENT in the seed data, and parent compose is defined entirely
-   * by the ParentLink relationship, so the fixture has to build one: a parent
-   * linked to the student we already picked. Torn down in the finally block.
-   */
-  const { rows: studentProfileRows } = await db.query(
-    `SELECT id FROM "StudentProfile" WHERE "userId"=$1`, [roleUser.STUDENT.id],
-  );
-  if (!studentProfileRows.length) throw new Error('The test student has no StudentProfile');
-  const linkedStudentId = studentProfileRows[0].id;
-
-  const parentEmail = `smoke-notif-parent-${Date.now()}@example.test`;
-  const { rows: parentRows } = await db.query(
-    `INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt")
-     VALUES (gen_random_uuid(),$1,'x','Smoke','Parent','PARENT','ACTIVE',now()) RETURNING id, email`,
-    [parentEmail],
-  );
-  roleUser.PARENT = parentRows[0];
-  await db.query(
-    `INSERT INTO "ParentLink" (id,"parentUserId","studentId","isPrimary")
-     VALUES (gen_random_uuid(),$1,$2,true)`,
-    [roleUser.PARENT.id, linkedStudentId],
-  );
 
   const createdTemplates = [];
   const createdBroadcasts = [];
@@ -456,52 +433,6 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
 
     await db.query(`DELETE FROM "PushSubscription" WHERE endpoint=$1`, [deadEndpoint]);
 
-    // ── Parent compose ───────────────────────────────────────────────────────
-    console.log('\n── Parent compose ──');
-    const parentRecipients =
-      await get('/notification-admin/compose/recipients', roleUser.PARENT.id);
-    check('a parent is offered a recipient list', parentRecipients.ok,
-      `status ${parentRecipients.status}`);
-    check('a parent is never offered a student or another parent',
-      parentRecipients.ok &&
-      !parentRecipients.body.some((r) => r.role === 'PARENT' || r.role === 'STUDENT'),
-      (parentRecipients.body ?? []).map((r) => r.role).join(','));
-    check('every parent option explains which child it is about',
-      parentRecipients.ok && parentRecipients.body.length > 0 &&
-      parentRecipients.body.every((r) => typeof r.context === 'string' && r.context.length > 0),
-      `${(parentRecipients.body ?? []).length} options`);
-
-    // The parent's own child is a STUDENT, so it must not be reachable either.
-    const parentToStudent = await req('POST', '/notification-admin/compose', roleUser.PARENT.id, {
-      userIds: [roleUser.STUDENT.id], title: `${MARKER} nope`, body: 'x',
-    }, 403);
-    check('a parent cannot message a student directly', parentToStudent.ok,
-      `status ${parentToStudent.status}`);
-
-    const parentCritical = await req('POST', '/notification-admin/compose', roleUser.PARENT.id, {
-      userIds: parentRecipients.body.slice(0, 1).map((r) => r.id),
-      title: `${MARKER} parent critical`, body: 'x', priority: 'CRITICAL',
-    }, 400);
-    check('a parent cannot send CRITICAL either', parentCritical.ok,
-      `status ${parentCritical.status}`);
-
-    if (parentRecipients.ok && parentRecipients.body.length) {
-      const target = parentRecipients.body[0];
-      const parentSend = await req('POST', '/notification-admin/compose', roleUser.PARENT.id, {
-        userIds: [target.id], title: `${MARKER} from a parent`, body: 'Question about my child.',
-      });
-      check('a parent can message staff connected to their child',
-        parentSend.ok && parentSend.body.sent === 1,
-        `status ${parentSend.status} · sent ${parentSend.body?.sent}`);
-
-      const landed = await db.query(
-        `SELECT "actorId" FROM "Notification" WHERE "userId"=$1 AND title=$2`,
-        [target.id, `${MARKER} from a parent`],
-      );
-      check('the message is attributed to the parent who sent it',
-        landed.rows.length === 1 && landed.rows[0].actorId === roleUser.PARENT.id);
-    }
-
     // ── Feed, filters, archive ───────────────────────────────────────────────
     console.log('\n── Feed ──');
     const feed = await get('/notifications/feed?limit=5', roleUser.ACADEMIC_COACH.id);
@@ -629,25 +560,16 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
       Object.values(roleUser).map((u) => u.id),
     ]);
 
-    // The parent fixture, and anything addressed to it.
-    if (roleUser.PARENT?.id) {
-      await db.query(`DELETE FROM "ParentLink" WHERE "parentUserId"=$1`, [roleUser.PARENT.id]);
-      await db.query(`DELETE FROM "Notification" WHERE "userId"=$1`, [roleUser.PARENT.id]);
-      await db.query(`DELETE FROM "User" WHERE id=$1`, [roleUser.PARENT.id]);
-    }
-
     const { rows } = await db.query(
       `SELECT (SELECT count(*)::int FROM "Notification" WHERE title LIKE $1) AS notifications,
               (SELECT count(*)::int FROM "NotificationBroadcast" WHERE title LIKE $1) AS broadcasts,
               (SELECT count(*)::int FROM "NotificationTemplate" WHERE code LIKE $2) AS templates,
-              (SELECT count(*)::int FROM "NotificationPreference") AS preferences,
-              (SELECT count(*)::int FROM "User" WHERE email LIKE 'smoke-notif-parent-%') AS parents`,
+              (SELECT count(*)::int FROM "NotificationPreference") AS preferences`,
       [`${MARKER}%`, `${MARKER}%`],
     );
     console.log(
       `Cleanup: ${rows[0].notifications} stray notifications · ${rows[0].broadcasts} broadcasts · ` +
-        `${rows[0].templates} templates · ${rows[0].preferences} preference rows · ` +
-        `${rows[0].parents} parent fixtures remaining`,
+        `${rows[0].templates} templates · ${rows[0].preferences} preference rows remaining`,
     );
     await db.end();
   }

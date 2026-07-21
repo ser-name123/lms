@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUser, Roles, type AuthUser } from '../auth/decorators';
@@ -8,7 +8,6 @@ import { AdminOpsDashboardService } from './admin-ops.service';
 import { CoachDashboardService } from './coach.service';
 import { TeacherDashboardService } from './teacher-dash.service';
 import { StudentDashboardService } from './student-dash.service';
-import { ParentDashboardService } from './parent-dash.service';
 import { DashboardCommonService } from './common.service';
 import { AnnouncementsService } from './announcements.service';
 import { CalendarDto, DashboardRangeDto, GlobalSearchDto, ParentDashboardDto } from './dto';
@@ -35,7 +34,6 @@ export class DashboardController {
     private readonly coach: CoachDashboardService,
     private readonly teacher: TeacherDashboardService,
     private readonly student: StudentDashboardService,
-    private readonly parent: ParentDashboardService,
     private readonly common: DashboardCommonService,
     private readonly announcements: AnnouncementsService,
   ) {}
@@ -77,61 +75,6 @@ export class DashboardController {
     return this.student.dashboard(user.id, resolveRange(query.range, query.from, query.to));
   }
 
-  // Declared before `parent` so the static segment is not swallowed.
-  @Get('parent/children')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'Children linked to the signed-in parent' })
-  parentChildren(@CurrentUser() user: AuthUser) {
-    return this.parent.children(user.id);
-  }
-
-  @Get('parent/contacts')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: "The child's teachers and academic coach" })
-  parentContacts(@CurrentUser() user: AuthUser, @Query() query: ParentDashboardDto) {
-    return this.parent.contacts(user.id, query.childId);
-  }
-
-  @Get('parent/fees')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: "The child's invoices, receipts and how to pay" })
-  parentFees(@CurrentUser() user: AuthUser, @Query() query: ParentDashboardDto) {
-    return this.parent.fees(user.id, query.childId);
-  }
-
-  @Get('parent/report-card')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: "A printable summary of the child's progress" })
-  parentReportCard(@CurrentUser() user: AuthUser, @Query() query: ParentDashboardDto) {
-    return this.parent.reportCard(
-      user.id,
-      resolveRange(query.range, query.from, query.to),
-      query.childId,
-    );
-  }
-
-  @Get('parent/receipt/:receiptId')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: 'One receipt, if it belongs to a linked child' })
-  parentReceipt(
-    @CurrentUser() user: AuthUser,
-    @Param('receiptId') receiptId: string,
-    @Query() query: ParentDashboardDto,
-  ) {
-    return this.parent.receipt(user.id, receiptId, query.childId);
-  }
-
-  @Get('parent')
-  @Roles(Role.PARENT)
-  @ApiOperation({ summary: "Parent's view of a linked child" })
-  parentDashboard(@CurrentUser() user: AuthUser, @Query() query: ParentDashboardDto) {
-    return this.parent.dashboard(
-      user.id,
-      resolveRange(query.range, query.from, query.to),
-      query.childId,
-    );
-  }
-
   /** Dispatches to whichever dashboard the caller's role owns. */
   @Get('my')
   @ApiOperation({ summary: "The signed-in user's own dashboard, chosen by role" })
@@ -148,9 +91,8 @@ export class DashboardController {
         return this.teacher.dashboard(user.id, range);
       case Role.STUDENT:
         return this.student.dashboard(user.id, range);
-      case Role.PARENT:
       default:
-        return this.parent.dashboard(user.id, range, query.childId);
+        throw new ForbiddenException('No dashboard for this role.');
     }
   }
 

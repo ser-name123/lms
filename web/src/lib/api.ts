@@ -1001,116 +1001,13 @@ export type StudentDashboard = {
   };
 };
 
-export type ParentChild = {
-  studentId: string;
-  studentCode: string;
-  name: string;
-  avatarUrl: string | null;
-  relationship: string | null;
-  isPrimary: boolean;
-};
-
-export type ParentDashboard = {
-  range: DashboardRange;
-  generatedAt: string;
-  child: {
-    studentId: string;
-    studentCode: string;
-    name: string;
-    avatarUrl: string | null;
-    status: string;
-    level: string | null;
-    course: string | null;
-    teacher: string | null;
-  };
-  children: ParentChild[];
-  cards: {
-    attendancePct: number;
-    assignments: { total: number; submitted: number; pending: number };
-    lastResult: {
-      title: string;
-      percentage: number;
-      score: number;
-      totalMarks: number;
-      passed: boolean;
-      at: string | null;
-    } | null;
-    feeDue: { amount: number; invoices: number };
-    lastFeedback: { remarks: string | null; suggestions: string | null; at: string } | null;
-    overallProgress: number;
-    progressStatus: string | null;
-  };
-  timeline: {
-    todayClasses: {
-      id: string;
-      title: string;
-      subject: string;
-      teacher: string;
-      time: string;
-      classStatus: string;
-      attendance: string | null;
-    }[];
-    recentAttendance: {
-      id: string;
-      title: string;
-      at: string;
-      status: string | null;
-      lateMinutes: number | null;
-    }[];
-    homework: { id: string; title: string; dueAt: string | null; status: string }[];
-    upcomingTests: { id: string; title: string; at: string | null; totalMarks: number }[];
-    teacherRemarks: {
-      id: string;
-      kind: string;
-      remarks: string | null;
-      suggestions: string | null;
-      ratings: {
-        participation: number | null;
-        understanding: number | null;
-        behavior: number | null;
-      };
-      at: string;
-    }[];
-  };
-  charts: {
-    attendance: { label: string; rate: number }[];
-    marks: { label: string; score: number }[];
-    progress: { label: string; score: number }[];
-  };
-  fees: {
-    outstanding: number;
-    unpaidInvoices: number;
-    lastPayment: {
-      amount: number;
-      at: string | null;
-      method: string | null;
-      invoiceNumber: string;
-    } | null;
-    nextDue: {
-      invoiceId: string | null;
-      number: string | null;
-      amount: number;
-      dueAt: string | null;
-    } | null;
-    receipts: {
-      id: string;
-      number: string;
-      amount: number;
-      currency: string;
-      method: string | null;
-      issuedAt: string;
-    }[];
-  };
-};
-
 /** Whatever the signed-in role's dashboard returns. */
 export type AnyRoleDashboard =
   | SuperAdminDashboard
   | AdminDashboard
   | CoachDashboard
   | TeacherDashboard
-  | StudentDashboard
-  | ParentDashboard;
+  | StudentDashboard;
 
 export const fetchSuperAdminDashboard = (q?: RangeQuery) =>
   api<SuperAdminDashboard>(`/dashboard/super-admin${rangeQs(q)}`);
@@ -1122,91 +1019,6 @@ export const fetchTeacherRoleDashboard = (q?: RangeQuery) =>
   api<TeacherDashboard>(`/dashboard/teacher${rangeQs(q)}`);
 export const fetchStudentRoleDashboard = (q?: RangeQuery) =>
   api<StudentDashboard>(`/dashboard/student${rangeQs(q)}`);
-export const fetchParentDashboard = (q?: RangeQuery & { childId?: string }) => {
-  const p = new URLSearchParams(rangeQs(q).replace(/^\?/, ""));
-  if (q?.childId) p.set("childId", q.childId);
-  const s = p.toString();
-  return api<ParentDashboard>(`/dashboard/parent${s ? `?${s}` : ""}`);
-};
-export const fetchParentChildren = () => api<ParentChild[]>("/dashboard/parent/children");
-
-// ─── Parent quick actions ────────────────────────────────────────────────────
-
-export type ParentContacts = {
-  teachers: { name: string; email: string; courses: string[] }[];
-  coach: { name: string; email: string } | null;
-};
-
-export type ParentAcademy = {
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-};
-
-export type ParentFees = {
-  child: ParentDashboard["child"];
-  summary: ParentDashboard["fees"];
-  academy: ParentAcademy;
-  invoices: {
-    id: string;
-    number: string;
-    status: string;
-    amount: number;
-    paidAmount: number;
-    balance: number;
-    issuedAt: string | null;
-    dueAt: string | null;
-  }[];
-};
-
-export type ParentReceipt = {
-  id: string;
-  number: string;
-  amount: number;
-  currency: string;
-  method: string | null;
-  notes: string | null;
-  issuedAt: string;
-  paidAt: string | null;
-  reference: string | null;
-  invoice: { number: string; amount: number; dueAt: string | null };
-  student: { name: string; code: string };
-  academy: ParentAcademy;
-};
-
-export type ParentReportCard = {
-  generatedAt: string;
-  range: DashboardRange;
-  academy: ParentAcademy;
-  child: ParentDashboard["child"];
-  summary: ParentDashboard["cards"];
-  trends: ParentDashboard["charts"];
-  skills: { name: string; percentage: number }[];
-  reviews: {
-    monthLabel: string;
-    academic: number | null;
-    attendance: number | null;
-    behavior: number | null;
-    participation: number | null;
-    remarks: string | null;
-  }[];
-};
-
-const childQs = (childId?: string) => (childId ? `?childId=${encodeURIComponent(childId)}` : "");
-
-export const fetchParentContacts = (childId?: string) =>
-  api<ParentContacts>(`/dashboard/parent/contacts${childQs(childId)}`);
-export const fetchParentFees = (childId?: string) =>
-  api<ParentFees>(`/dashboard/parent/fees${childQs(childId)}`);
-export const fetchParentReceipt = (receiptId: string, childId?: string) =>
-  api<ParentReceipt>(`/dashboard/parent/receipt/${receiptId}${childQs(childId)}`);
-export const fetchParentReportCard = (q?: RangeQuery & { childId?: string }) => {
-  const p = new URLSearchParams(rangeQs(q).replace(/^\?/, ""));
-  if (q?.childId) p.set("childId", q.childId);
-  const s = p.toString();
-  return api<ParentReportCard>(`/dashboard/parent/report-card${s ? `?${s}` : ""}`);
-};
 
 // ─── Widgets ─────────────────────────────────────────────────────────────────
 
@@ -1328,7 +1140,6 @@ export type SearchHit = {
   type:
     | "STUDENT"
     | "TEACHER"
-    | "PARENT"
     | "BATCH"
     | "COURSE"
     | "INVOICE"
@@ -1434,48 +1245,6 @@ export const saveZoomCredentials = (input: {
 
 export const disconnectZoom = () =>
   api<ZoomStatus>("/settings/integrations/zoom/disconnect", { method: "POST" });
-
-// ─── Parent links (admin) ────────────────────────────────────────────────────
-
-export type ParentLinkRow = {
-  linkId: string;
-  parentUserId: string;
-  name: string;
-  email: string;
-  status: string;
-  lastLoginAt: string | null;
-  relationship: string | null;
-  isPrimary: boolean;
-  linkedAt: string;
-};
-
-export const fetchParentLinks = (studentId: string) =>
-  api<ParentLinkRow[]>(`/parent-links/student/${studentId}`);
-
-export const createParentAccount = (input: {
-  studentId: string;
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-  relationship?: string;
-}) =>
-  api<{
-    parentUserId: string;
-    email: string;
-    linkId: string;
-    created: boolean;
-    temporaryPassword: string | null;
-  }>("/parent-links/account", { method: "POST", body: JSON.stringify(input) });
-
-export const linkParentToChild = (input: {
-  parentUserId: string;
-  studentId: string;
-  relationship?: string;
-  isPrimary?: boolean;
-}) => api<unknown>("/parent-links/link", { method: "POST", body: JSON.stringify(input) });
-
-export const unlinkParent = (linkId: string) =>
-  api<{ success: boolean }>(`/parent-links/${linkId}`, { method: "DELETE" });
 
 // ─── Payout Calls & Types ──────────────────────────────────────────────────────
 
@@ -3465,16 +3234,6 @@ export interface StudentTransferRow {
   fromLabel: string | null; toLabel: string | null; status: string;
   requestedByName: string | null; decidedByName: string | null; decidedAt: string | null; createdAt: string;
 }
-export interface StudentParentView {
-  student: { name: string; code: string; status: string };
-  course: string | null; teacher: string | null; coach: string | null;
-  childAttendance: { present: number; absent: number; late: number; total: number; rate: number };
-  attendanceTrend: { month: string; rate: number }[];
-  homework: { pending: number; completed: number; avgMark: number | null };
-  upcomingClasses: number; progress: number;
-  feeStatus: { dueInvoices: number; nextPaymentDate: string | null; lastPaymentDate: string | null };
-  recentClasses: { title: string; course: string; date: string; status: string; lateMinutes: number | null }[];
-}
 
 export const fetchStudentManagement = (id: string) => api<StudentManagement>(`/student-management/${id}`);
 export const updateStudentBasic = (id: string, dto: Record<string, unknown>) =>
@@ -3533,9 +3292,6 @@ export const fetchStudentMgmtReport = (type: string) => api<unknown>(`/student-m
 export const fetchCoaches = () => api<{ id: string; name: string; email: string }[]>(`/student-management/coaches`);
 export const assignStudentCoach = (id: string, coachId: string | null) =>
   api<{ coachId: string | null; coach: string | null }>(`/student-management/${id}/coach`, { method: "PATCH", body: JSON.stringify({ coachId }) });
-
-// Parent Dashboard (read-only, admin-viewable)
-export const fetchStudentParentView = (id: string) => api<StudentParentView>(`/student-management/${id}/parent-view`);
 
 // Transfer approval workflow
 export const fetchStudentTransfers = (id: string) => api<StudentTransferRow[]>(`/student-management/${id}/transfers`);
@@ -3618,6 +3374,27 @@ export const createAssignment = (dto: Record<string, unknown>) =>
   api<{ id: string }>(`/assignments`, { method: "POST", body: JSON.stringify(dto) });
 export const updateAssignment = (id: string, dto: Record<string, unknown>) =>
   api<{ id: string }>(`/assignments/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+
+/*
+ * Bulk delete, shared shape across every catalogue that has one. Reports each
+ * row rather than a total, because a partial refusal has to say which and why.
+ */
+export interface BulkDeleteReport {
+  deleted: number;
+  failed: number;
+  deletedItems: { id: string; label?: string }[];
+  failures: { id: string; label?: string; reason: string }[];
+}
+
+const bulkDeleteAt = (path: string) => (ids: string[]) =>
+  api<BulkDeleteReport>(path, { method: "POST", body: JSON.stringify({ ids }) });
+
+export const bulkDeleteAssignments = bulkDeleteAt("/assignments/bulk-delete");
+export const bulkDeleteAssessments = bulkDeleteAt("/assessments/bulk-delete");
+export const bulkDeleteCourses = bulkDeleteAt("/lms-data/courses/bulk-delete");
+export const bulkDeleteKnowledgebase = bulkDeleteAt("/lms-data/knowledgebase/bulk-delete");
+export const bulkDeletePackages = bulkDeleteAt("/lms-data/packages/bulk-delete");
+
 export const deleteAssignment = (id: string) => api<{ deleted: boolean }>(`/assignments/${id}`, { method: "DELETE" });
 export const listAssignments = (q: Record<string, string> = {}) =>
   api<{ items: AssignmentListRow[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/assignments?${new URLSearchParams(q).toString()}`);

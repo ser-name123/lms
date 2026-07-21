@@ -47,7 +47,7 @@ const AUDIENCES: { value: BroadcastAudience; label: string }[] = [
   { value: "STUDENTS", label: "Selected students" },
 ];
 
-const ROLES: Role[] = ["ADMIN", "SUPERVISOR", "ACADEMIC_COACH", "TEACHER", "STUDENT", "PARENT"];
+const ROLES: Role[] = ["ADMIN", "SUPERVISOR", "ACADEMIC_COACH", "TEACHER", "STUDENT"];
 
 const CHANNELS: { value: NotificationChannel; label: string }[] = [
   { value: "IN_APP", label: "In-app" },

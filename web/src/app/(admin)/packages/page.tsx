@@ -1,8 +1,8 @@
 "use client";
 
-import { authHeader } from "@/lib/api";
+import { authHeader, bulkDeletePackages } from "@/lib/api";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   Plus, 
   Search, 
@@ -32,6 +32,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { useBulkSelect, SelectAllBox, SelectBox, BulkBar } from "@/components/ui/bulk-select";
 import { cn } from "@/lib/utils";
 
 // Initial Mock Packages Data (30 items with dynamic feature benefits lists and linked courses)
@@ -54,14 +55,18 @@ export default function PackagesPage() {
 
   const [availableCourses, setAvailableCourses] = useState<any[]>([]);
 
-  // Fetch packages on mount
-  useEffect(() => {
+  const loadPackages = useCallback(() => {
     fetch(`${apiBase}/lms-data/packages`)
       .then(res => res.json())
       .then((data: any[]) => {
         setPackages(data);
       })
       .catch(console.error);
+  }, [apiBase]);
+
+  // Fetch packages on mount
+  useEffect(() => {
+    loadPackages();
 
     fetch(`${apiBase}/lms-data/courses`)
       .then(res => res.json())
@@ -69,7 +74,7 @@ export default function PackagesPage() {
         setAvailableCourses(data);
       })
       .catch(console.error);
-  }, [apiBase]);
+  }, [apiBase, loadPackages]);
 
   // Filters, sorting, and pagination
   const [searchQuery, setSearchQuery] = useState("");
@@ -155,6 +160,9 @@ export default function PackagesPage() {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedPackages = filteredPackages.slice(startIndex, startIndex + pageSize);
+
+  const { selected, ids, toggle, toggleAll, allShown, clear, busy, confirmAndDelete } =
+    useBulkSelect(paginatedPackages);
 
   // CRUD handlers
   const handleDelete = (id: string, name: string) => {
@@ -507,11 +515,22 @@ export default function PackagesPage() {
               </div>
             </div>
 
+            <BulkBar
+              count={ids.length}
+              busy={busy}
+              onClear={clear}
+              noun="package"
+              onDelete={() => confirmAndDelete("package", (p) => p.title, bulkDeletePackages, loadPackages)}
+            />
+
             {/* Packages Table Grid */}
             <div className="overflow-x-auto border border-hairline rounded-xl">
               <table className="w-full border-collapse text-left text-sm text-ink-2">
                 <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
                   <tr>
+                    <th scope="col" className="px-6 py-4 w-10">
+                      <SelectAllBox checked={allShown} onChange={toggleAll} />
+                    </th>
                     <th scope="col" className="px-6 py-4">Package Title</th>
                     <th scope="col" className="px-6 py-4">Pricing Tier</th>
                     <th scope="col" className="px-6 py-4">Target Level</th>
@@ -525,10 +544,20 @@ export default function PackagesPage() {
                   {paginatedPackages.length > 0 ? (
                     paginatedPackages.map((pkg) => {
                       return (
-                        <tr 
-                          key={pkg.id} 
-                          className="hover:bg-surface-2/60 transition-colors"
+                        <tr
+                          key={pkg.id}
+                          className={cn(
+                            "hover:bg-surface-2/60 transition-colors",
+                            selected.has(pkg.id) && "bg-accent/5"
+                          )}
                         >
+                          <td className="px-6 py-4">
+                            <SelectBox
+                              checked={selected.has(pkg.id)}
+                              onChange={() => toggle(pkg.id)}
+                              label={pkg.title}
+                            />
+                          </td>
                           <td className="px-6 py-4 max-w-xs">
                             <div className="font-semibold text-ink">{pkg.title}</div>
                             <div className="text-xs text-ink-3 italic mt-1.5 truncate max-w-xs">{pkg.description}</div>
@@ -606,7 +635,7 @@ export default function PackagesPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-ink-3">
+                      <td colSpan={8} className="px-6 py-12 text-center text-ink-3">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <ClipboardList className="size-8 text-ink-3/60" />
                           <p className="font-semibold text-sm">No subscription packages matched the search parameters.</p>

@@ -15,10 +15,11 @@ import { Card, CardBody } from "@/components/ui/card";
 import { QuestionFormModal } from "@/components/assessments/question-form-modal";
 import { AssessmentFormModal } from "@/components/assessments/assessment-form-modal";
 import {
-  listAssessments, deleteAssessment, assessmentLifecycle, fetchAssessmentAdminDashboard, fetchAssessmentAnalytics,
+  listAssessments, deleteAssessment, bulkDeleteAssessments, assessmentLifecycle, fetchAssessmentAdminDashboard, fetchAssessmentAnalytics,
   fetchAssessmentCalendar, fetchAssessmentReport, fetchAssessmentMeta, listQuestions, deleteQuestion,
   getAssessmentAttempts, createQuestion, type AssessmentListRow, type Question,
 } from "@/lib/api";
+import { useBulkSelect, SelectAllBox, SelectBox, BulkBar } from "@/components/ui/bulk-select";
 
 const STATUS_TONE: Record<string, Tone> = { DRAFT: "neutral", SCHEDULED: "warning", PUBLISHED: "good", LIVE: "accent", CLOSED: "neutral", ARCHIVED: "neutral" };
 const CHART = ["#59A5D8", "#7BC950", "#F5A623", "#B07BE0", "#f85a6b", "#4FD1C5"];
@@ -123,6 +124,8 @@ function AssessmentList() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [rosterFor, setRosterFor] = useState<AssessmentListRow | null>(null);
+  const { selected, ids, toggle, toggleAll, allShown, clear, busy, confirmAndDelete } =
+    useBulkSelect(rows);
 
   const load = useCallback(() => {
     const q: Record<string, string> = {};
@@ -158,15 +161,19 @@ function AssessmentList() {
           </div>
         </div>
 
+        <BulkBar count={ids.length} busy={busy} noun="assessment" onClear={clear}
+          onDelete={() => confirmAndDelete("assessment", (a) => a.title, bulkDeleteAssessments, load)} />
+
         <div className="overflow-x-auto rounded-xl border border-hairline">
           <table className="w-full text-left text-sm text-ink-2">
             <thead className="bg-surface-2 text-xs font-bold uppercase text-ink-3">
-              <tr><th className="px-4 py-3">Assessment</th><th className="px-4 py-3">Course / Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Qs · Marks</th><th className="px-4 py-3">Progress</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr>
+              <tr><th className="w-10 px-4 py-3"><SelectAllBox checked={allShown} onChange={toggleAll} /></th><th className="px-4 py-3">Assessment</th><th className="px-4 py-3">Course / Batch</th><th className="px-4 py-3">Teacher</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Qs · Marks</th><th className="px-4 py-3">Progress</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody className="divide-y divide-hairline bg-surface">
-              {rows.length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center text-ink-3"><ClipboardList className="mx-auto mb-2 size-8 opacity-60" />No assessments yet.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-ink-3"><ClipboardList className="mx-auto mb-2 size-8 opacity-60" />No assessments yet.</td></tr>}
               {rows.map((a) => (
-                <tr key={a.id} className="hover:bg-surface-2/60">
+                <tr key={a.id} className={selected.has(a.id) ? "bg-accent/5" : "hover:bg-surface-2/60"}>
+                  <td className="px-4 py-3"><SelectBox checked={selected.has(a.id)} onChange={() => toggle(a.id)} label={a.title} /></td>
                   <td className="px-4 py-3"><div className="font-semibold text-ink">{a.title}</div><div className="mt-0.5 flex gap-1.5 text-[10px]"><Badge tone="neutral">{a.type}</Badge>{a.subject && <span className="text-ink-3">{a.subject}</span>}</div></td>
                   <td className="px-4 py-3 text-xs">{a.course ?? "—"}{a.batch && <div className="text-ink-3">{a.batch}</div>}</td>
                   <td className="px-4 py-3 text-xs">{a.teacher ?? "—"}</td>

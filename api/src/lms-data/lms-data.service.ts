@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { bulkDelete } from '../common/bulk-delete';
 
 @Injectable()
 export class LmsDataService {
@@ -248,5 +249,82 @@ export class LmsDataService {
   }
   async deleteMeeting(id: string) {
     return this.prisma.lmsMeeting.delete({ where: { id } });
+  }
+
+  // ── Bulk delete ────────────────────────────────────────────────────────────
+  /*
+   * Each of these catalogues grew a "select several and delete" control, and
+   * they share one rule: a catalogue entry still pointed at by live records is
+   * refused rather than quietly taking those records with it.
+   */
+
+  async deleteCourses(ids: string[]) {
+    return bulkDelete(ids, async (id) => {
+      const course = await this.prisma.lmsCourse.findUnique({
+        where: { id },
+        select: { title: true, code: true, studentsCount: true },
+      });
+      if (!course) throw new NotFoundException('Course not found.');
+      if (course.studentsCount > 0) {
+        throw new BadRequestException(
+          `"${course.title}" has ${course.studentsCount} enrolled student${course.studentsCount > 1 ? 's' : ''}. ` +
+            'Move them first — deleting it would leave them without a course.',
+        );
+      }
+      /*
+       * Knowledgebase material is filed under a course code. Deleting the
+       * course would leave that material pointing at a code that no longer
+       * resolves, which reads as missing rather than as orphaned.
+       */
+      const material = await this.prisma.lmsKnowledgebase.count({
+        where: { courseCode: course.code },
+      });
+      if (material > 0) {
+        throw new BadRequestException(
+          `"${course.title}" has ${material} knowledgebase item${material > 1 ? 's' : ''} filed under it. ` +
+            'Remove or re-file those first.',
+        );
+      }
+      await this.prisma.lmsCourse.delete({ where: { id } });
+      return course.title;
+    });
+  }
+
+  async deleteKnowledgebaseMany(ids: string[]) {
+    return bulkDelete(ids, async (id) => {
+      const item = await this.prisma.lmsKnowledgebase.findUnique({
+        where: { id },
+        select: { title: true },
+      });
+      if (!item) throw new NotFoundException('Item not found.');
+      await this.prisma.lmsKnowledgebase.delete({ where: { id } });
+      return item.title;
+    });
+  }
+
+  async deletePackages(ids: string[]) {
+    return bulkDelete(ids, async (id) => {
+      const pkg = await this.prisma.lmsPackage.findUnique({
+        where: { id },
+        select: { title: true },
+      });
+      if (!pkg) throw new NotFoundException('Package not found.');
+      /*
+       * Named rather than joined: LmsPackage is the flat catalogue and the
+       * relational Package that enrolments point at is a separate table, so
+       * the only link is the name a coach chose from a list.
+       */
+      const inUse = await this.prisma.leadTrial.count({
+        where: { preferredPackage: pkg.title },
+      });
+      if (inUse > 0) {
+        throw new BadRequestException(
+          `"${pkg.title}" is the package chosen on ${inUse} trial${inUse > 1 ? 's' : ''}. ` +
+            'Deleting it would leave those families billed for something that no longer exists.',
+        );
+      }
+      await this.prisma.lmsPackage.delete({ where: { id } });
+      return pkg.title;
+    });
   }
 }

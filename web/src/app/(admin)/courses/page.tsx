@@ -1,8 +1,8 @@
 "use client";
 
-import { authHeader } from "@/lib/api";
+import { authHeader, bulkDeleteCourses } from "@/lib/api";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { 
   Plus, 
   Search, 
@@ -27,6 +27,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
+import { useBulkSelect, SelectAllBox, SelectBox, BulkBar } from "@/components/ui/bulk-select";
 import { cn } from "@/lib/utils";
 
 // Initial Mock Course Data (30 courses)
@@ -72,8 +73,7 @@ export default function CoursesPage() {
       .catch(console.error);
   }, [apiBase]);
 
-  // Fetch courses on mount
-  useEffect(() => {
+  const loadCourses = useCallback(() => {
     fetch(`${apiBase}/lms-data/courses`)
       .then(res => res.json())
       .then((data: any[]) => {
@@ -81,6 +81,11 @@ export default function CoursesPage() {
       })
       .catch(console.error);
   }, [apiBase]);
+
+  // Fetch courses on mount
+  useEffect(() => {
+    loadCourses();
+  }, [loadCourses]);
 
   // Filters & Sorting & Pagination State
   const [searchQuery, setSearchQuery] = useState("");
@@ -154,6 +159,9 @@ export default function CoursesPage() {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedCourses = filteredCourses.slice(startIndex, startIndex + pageSize);
+
+  const { selected, ids, toggle, toggleAll, allShown, clear, busy, confirmAndDelete } =
+    useBulkSelect(paginatedCourses);
 
   // CRUD actions
   const handleDelete = (id: string, name: string) => {
@@ -485,11 +493,22 @@ export default function CoursesPage() {
               </div>
             </div>
 
+            <BulkBar
+              count={ids.length}
+              busy={busy}
+              onClear={clear}
+              noun="course"
+              onDelete={() => confirmAndDelete("course", (c) => c.title, bulkDeleteCourses, loadCourses)}
+            />
+
             {/* Courses Table Grid */}
             <div className="overflow-x-auto border border-hairline rounded-xl">
               <table className="w-full border-collapse text-left text-sm text-ink-2">
                 <thead className="bg-surface-2 text-xs font-bold text-ink-3 uppercase border-b border-hairline">
                   <tr>
+                    <th scope="col" className="px-6 py-4 w-10">
+                      <SelectAllBox checked={allShown} onChange={toggleAll} />
+                    </th>
                     <th scope="col" className="px-6 py-4">Code</th>
                     <th scope="col" className="px-6 py-4">Course Title & Category</th>
                     <th scope="col" className="px-6 py-4">Level</th>
@@ -502,10 +521,20 @@ export default function CoursesPage() {
                 <tbody className="divide-y divide-hairline bg-surface">
                   {paginatedCourses.length > 0 ? (
                     paginatedCourses.map((course) => (
-                      <tr 
-                        key={course.id} 
-                        className="hover:bg-surface-2/60 transition-colors"
+                      <tr
+                        key={course.id}
+                        className={cn(
+                          "hover:bg-surface-2/60 transition-colors",
+                          selected.has(course.id) && "bg-accent/5"
+                        )}
                       >
+                        <td className="px-6 py-4">
+                          <SelectBox
+                            checked={selected.has(course.id)}
+                            onChange={() => toggle(course.id)}
+                            label={course.title}
+                          />
+                        </td>
                         <td className="px-6 py-4 font-mono text-xs font-bold text-accent">
                           {course.code}
                         </td>
@@ -570,7 +599,7 @@ export default function CoursesPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-6 py-12 text-center text-ink-3">
+                      <td colSpan={8} className="px-6 py-12 text-center text-ink-3">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <FileText className="size-8 text-ink-3/60" />
                           <p className="font-semibold text-sm">No courses matches the filter criteria.</p>

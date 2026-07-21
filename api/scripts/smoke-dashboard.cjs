@@ -2,7 +2,7 @@
  * Smoke test for the Dashboard Management module.
  *
  * Hits every new route with a real JWT for each role and asserts the response
- * shape. Creates a throwaway PARENT account + link (no parent exists in the DB
+ * shape.
  * yet), then removes it so the database is left exactly as it was found.
  *
  * Run with the API already listening on :5000.
@@ -89,18 +89,6 @@ async function send(method, path, userId, payload, expect = 200) {
   );
   const testStudentId = studentRows[0].id;
 
-  // Throwaway parent, cleaned up at the end.
-  const parentEmail = `smoke-parent-${Date.now()}@example.invalid`;
-  const { rows: parentRows } = await db.query(
-    `INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt")
-     VALUES (gen_random_uuid(),$1,'x','Smoke','Parent','PARENT','ACTIVE',now()) RETURNING id`,
-    [parentEmail],
-  );
-  const parentId = parentRows[0].id;
-  await db.query(
-    `INSERT INTO "ParentLink" (id,"parentUserId","studentId","isPrimary") VALUES (gen_random_uuid(),$1,$2,true)`,
-    [parentId, testStudentId],
-  );
 
   const createdAnnouncementIds = [];
 
@@ -144,60 +132,18 @@ async function send(method, path, userId, payload, expect = 200) {
     check('GET /dashboard/student', st.ok, `status ${st.status}`);
     check('student has progress + achievements', st.ok && st.body.progress && st.body.achievements);
 
-    const pa = await get('/dashboard/parent?range=30d', parentId);
-    check('GET /dashboard/parent', pa.ok, `status ${pa.status}`);
-    check('parent resolves the linked child', pa.ok && pa.body.child?.studentId === testStudentId);
-    check('parent has fee summary', pa.ok && pa.body.fees);
-    check('parent has timeline', pa.ok && pa.body.timeline);
-
-    const kids = await get('/dashboard/parent/children', parentId);
-    check('GET /dashboard/parent/children', kids.ok && Array.isArray(kids.body) && kids.body.length === 1);
-
-    // Quick-action endpoints behind the parent dashboard.
-    const contacts = await get('/dashboard/parent/contacts', parentId);
-    check('GET /dashboard/parent/contacts', contacts.ok, `status ${contacts.status}`);
-    check('contacts returns a teacher list', contacts.ok && Array.isArray(contacts.body.teachers));
-
-    const pFees = await get('/dashboard/parent/fees', parentId);
-    check('GET /dashboard/parent/fees', pFees.ok, `status ${pFees.status}`);
-    check(
-      'fees returns invoices + academy details',
-      pFees.ok && Array.isArray(pFees.body.invoices) && pFees.body.academy !== undefined,
-    );
-
-    const card = await get('/dashboard/parent/report-card?range=90d', parentId);
-    check('GET /dashboard/parent/report-card', card.ok, `status ${card.status}`);
-    check('report card carries summary + trends', card.ok && card.body.summary && card.body.trends);
-
-    // A receipt belonging to nobody must 404 rather than leak.
-    const ghost = await get('/dashboard/parent/receipt/00000000-0000-0000-0000-000000000000', parentId, 404);
-    check('unknown receipt is rejected', ghost.ok, `status ${ghost.status}`);
 
     console.log('\n── /my dispatch ──');
     for (const [role, user] of Object.entries(roleUser)) {
       const my = await get('/dashboard/my', user.id);
       check(`GET /dashboard/my as ${role}`, my.ok, `status ${my.status}`);
     }
-    const myParent = await get('/dashboard/my', parentId);
-    check('GET /dashboard/my as PARENT', myParent.ok, `status ${myParent.status}`);
 
     console.log('\n── Role isolation ──');
     const studentHitsSuperAdmin = await get('/dashboard/super-admin', roleUser.STUDENT.id, 403);
     check('STUDENT blocked from /dashboard/super-admin', studentHitsSuperAdmin.ok, `status ${studentHitsSuperAdmin.status}`);
-    const teacherHitsParent = await get('/dashboard/parent', roleUser.TEACHER.id, 403);
-    check('TEACHER blocked from /dashboard/parent', teacherHitsParent.ok, `status ${teacherHitsParent.status}`);
     const supervisorHitsSuperAdmin = await get('/dashboard/super-admin', roleUser.SUPERVISOR.id, 403);
     check('SUPERVISOR blocked from /dashboard/super-admin', supervisorHitsSuperAdmin.ok, `status ${supervisorHitsSuperAdmin.status}`);
-
-    // A parent must not be able to read a child they are not linked to.
-    const { rows: otherStudent } = await db.query(
-      `SELECT id FROM "StudentProfile" WHERE id <> $1 LIMIT 1`,
-      [testStudentId],
-    );
-    if (otherStudent.length) {
-      const foreign = await get(`/dashboard/parent?childId=${otherStudent[0].id}`, parentId, 403);
-      check('PARENT blocked from an unlinked child', foreign.ok, `status ${foreign.status}`);
-    }
 
     console.log('\n── Widgets ──');
     const reg = await get('/dashboard/widgets/registry', roleUser.ADMIN.id);
@@ -281,7 +227,6 @@ async function send(method, path, userId, payload, expect = 200) {
       ACADEMIC_COACH: 'coach-panel.tsx',
       TEACHER: 'teacher-panel.tsx',
       STUDENT: 'student-panel.tsx',
-      PARENT: 'parent-panel.tsx',
     };
     const panelSource = Object.fromEntries(
       Object.entries(PANEL_BY_ROLE).map(([role, file]) => [
@@ -366,11 +311,6 @@ async function send(method, path, userId, payload, expect = 200) {
     const actStudent = await get('/dashboard/activity', roleUser.STUDENT.id, 403);
     check('STUDENT blocked from the activity feed', actStudent.ok, `status ${actStudent.status}`);
 
-    console.log('\n── Parent links ──');
-    const links = await get(`/parent-links/student/${testStudentId}`, roleUser.ADMIN.id);
-    check('GET /parent-links/student/:id', links.ok && Array.isArray(links.body), `status ${links.status}`);
-    check('smoke parent appears in the student links', links.ok && links.body.some((l) => l.parentUserId === parentId));
-
     const range7 = await get('/dashboard/super-admin?range=7d', roleUser.ADMIN.id);
     const range12 = await get('/dashboard/super-admin?range=12m', roleUser.ADMIN.id);
     check('range=7d yields 7 buckets',
@@ -393,11 +333,6 @@ async function send(method, path, userId, payload, expect = 200) {
      * was spotted, silently inflating every backup taken since.
      */
     await db.query(`DELETE FROM "Notification" WHERE type='ANNOUNCEMENT' AND title='Smoke test notice'`);
-    await db.query(`DELETE FROM "AnnouncementRead" WHERE "userId"=$1`, [parentId]);
-    await db.query(`DELETE FROM "ParentLink" WHERE "parentUserId"=$1`, [parentId]);
-    await db.query(`DELETE FROM "Notification" WHERE "userId"=$1`, [parentId]);
-    await db.query(`DELETE FROM "User" WHERE id=$1`, [parentId]);
-    await db.query(`DELETE FROM "StudentActivity" WHERE type='PARENT_ACCOUNT_LINKED' AND description LIKE 'smoke-parent-%'`);
     // Personalisation + role toggles created by the test.
     await db.query(`DELETE FROM "UserWidgetLayout" WHERE "userId" = ANY($1::text[])`, [
       Object.values(roleUser).map((u) => u.id),
@@ -410,15 +345,14 @@ async function send(method, path, userId, payload, expect = 200) {
      * that cries wolf gets ignored, and then hides an actual leak.
      */
     const { rows: leftovers } = await db.query(
-      `SELECT (SELECT count(*)::int FROM "User" WHERE role='PARENT' AND email LIKE 'smoke-parent-%') AS parents,
-              (SELECT count(*)::int FROM "Announcement" WHERE title='Smoke test notice') AS announcements,
+      `SELECT               (SELECT count(*)::int FROM "Announcement" WHERE title='Smoke test notice') AS announcements,
               (SELECT count(*)::int FROM "Notification" WHERE title='Smoke test notice') AS notifications,
               (SELECT count(*)::int FROM "UserWidgetLayout"
                 WHERE "userId" = ANY($1::text[])) AS layouts`,
       [Object.values(roleUser).map((u) => u.id)],
     );
     console.log(
-      `\nCleanup: ${leftovers[0].parents} stray parents · ${leftovers[0].announcements} stray announcements · ` +
+      `\nCleanup: ${leftovers[0].announcements} stray announcements · ` +
         `${leftovers[0].notifications} stray notifications · ${leftovers[0].layouts} layout rows remaining`,
     );
     await db.end();

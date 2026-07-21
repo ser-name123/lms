@@ -12,6 +12,8 @@ import {
   CreateAssignmentDto, GradeSubmissionDto, ListAssignmentsQuery,
   SubmitAssignmentDto, UpdateAssignmentDto,
 } from './dto';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsArray, IsString } from 'class-validator';
 
 const DIR = join(process.cwd(), 'uploads', 'assignments');
 const storage = diskStorage({
@@ -24,6 +26,12 @@ const storage = diskStorage({
 });
 
 const actor = (u: AuthUser) => ({ id: u.id, role: u.role });
+
+/** The rows a user ticked in a list. */
+export class BulkIdsDto {
+  @ApiProperty({ type: [String] })
+  @IsArray() @IsString({ each: true }) ids!: string[];
+}
 
 @ApiTags('assignments')
 @ApiBearerAuth()
@@ -114,6 +122,9 @@ export class AssignmentsController {
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateAssignmentDto, @CurrentUser() u: AuthUser) { return this.service.update(id, dto, actor(u)); }
+
+  @Post('bulk-delete')
+  bulkDelete(@Body() dto: BulkIdsDto, @CurrentUser() u: AuthUser) { return this.service.removeMany(dto.ids, actor(u)); }
 
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.service.remove(id, actor(u)); }

@@ -112,8 +112,6 @@ export function UserMenu() {
                   router.push("/student/profile");
                 } else if (user.role === "TEACHER") {
                   router.push("/teacher/profile");
-                } else if (user.role === "PARENT") {
-                  router.push("/parent/dashboard");
                 } else {
                   router.push("/profile");
                 }

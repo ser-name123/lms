@@ -41,7 +41,6 @@ const AUDIENCE: { role: Role; label: string }[] = [
   { role: "ACADEMIC_COACH", label: "Coach" },
   { role: "TEACHER", label: "Teacher" },
   { role: "STUDENT", label: "Student" },
-  { role: "PARENT", label: "Parent" },
 ];
 
 const EMPTY_FORM = {
