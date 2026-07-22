@@ -333,6 +333,31 @@ async function send(method, path, userId, payload, expect = 200) {
     const actStudent = await get('/dashboard/activity', roleUser.STUDENT.id, 403);
     check('STUDENT blocked from the activity feed', actStudent.ok, `status ${actStudent.status}`);
 
+    /*
+     * This widget ships on the teacher dashboard too, and every row linked to
+     * an admin route — /students, /invoices, /assignments — which a teacher's
+     * layout answers with a 404. The feed looked healthy and every row in it
+     * was a dead end.
+     */
+    const actTeacher = await get('/dashboard/activity', roleUser.TEACHER.id);
+    check('TEACHER can read the activity feed', actTeacher.ok && Array.isArray(actTeacher.body), `status ${actTeacher.status}`);
+    const teacherLinks = (actTeacher.body || []).map((r) => r.link).filter(Boolean);
+    // `every` on an empty list is true, so an empty feed would pass this
+    // without testing anything — require rows before believing it.
+    check(
+      'and every link it gives them is a teacher route',
+      teacherLinks.length > 0 && teacherLinks.every((l) => l.startsWith('/teacher/')),
+      teacherLinks.length === 0
+        ? 'the feed was empty, so nothing was checked'
+        : teacherLinks.filter((l) => !l.startsWith('/teacher/')).join(', ') || 'none',
+    );
+    const adminLinks = (act.body || []).map((r) => r.link).filter(Boolean);
+    check(
+      'while an admin still gets the admin ones',
+      adminLinks.every((l) => !l.startsWith('/teacher/')),
+      adminLinks.filter((l) => l.startsWith('/teacher/')).join(', ') || 'none',
+    );
+
     const range7 = await get('/dashboard/super-admin?range=7d', roleUser.ADMIN.id);
     const range12 = await get('/dashboard/super-admin?range=12m', roleUser.ADMIN.id);
     check('range=7d yields 7 buckets',

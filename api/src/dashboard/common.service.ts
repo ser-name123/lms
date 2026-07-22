@@ -255,7 +255,12 @@ export class DashboardCommonService {
     const studentIds = await this.resolveOwnStudentIds(user);
     if (!studentIds.length) return [];
 
-    const prefix = user.role === Role.STUDENT ? '/student' : '/parent';
+    /*
+     * The parent portal was removed, so `/parent/...` resolves to nothing.
+     * Anyone reaching this who is not a student gets the student's own pages,
+     * which is where the work they are looking at actually lives.
+     */
+    const prefix = '/student';
 
     const [assignments, assessments, courses] = await Promise.all([
       this.prisma.assignment.findMany({
@@ -527,7 +532,12 @@ export class DashboardCommonService {
     // Student / parent: the child's own schedule.
     const studentIds = await this.resolveOwnStudentIds(user);
     if (!studentIds.length) return events;
-    const prefix = user.role === Role.STUDENT ? '/student' : '/parent';
+    /*
+     * The parent portal was removed, so `/parent/...` resolves to nothing.
+     * Anyone reaching this who is not a student gets the student's own pages,
+     * which is where the work they are looking at actually lives.
+     */
+    const prefix = '/student';
 
     const [classes, assignments, assessments, meetings] = await Promise.all([
       this.prisma.classAttendee.findMany({
@@ -609,7 +619,21 @@ export class DashboardCommonService {
   // ── Recent activity ────────────────────────────────────────────────────────
 
   /** Academy-wide feed for staff dashboards. */
-  async recentActivity(limit = 12) {
+  /**
+   * The academy's recent activity, linked to pages the CALLER can open.
+   *
+   * This widget ships on the teacher dashboard as well as the admin one, and
+   * every row linked to an admin route — /students, /invoices, /assignments —
+   * which a teacher's layout answers with a 404. The feed looked fine and
+   * every row in it was a dead end.
+   */
+  async recentActivity(role: Role = Role.ADMIN, limit = 12) {
+    // A teacher has their own copies of these pages; the staff roles share the
+    // admin ones. Anyone else gets no link rather than a broken one.
+    const isTeacher = role === Role.TEACHER;
+    const to = (staffPath: string, teacherPath: string | null) =>
+      isTeacher ? teacherPath : staffPath;
+
     const [students, payments, enrollments, submissions, registrations, attempts] =
       await Promise.all([
       this.prisma.studentActivity.findMany({
@@ -698,7 +722,7 @@ export class DashboardCommonService {
         action: s.title,
         target: s.description ?? '',
         at: s.createdAt.toISOString(),
-        link: `/students/${s.studentId}`,
+        link: to(`/students/${s.studentId}`, '/teacher/students'),
       })),
       ...payments.map((p) => ({
         id: p.id,
@@ -709,7 +733,8 @@ export class DashboardCommonService {
         action: 'paid',
         target: p.invoice.number,
         at: (p.paidAt ?? new Date()).toISOString(),
-        link: '/invoices',
+        // A teacher has no invoices page at all — no link beats a 404.
+        link: to('/invoices', null),
       })),
       ...enrollments.map((e) => ({
         id: e.id,
@@ -718,7 +743,7 @@ export class DashboardCommonService {
         action: 'enrolled in',
         target: e.course.title,
         at: e.createdAt.toISOString(),
-        link: '/students',
+        link: to('/students', '/teacher/students'),
       })),
       ...submissions.map((s) => ({
         id: s.id,
@@ -727,7 +752,7 @@ export class DashboardCommonService {
         action: 'submitted',
         target: s.assignment.title,
         at: s.submittedAt!.toISOString(),
-        link: '/assignments',
+        link: to('/assignments', '/teacher/assignments'),
       })),
       ...registrations.map((s) => ({
         id: s.id,
@@ -736,7 +761,7 @@ export class DashboardCommonService {
         action: 'registered as',
         target: s.studentCode,
         at: s.user.createdAt.toISOString(),
-        link: `/students/${s.id}`,
+        link: to(`/students/${s.id}`, '/teacher/students'),
       })),
       ...attempts.map((a) => ({
         id: a.id,
@@ -745,7 +770,7 @@ export class DashboardCommonService {
         action: 'completed',
         target: a.assessment.title,
         at: a.submittedAt!.toISOString(),
-        link: '/assessments',
+        link: to('/assessments', '/teacher/assessments'),
       })),
     ];
 

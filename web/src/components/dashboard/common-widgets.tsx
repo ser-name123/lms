@@ -443,22 +443,36 @@ export function ActivityWidget() {
         <ul className="space-y-1">
           {items.map((a) => {
             const Icon = ACTIVITY_ICON[a.kind] ?? ClipboardList;
+            /*
+             * The row is still worth showing when the caller has nowhere to go
+             * — a teacher sees that a payment came in without a link to an
+             * invoices page they cannot open.
+             */
+            const body = (
+              <>
+                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2">
+                  <Icon className="size-4 text-ink-2" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1 text-xs">
+                  <span className="font-semibold text-ink">{a.who}</span>{" "}
+                  <span className="text-ink-3">{a.action}</span>{" "}
+                  <span className="font-medium text-ink-2">{a.target}</span>
+                </span>
+                <span className="shrink-0 text-xs text-ink-3">{relativeTime(a.at)}</span>
+              </>
+            );
             return (
               <li key={`${a.kind}-${a.id}`}>
-                <Link
-                  href={a.link}
-                  className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2"
-                >
-                  <span className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2">
-                    <Icon className="size-4 text-ink-2" aria-hidden />
-                  </span>
-                  <span className="min-w-0 flex-1 text-xs">
-                    <span className="font-semibold text-ink">{a.who}</span>{" "}
-                    <span className="text-ink-3">{a.action}</span>{" "}
-                    <span className="font-medium text-ink-2">{a.target}</span>
-                  </span>
-                  <span className="shrink-0 text-xs text-ink-3">{relativeTime(a.at)}</span>
-                </Link>
+                {a.link ? (
+                  <Link
+                    href={a.link}
+                    className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2"
+                  >
+                    {body}
+                  </Link>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-lg px-2 py-2">{body}</div>
+                )}
               </li>
             );
           })}

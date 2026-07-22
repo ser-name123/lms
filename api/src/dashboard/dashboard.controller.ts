@@ -113,8 +113,10 @@ export class DashboardController {
   @Get('activity')
   @Roles(Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH, Role.TEACHER)
   @ApiOperation({ summary: 'Recent academy activity feed' })
-  activity() {
-    return this.common.recentActivity();
+  activity(@CurrentUser() user: AuthUser) {
+    // The caller's role decides where each row links. A teacher opening this
+    // used to get admin URLs they cannot open — every row a dead end.
+    return this.common.recentActivity(user.role);
   }
 
   @Get('announcements')

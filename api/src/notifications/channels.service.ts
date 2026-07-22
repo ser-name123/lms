@@ -3,7 +3,7 @@ import * as webpush from 'web-push';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
-import { NotificationChannel as Ch } from '../generated/prisma/enums';
+import { NotificationChannel as Ch, Role } from '../generated/prisma/enums';
 
 /*
  * One sender per channel, behind a single interface.
@@ -168,16 +168,38 @@ export class NotificationChannelsService implements OnModuleInit {
     </div>`;
   }
 
+  /**
+   * Where a notification with no link of its own should open.
+   *
+   * "/dashboard" belongs to the admin route group, which answers a student or
+   * teacher with a 404 — so the fallback used to send exactly the people most
+   * likely to tap a push straight into a dead page.
+   */
+  private static homeFor(role: Role): string {
+    if (role === Role.STUDENT) return '/student/dashboard';
+    if (role === Role.TEACHER) return '/teacher/dashboard';
+    return '/dashboard';
+  }
+
   private async sendPush(userId: string, message: OutgoingMessage): Promise<SendResult> {
     if (!this.vapidReady) return { ok: false, skipped: 'Web Push is not configured' };
 
     const subs = await this.prisma.pushSubscription.findMany({ where: { userId } });
     if (!subs.length) return { ok: false, skipped: 'No push subscription on this account' };
 
+    let home = '/dashboard';
+    if (!message.link) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      if (user) home = NotificationChannelsService.homeFor(user.role);
+    }
+
     const payload = JSON.stringify({
       title: message.title,
       body: message.body,
-      link: message.link ?? '/dashboard',
+      link: message.link ?? home,
     });
 
     let delivered = 0;
