@@ -506,40 +506,19 @@ export class StudentPortalService {
     });
   }
 
-  async payInvoice(userId: string, invoiceId: string) {
-    const student = await this.prisma.studentProfile.findUnique({
-      where: { userId },
-    });
-    if (!student) throw new NotFoundException('Student profile not found');
-
-    const invoice = await this.prisma.invoice.findFirst({
-      where: { id: invoiceId, studentId: student.id },
-    });
-    if (!invoice) throw new NotFoundException('Invoice not found');
-
-    // Update invoice status to PAID
-    const updatedInvoice = await this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        status: InvoiceStatus.PAID,
-        paidAt: new Date(),
-      },
-    });
-
-    // Record mock payment log
-    await this.prisma.payment.create({
-      data: {
-        invoiceId,
-        amount: invoice.amount,
-        provider: 'stripe',
-        providerRef: `ch_${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-        status: 'SUCCEEDED',
-        paidAt: new Date(),
-      },
-    });
-
-    return updatedInvoice;
-  }
+/*
+ * `payInvoice` was removed here, not replaced.
+ *
+ * It let any signed-in student mark any of their own invoices PAID: it set
+ * status PAID and wrote a Payment row with a made-up Stripe reference
+ * (`ch_` + random). No money moved. It also bypassed BillingService.recordPayment,
+ * so paidAmount stayed at zero, no Receipt was issued and lastPaymentDate never
+ * moved — while the finance dashboard counted the invoice as revenue.
+ *
+ * An invoice is marked paid in exactly one place now: recordPayment, reached
+ * either by a member of staff recording a payment or by a verified Stripe
+ * webhook. Nothing a browser sends can settle an invoice.
+ */
 
   async getProfile(userId: string) {
     const student = await this.prisma.studentProfile.findUnique({

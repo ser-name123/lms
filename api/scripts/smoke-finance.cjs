@@ -206,6 +206,39 @@ async function main() {
       }
     }
 
+    /*
+     * A student cannot settle their own invoice.
+     *
+     * POST /student-portal/invoices/:id/pay used to set it PAID and write a
+     * Payment row with an invented Stripe reference — no money, no Receipt, no
+     * paidAmount, and the finance dashboard counted it as revenue. It is gone;
+     * this proves it stays gone, and that the invoice does not move.
+     */
+    if (studentProfileId && users.STUDENT) {
+      console.log('SELF-PAY:');
+      let probeId = null;
+      try {
+        const probe = await req(users.ADMIN, 'POST', '/finance/invoices', {
+          studentId: studentProfileId,
+          items: [{ type: 'COURSE', label: 'self-pay probe', amount: 50 }],
+          status: 'SENT',
+        });
+        probeId = probe.id;
+        const r = await fetch(`${BASE}/student-portal/invoices/${probe.id}/pay`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tok(users.STUDENT)}` },
+        });
+        ok(r.status === 404, `the self-pay endpoint is gone (got ${r.status})`);
+        const after = (
+          await db.query(`SELECT status, "paidAmount" FROM "Invoice" WHERE id=$1`, [probe.id])
+        ).rows[0];
+        ok(after.status === 'SENT' && Number(after.paidAmount) === 0,
+          `the invoice did not move (${after.status}, paid ${after.paidAmount})`);
+      } finally {
+        if (probeId) await db.query(`DELETE FROM "Invoice" WHERE id=$1`, [probeId]);
+      }
+    }
+
     console.log('RBAC:');
     if (users.STUDENT) {
       const r = await fetch(`${BASE}/finance/dashboard`, { headers: { Authorization: `Bearer ${tok(users.STUDENT)}` } });

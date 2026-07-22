@@ -1514,9 +1514,9 @@ export const submitStudentAssignment = (assignmentId: string, content: string, f
   body: JSON.stringify({ content, fileUrl }),
 });
 export const fetchStudentInvoices = () => api<any[]>("/student-portal/invoices");
-export const payStudentInvoice = (invoiceId: string) => api<any>(`/student-portal/invoices/${invoiceId}/pay`, {
-  method: "POST",
-});
+// payStudentInvoice is gone with the endpoint behind it: it marked the invoice
+// PAID with a fabricated Stripe reference and no money moved. Settling an
+// invoice is recordPayment's job — staff, or a verified Stripe webhook.
 export const fetchStudentProfile = () => api<any>("/student-portal/profile");
 export const updateStudentProfile = (payload: any) => api<any>("/student-portal/profile", {
   method: "PATCH",

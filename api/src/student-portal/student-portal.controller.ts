@@ -83,15 +83,13 @@ export class StudentPortalController {
     return this.service.getInvoices(user.id);
   }
 
-  @Post('invoices/:invoiceId/pay')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Simulate invoice payment' })
-  payInvoice(
-    @CurrentUser() user: AuthUser,
-    @Param('invoiceId') invoiceId: string,
-  ) {
-    return this.service.payInvoice(user.id, invoiceId);
-  }
+  /*
+   * POST invoices/:invoiceId/pay is gone. Its own summary called it "Simulate
+   * invoice payment", and that is what it did — marked the invoice PAID with a
+   * fabricated Stripe reference, for any student who called it. Settling an
+   * invoice now goes through recordPayment only: staff recording a payment, or
+   * a signature-verified Stripe webhook.
+   */
 
   @Get('profile')
   @ApiOperation({ summary: 'Get personal student profile' })
