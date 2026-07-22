@@ -147,11 +147,15 @@ export class PaymentsService {
   /**
    * Handles one Stripe event, exactly once.
    *
-   * The insert of the event row is the lock. Stripe redelivers on timeouts,
-   * non-2xx replies and manual retries, and two deliveries of one
-   * payment_intent.succeeded would take the money twice on our books. A
-   * duplicate loses the race on the primary key and returns `duplicate` —
-   * the caller answers 200, because retrying will never help.
+   * Stripe redelivers on timeouts, non-2xx replies and manual retries, and two
+   * deliveries of one payment_intent.succeeded must not take the money twice.
+   *
+   * Two locks, because one is not enough. The event row stops a repeat of work
+   * that COMPLETED. It cannot stop a repeat of work that failed halfway,
+   * because the row is written before the handler runs — so the money-level
+   * guard is the PaymentIntent id already being on a Payment row, checked in
+   * onPaymentSucceeded. The first makes retries cheap; the second makes them
+   * safe.
    */
   async handleEvent(event: Stripe.Event): Promise<{ status: string }> {
     try {
@@ -163,8 +167,32 @@ export class PaymentsService {
         },
       });
     } catch {
-      this.logger.log(`Ignoring duplicate delivery of ${event.id} (${event.type})`);
-      return { status: 'duplicate' };
+      /*
+       * The row exists, but that alone does not mean the work was done.
+       *
+       * This used to return `duplicate` for any repeat delivery. The row is
+       * written BEFORE the handler runs, so a handler that failed left the row
+       * behind and Stripe's retry — the thing that exists to rescue exactly
+       * that case — was answered "already handled, thanks". A blip while
+       * recording a payment meant the family was charged, the invoice stayed
+       * unpaid, and we reported success. Proved with a failing event: delivery
+       * one 400, delivery two 200 duplicate, row still handled=false.
+       *
+       * So only a row that actually completed is a duplicate. An unfinished one
+       * is retried, which is safe because onPaymentSucceeded refuses to book a
+       * PaymentIntent it has already booked.
+       */
+      const existing = await this.prisma.stripeWebhookEvent.findUnique({
+        where: { id: event.id },
+        select: { handled: true },
+      });
+      if (existing?.handled) {
+        this.logger.log(`Ignoring duplicate delivery of ${event.id} (${event.type})`);
+        return { status: 'duplicate' };
+      }
+      this.logger.warn(
+        `Retrying ${event.id} (${event.type}) — a previous delivery did not complete`,
+      );
     }
 
     try {
@@ -197,9 +225,9 @@ export class PaymentsService {
         where: { id: event.id },
         data: { error: message, processedAt: new Date() },
       });
-      // Rethrow so the controller answers 5xx and Stripe retries: the event is
-      // recorded as unhandled, and a retry re-runs it rather than being
-      // swallowed as a duplicate.
+      // Rethrow so the controller answers non-2xx and Stripe retries. The row
+      // stays handled=false, which is what lets the retry re-run the handler
+      // instead of being dismissed as a duplicate.
       throw e;
     }
   }
@@ -211,6 +239,24 @@ export class PaymentsService {
       return null;
     }
 
+    /*
+     * The real guard against taking the money twice.
+     *
+     * The event row stops a repeat delivery, but it is written before the
+     * handler runs, so it cannot prove the payment was booked — and a retry of
+     * an unfinished event now genuinely re-runs this method. The PaymentIntent
+     * id is what Stripe charged, so a Payment already carrying it means this
+     * money is already on the invoice, however many times we arrive here.
+     */
+    const already = await this.prisma.payment.findFirst({
+      where: { reference: intent.id, status: 'SUCCEEDED' },
+      select: { id: true },
+    });
+    if (already) {
+      this.logger.log(`${intent.id} is already recorded on invoice ${invoiceId}`);
+      return invoiceId;
+    }
+
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       select: { id: true, amount: true, paidAmount: true, currency: true, status: true },
@@ -218,6 +264,22 @@ export class PaymentsService {
     if (!invoice) {
       this.logger.error(`PaymentIntent ${intent.id} names unknown invoice ${invoiceId}`);
       return null;
+    }
+
+    /*
+     * A cancelled or void invoice can never accept this payment, so retrying is
+     * pointless — recorded and reported as handled rather than left for Stripe
+     * to redeliver for three days. It needs a human: money was taken against an
+     * invoice that was withdrawn, and that is a refund, not a retry.
+     */
+    if (
+      invoice.status === InvoiceStatus.CANCELLED ||
+      invoice.status === InvoiceStatus.VOID
+    ) {
+      this.logger.error(
+        `${intent.id} paid ${invoice.status} invoice ${invoiceId} — needs a refund, not a retry`,
+      );
+      return invoiceId;
     }
 
     /*

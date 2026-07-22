@@ -235,6 +235,64 @@ async function main() {
       `SELECT count(*)::int n FROM "Payment" WHERE "invoiceId"=$1`, [inv.body.id])).rows[0].n;
     ok(payCount === 1, `exactly one Payment row exists (${payCount})`);
 
+    /*
+     * A retry after a FAILED delivery must actually re-run.
+     *
+     * The event row is written before the handler, so a failed handler leaves
+     * one behind. Treating any repeat delivery as a duplicate answered Stripe's
+     * retry — the very thing that exists to rescue a transient failure — with
+     * "already handled", and the payment was never recorded: family charged,
+     * invoice unpaid, 200 returned. Here the first delivery is made to fail by
+     * making the invoice unpayable, then it is repaired and redelivered.
+     */
+    console.log('\nRETRY AFTER FAILURE:');
+    const inv3 = await req(users.ADMIN, 'POST', '/finance/invoices', {
+      studentId: studentProfileId,
+      items: [{ type: 'COURSE', label: 'retry probe', amount: 75 }],
+      status: 'SENT',
+    }, 201);
+    invoices.push(inv3.body.id);
+
+    const retryEvt = `evt_retry_${Date.now()}`;
+    const retryIntent = `pi_retry_${Date.now()}`;
+    const retryBody = intentEvent({
+      eventId: retryEvt, intentId: retryIntent, invoiceId: inv3.body.id, amountMinor: 7500,
+    });
+    const sigNow = () => signature(retryBody, SECRET, Math.floor(Date.now() / 1000));
+
+    /*
+     * The dangerous state, created directly: the event row exists but the work
+     * was never done. That is what a handler failure leaves behind — and also
+     * what a process killed between the insert and the handler leaves behind,
+     * which no induced error would reproduce, since a crash records no error
+     * at all. Either way the next delivery must do the work.
+     */
+    await db.query(
+      `INSERT INTO "StripeWebhookEvent" (id, type, payload, handled)
+       VALUES ($1, 'payment_intent.succeeded', '{}'::jsonb, false)`,
+      [retryEvt],
+    );
+    const stuck = (await db.query(
+      `SELECT handled FROM "StripeWebhookEvent" WHERE id=$1`, [retryEvt])).rows[0];
+    ok(stuck.handled === false, 'an unfinished delivery is on record');
+
+    const d2 = await postWebhook(retryBody, sigNow());
+    const d2Body = await d2.json();
+    ok(d2.status === 200 && d2Body.status === 'handled',
+      `the retry re-runs instead of being dismissed as a duplicate (${d2Body.status})`);
+
+    const afterRetry = (await db.query(
+      `SELECT status, "paidAmount" FROM "Invoice" WHERE id=$1`, [inv3.body.id])).rows[0];
+    ok(afterRetry.status === 'PAID' && Number(afterRetry.paidAmount) === 75,
+      `the retry settled the invoice (${afterRetry.status}, ${afterRetry.paidAmount})`);
+
+    // And a genuine duplicate after success still books nothing further.
+    const d3 = await postWebhook(retryBody, sigNow());
+    ok((await d3.json()).status === 'duplicate', 'a delivery after success is a duplicate again');
+    const retryPayments = (await db.query(
+      `SELECT count(*)::int n FROM "Payment" WHERE reference=$1`, [retryIntent])).rows[0].n;
+    ok(retryPayments === 1, `the intent was booked exactly once across three deliveries (${retryPayments})`);
+
     // ── Refusing when Stripe is absent ───────────────────────────────────────
     console.log('\nWITHOUT KEYS:');
     const inv2 = await req(users.ADMIN, 'POST', '/finance/invoices', {
