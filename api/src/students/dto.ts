@@ -168,6 +168,14 @@ export class CreateStudentDto {
   @IsOptional()
   @IsString()
   teacherId?: string;
+
+  // The package the enrolment is billed on. Without it a student created here
+  // gets an enrolment with no package: their own subscription page has nothing
+  // to show and no package change can be priced.
+  @ApiPropertyOptional({ description: 'Package id the enrolment is billed on' })
+  @IsOptional()
+  @IsString()
+  packageId?: string;
 }
 
 export class UpdateStudentDto {
@@ -251,4 +259,12 @@ export class UpdateStudentDto {
   @IsOptional()
   @IsString()
   teacherId?: string;
+
+  // The package the enrolment is billed on. Without it a student created here
+  // gets an enrolment with no package: their own subscription page has nothing
+  // to show and no package change can be priced.
+  @ApiPropertyOptional({ description: 'Package id the enrolment is billed on' })
+  @IsOptional()
+  @IsString()
+  packageId?: string;
 }

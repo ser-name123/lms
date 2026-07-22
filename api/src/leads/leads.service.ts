@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { courseForCode } from '../common/catalogue-course';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -1931,6 +1932,18 @@ export class LeadsService implements OnModuleInit {
     const passwords = children.map(() => this.tempPassword());
     const hashes = await Promise.all(passwords.map((p) => bcrypt.hash(p, 12)));
 
+    /*
+     * Resolved before the enrolments rather than beside the invoice below,
+     * because the enrolment is what has to carry it.
+     *
+     * This package was already being billed, written onto the profile's fees
+     * and named in the welcome email — but never onto the enrolment. So a
+     * converted family paid for a package, was told which one, and their
+     * enrolment said they had none: their own subscription page showed
+     * nothing and no package change could be raised against it.
+     */
+    const pkg = await this.packageForConversion(lead.id, packageId).catch(() => null);
+
     const created = await this.prisma.$transaction(async (tx) => {
       const profiles: { id: string; code: string; name: string; email: string }[] = [];
 
@@ -1999,6 +2012,7 @@ export class LeadsService implements OnModuleInit {
               data: {
                 studentId: profile.id,
                 courseId: exists.id,
+                packageId: pkg?.id ?? null,
                 status: EnrollmentStatus.ACTIVE,
                 startedAt: report.preferredStartDate ?? now,
               },
@@ -2008,31 +2022,16 @@ export class LeadsService implements OnModuleInit {
 
         // Enrol into the chosen LmsCourse if one was supplied.
         if (courseCode) {
-          const lms = await tx.lmsCourse.findUnique({ where: { code: courseCode } });
-          if (lms) {
-            const slug = courseCode.toLowerCase();
-            const course = await tx.course.upsert({
-              where: { slug },
-              update: {},
-              create: {
-                title: lms.title,
-                slug,
-                description: lms.description,
-                price: 0,
-                status: CourseStatus.PUBLISHED,
-              },
-            });
+          const course = await courseForCode(tx, courseCode);
+          if (course) {
             await tx.enrollment.create({
               data: {
                 studentId: profile.id,
                 courseId: course.id,
+                packageId: pkg?.id ?? null,
                 status: EnrollmentStatus.ACTIVE,
                 startedAt: now,
               },
-            });
-            await tx.lmsCourse.update({
-              where: { id: lms.id },
-              data: { studentsCount: { increment: 1 } },
             });
           }
         }
@@ -2073,7 +2072,6 @@ export class LeadsService implements OnModuleInit {
      * accounts exist but whose invoice did not generate is recoverable in a
      * click, whereas rolling the accounts back over a billing hiccup is not.
      */
-    const pkg = await this.packageForConversion(lead.id, packageId).catch(() => null);
     const invoices: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[] = [];
     if (pkg) {
       for (const student of created) {

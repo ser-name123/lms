@@ -258,22 +258,28 @@ export class LmsDataService implements OnModuleInit {
 
   // 3. Assessments
   // LmsAssessment has no student count of its own, so it is resolved live from
-  // the linked course (by courseCode) — the same rule assignments follow.
+  // the linked course (by courseCode) — the same rule assignments follow, and
+  // it comes from real enrolments rather than the stored figure, so this and
+  // the courses page can never disagree about how many students a course has.
   async getAssessments() {
-    const [assessments, courses] = await Promise.all([
+    const [assessments, courses, enrolments] = await Promise.all([
       this.prisma.lmsAssessment.findMany({ orderBy: { title: 'asc' } }),
-      this.prisma.lmsCourse.findMany({
-        select: { code: true, title: true, studentsCount: true },
+      this.prisma.lmsCourse.findMany({ select: { id: true, code: true, title: true } }),
+      this.prisma.enrollment.groupBy({
+        by: ['courseId'],
+        where: { status: { in: ['ACTIVE', 'TRIAL', 'PENDING'] } },
+        _count: { _all: true },
       }),
     ]);
 
+    const students = new Map(enrolments.map((e) => [e.courseId, e._count._all]));
     const courseByCode = new Map(courses.map((c) => [c.code, c]));
 
     return assessments.map((a) => {
       const course = courseByCode.get(a.courseCode);
       return {
         ...a,
-        studentsCount: course?.studentsCount ?? 0,
+        studentsCount: course ? (students.get(course.id) ?? 0) : 0,
         courseTitle: course?.title ?? a.courseTitle,
       };
     });

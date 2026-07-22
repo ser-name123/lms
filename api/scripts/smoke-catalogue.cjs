@@ -349,6 +349,65 @@ const today = () => new Date().toISOString().slice(0, 10);
     check('omitting the package leaves it in place', enr[0]?.packageId === packageId, String(enr[0]?.packageId));
     check('  while the status did change', enr[0]?.status === 'PAUSED', enr[0]?.status);
 
+    // ── 8b. Creating a student enrols them in the SAME Course ───────────────
+    /*
+     * Five call sites used to find-or-create the Course by slug, inventing a
+     * fresh id and a price of 0. That is how a student ended up enrolled in a
+     * course the admin panel does not list. These check the id matches the
+     * catalogue's, and that a catalogue row with no relational half yet gets
+     * one carrying its real price rather than 0.
+     */
+    console.log('\n8b. Enrolling on create resolves the catalogue Course');
+
+    const enrolEmail = `${MARKER}-enrolled@example.test`;
+    await db.query(`DELETE FROM "User" WHERE email = $1`, [enrolEmail]);
+
+    // A catalogue row inserted straight into the table, with no Course behind
+    // it — the state every row was in before the two lists were joined.
+    const { rows: orphanCat } = await db.query(
+      `INSERT INTO "LmsCourse" (id,code,title,category,level,status,"createdAt",description,price,"durationWeeks")
+       VALUES (gen_random_uuid(),$1,$2,'General','Beginner','Active',$3,'no relational half',33,16)
+       RETURNING id`,
+      [`${MARKER}-C9`, `${MARKER} Orphan`, today()],
+    );
+    const orphanId = orphanCat[0].id;
+    check('the fixture really has no Course yet', !(await courseRow(orphanId)));
+
+    const madeStudent = await req('POST', '/students', adminToken, {
+      email: enrolEmail,
+      password: 'smoke-password-1',
+      firstName: 'Smoke',
+      lastName: 'Enrolled',
+      courseCode: `${MARKER}-C9`,
+      packageId,
+    });
+    check('POST /students returns 201', madeStudent.status === 201, `got ${madeStudent.status}`);
+
+    const orphanRel = await courseRow(orphanId);
+    check('the missing Course was created under the catalogue id', !!orphanRel);
+    check('  and carries the catalogue price, not 0', Number(orphanRel?.price) === 33, String(orphanRel?.price));
+    check('  and the catalogue duration, not the default 12', orphanRel?.durationWeeks === 16, String(orphanRel?.durationWeeks));
+
+    const { rows: dupes } = await db.query(
+      `SELECT id FROM "Course" WHERE title = $1`,
+      [`${MARKER} Orphan`],
+    );
+    check('  exactly one Course exists for it, not a second by slug', dupes.length === 1, `${dupes.length}`);
+
+    const { rows: newEnr } = await db.query(
+      `SELECT e."courseId", e."packageId" FROM "Enrollment" e
+         JOIN "StudentProfile" sp ON sp.id = e."studentId"
+         JOIN "User" u ON u.id = sp."userId" WHERE u.email = $1`,
+      [enrolEmail],
+    );
+    check('the new student is enrolled', newEnr.length === 1, `${newEnr.length}`);
+    check('  in the catalogue course, by id', newEnr[0]?.courseId === orphanId, newEnr[0]?.courseId);
+    check('  and the enrolment carries the package', newEnr[0]?.packageId === packageId, String(newEnr[0]?.packageId));
+
+    await db.query(`DELETE FROM "User" WHERE email = $1`, [enrolEmail]);
+    await db.query(`DELETE FROM "Course" WHERE id = $1`, [orphanId]);
+    await db.query(`DELETE FROM "LmsCourse" WHERE id = $1`, [orphanId]);
+
     // ── 9. Who is allowed to do any of this ─────────────────────────────────
     console.log('\n9. Roles');
 

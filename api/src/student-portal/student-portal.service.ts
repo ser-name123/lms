@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { courseForCode } from '../common/catalogue-course';
 import {
   Role,
   EnrollmentStatus,
@@ -292,18 +293,24 @@ export class StudentPortalService {
     });
     if (!lmsClass) throw new NotFoundException('Class session not found');
 
-    // Create session in ClassSession if not exists (for database relational modeling)
-    const slug = lmsClass.courseCode.toLowerCase();
-    const course = await this.prisma.course.upsert({
-      where: { slug },
-      update: {},
-      create: {
-        title: lmsClass.courseTitle,
-        slug,
-        status: CourseStatus.PUBLISHED,
-        price: 0,
-      },
-    });
+    /*
+     * The relational Course this class belongs to. Resolved from the
+     * catalogue by code so it is the same row the admin panel shows; the
+     * fallback only fires for a class filed under a code nobody catalogued,
+     * where refusing to let a student join would be the worse outcome.
+     */
+    const course =
+      (await courseForCode(this.prisma, lmsClass.courseCode)) ??
+      (await this.prisma.course.upsert({
+        where: { slug: lmsClass.courseCode.toLowerCase() },
+        update: {},
+        create: {
+          title: lmsClass.courseTitle,
+          slug: lmsClass.courseCode.toLowerCase(),
+          status: CourseStatus.PUBLISHED,
+          price: 0,
+        },
+      }));
 
     // Fetch or create teacher to keep relation happy
     let teacher = await this.prisma.teacherProfile.findFirst();
@@ -425,18 +432,20 @@ export class StudentPortalService {
     });
     if (!lmsAssignment) throw new NotFoundException('Assignment not found');
 
-    // Create relational entities to satisfy foreign key constraints
-    const slug = lmsAssignment.courseCode.toLowerCase();
-    const course = await this.prisma.course.upsert({
-      where: { slug },
-      update: {},
-      create: {
-        title: lmsAssignment.courseTitle,
-        slug,
-        status: CourseStatus.PUBLISHED,
-        price: 0,
-      },
-    });
+    // Same resolution as joining a class: the catalogue's Course if the code
+    // is one, and only otherwise a stand-in so the foreign key holds.
+    const course =
+      (await courseForCode(this.prisma, lmsAssignment.courseCode)) ??
+      (await this.prisma.course.upsert({
+        where: { slug: lmsAssignment.courseCode.toLowerCase() },
+        update: {},
+        create: {
+          title: lmsAssignment.courseTitle,
+          slug: lmsAssignment.courseCode.toLowerCase(),
+          status: CourseStatus.PUBLISHED,
+          price: 0,
+        },
+      }));
 
     await this.prisma.assignment.upsert({
       where: { id: assignmentId },

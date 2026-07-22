@@ -7,6 +7,7 @@ import {
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { courseForCode } from '../common/catalogue-course';
 import { EmailsService } from '../emails/emails.service';
 import {
   Role,
@@ -395,22 +396,10 @@ export class RegistrationsService {
 
       // Enrol into the selected course (mirroring LmsCourse -> Course) if any.
       if (reg.courseCode) {
-        const lms = await tx.lmsCourse.findUnique({
-          where: { code: reg.courseCode },
-        });
-        if (lms) {
-          const slug = reg.courseCode.toLowerCase();
-          const course = await tx.course.upsert({
-            where: { slug },
-            update: {},
-            create: {
-              title: lms.title,
-              slug,
-              description: lms.description,
-              price: 0,
-              status: CourseStatus.PUBLISHED,
-            },
-          });
+        // A code nobody catalogued is a shrug here, not an error: the account
+        // is what matters and a coach can enrol them by hand.
+        const course = await courseForCode(tx, reg.courseCode);
+        if (course) {
           await tx.enrollment.create({
             data: {
               studentId: profile.id,
@@ -418,10 +407,6 @@ export class RegistrationsService {
               status: EnrollmentStatus.ACTIVE,
               startedAt: now,
             },
-          });
-          await tx.lmsCourse.update({
-            where: { id: lms.id },
-            data: { studentsCount: { increment: 1 } },
           });
         }
       }

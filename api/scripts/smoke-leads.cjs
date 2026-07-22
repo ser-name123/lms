@@ -1389,6 +1389,29 @@ const isoDay = (offsetDays) =>
       raised.length === studentIds.length,
       `${raised.length} invoices for ${studentIds.length} students`,
     );
+
+    /*
+     * The package was billed, written onto the profile's fees and named in the
+     * welcome email — and never onto the enrolment. So a family paid for a
+     * package, were told which one, and their enrolment said they had none:
+     * their subscription page showed nothing and no change could be raised.
+     */
+    const enrolled = (
+      await db.query(
+        `SELECT "studentId", "packageId" FROM "Enrollment" WHERE "studentId" = ANY($1::text[])`,
+        [studentIds],
+      )
+    ).rows;
+    check(
+      'every converted child is enrolled',
+      enrolled.length === studentIds.length,
+      `${enrolled.length} enrolments for ${studentIds.length} students`,
+    );
+    check(
+      'the enrolment carries the package the family is being billed for',
+      enrolled.length > 0 && enrolled.every((e) => e.packageId === smokePkg.id),
+      enrolled.map((e) => e.packageId).join(', '),
+    );
     check(
       'it bills the package the family chose, without the coach re-entering it',
       raised.length > 0 && raised.every((r) => Number(r.amount) === 40),

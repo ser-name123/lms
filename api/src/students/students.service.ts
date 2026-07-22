@@ -6,9 +6,9 @@ import {
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { courseForCode } from '../common/catalogue-course';
 import {
   Role,
-  CourseStatus,
   EnrollmentStatus,
 } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
@@ -274,45 +274,24 @@ export class StudentsService {
       });
 
       // If a course was chosen, enrol the student. The catalogue lives in
-      // LmsCourse; enrolments need a relational Course, so we mirror the
-      // catalogue entry into Course on demand (find-or-create by slug).
+      // LmsCourse; enrolments need the relational Course of the same id.
       if (dto.courseCode) {
-        const lms = await tx.lmsCourse.findUnique({
-          where: { code: dto.courseCode },
-        });
-        if (!lms) {
+        const course = await courseForCode(tx, dto.courseCode);
+        if (!course) {
           throw new NotFoundException(
             `Course with code ${dto.courseCode} not found`,
           );
         }
-
-        const slug = dto.courseCode.toLowerCase();
-        const course = await tx.course.upsert({
-          where: { slug },
-          update: {},
-          create: {
-            title: lms.title,
-            slug,
-            description: lms.description,
-            price: 0,
-            status: CourseStatus.PUBLISHED,
-          },
-        });
 
         await tx.enrollment.create({
           data: {
             studentId: profile.id,
             courseId: course.id,
             teacherId: dto.teacherId ?? null,
+            packageId: dto.packageId ?? null,
             status: EnrollmentStatus.ACTIVE,
             startedAt: new Date(),
           },
-        });
-
-        // Keep the catalogue's student tally in step with real enrolments.
-        await tx.lmsCourse.update({
-          where: { id: lms.id },
-          data: { studentsCount: { increment: 1 } },
         });
       }
 
@@ -384,27 +363,12 @@ export class StudentsService {
       // enrolment for the same course → update its teacher; otherwise create a
       // new one. Other enrolments are left untouched.
       if (dto.courseCode) {
-        const lms = await tx.lmsCourse.findUnique({
-          where: { code: dto.courseCode },
-        });
-        if (!lms) {
+        const course = await courseForCode(tx, dto.courseCode);
+        if (!course) {
           throw new NotFoundException(
             `Course with code ${dto.courseCode} not found`,
           );
         }
-
-        const slug = dto.courseCode.toLowerCase();
-        const course = await tx.course.upsert({
-          where: { slug },
-          update: {},
-          create: {
-            title: lms.title,
-            slug,
-            description: lms.description,
-            price: 0,
-            status: CourseStatus.PUBLISHED,
-          },
-        });
 
         const existing = await tx.enrollment.findUnique({
           where: {
@@ -414,7 +378,12 @@ export class StudentsService {
         if (existing) {
           await tx.enrollment.update({
             where: { id: existing.id },
-            data: { teacherId: dto.teacherId ?? null },
+            data: {
+              teacherId: dto.teacherId ?? null,
+              // Left alone when the form did not send one, so editing a
+              // student's teacher does not silently drop their package.
+              packageId: dto.packageId ?? undefined,
+            },
           });
         } else {
           await tx.enrollment.create({
@@ -422,13 +391,10 @@ export class StudentsService {
               studentId: id,
               courseId: course.id,
               teacherId: dto.teacherId ?? null,
+              packageId: dto.packageId ?? null,
               status: EnrollmentStatus.ACTIVE,
               startedAt: new Date(),
             },
-          });
-          await tx.lmsCourse.update({
-            where: { id: lms.id },
-            data: { studentsCount: { increment: 1 } },
           });
         }
       }
