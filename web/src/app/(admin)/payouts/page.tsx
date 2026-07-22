@@ -1091,7 +1091,10 @@ export default function PayoutsDashboard() {
             <form onSubmit={handleProcessPaymentSubmit} className="p-6 space-y-4">
               <div className="p-3.5 bg-emerald-500/5 border border-emerald-500/15 rounded-2xl flex items-center justify-between text-xs font-bold">
                 <span className="text-ink-2">Disbursement Amount:</span>
-                <span className="text-emerald-500 text-sm font-extrabold">${selectedPayout.netAmount} USD</span>
+                {/* The row names its currency (always USD — staff are paid in
+                    dollars wherever they live); printing a hardcoded "USD" here
+                    meant a differently-stamped row would be mislabelled. */}
+                <span className="text-emerald-500 text-sm font-extrabold">${selectedPayout.netAmount} {selectedPayout.currency ?? "USD"}</span>
               </div>
 
               <div>
@@ -1463,7 +1466,7 @@ export default function PayoutsDashboard() {
                   </div>
                   <div className="flex items-center justify-between text-zinc-900 font-extrabold text-sm border-t pt-2 mt-2">
                     <span>Net Transfer Amount:</span>
-                    <span className="text-emerald-700">${Number(selectedPayout.netAmount).toLocaleString()} USD</span>
+                    <span className="text-emerald-700">${Number(selectedPayout.netAmount).toLocaleString()} {selectedPayout.currency ?? "USD"}</span>
                   </div>
                 </div>
               </div>

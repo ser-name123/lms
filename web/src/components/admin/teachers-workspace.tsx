@@ -458,7 +458,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
       return;
     }
 
-    const headers = ["Code", "First Name", "Last Name", "Email", "Specialisation", "Hourly Rate ($/hr)", "Country", "Timezone", "Status", "Date Joined"];
+    const headers = ["Code", "First Name", "Last Name", "Email", "Specialisation", "Hourly Rate (USD/hr)", "Country", "Timezone", "Status", "Date Joined"];
     const rows = teachers.map(t => [
       t.teacherCode,
       t.user.firstName,
@@ -765,7 +765,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
       return;
     }
 
-    const headers = ["Employee Code", "First Name", "Last Name", "Email", "Role", "Salary ($)", "Phone", "Gender", "Country", "Timezone", "Status", "Date Joined"];
+    const headers = ["Employee Code", "First Name", "Last Name", "Email", "Role", "Salary (USD)", "Phone", "Gender", "Country", "Timezone", "Status", "Date Joined"];
     const rows = employees.map(e => [
       `EMP-${e.id.substring(0, 5).toUpperCase()}`,
       e.firstName,
@@ -3017,7 +3017,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
 
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Hourly Rate ($ / hr)</label>
+                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Hourly Rate (USD / hr)</label>
                   <div className="relative">
                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3" />
                     <input type="number" required value={hourlyRate} onChange={e => setHourlyRate(e.target.value ? Number(e.target.value) : "")} placeholder="e.g. 18" className="h-10 w-full pl-9 pr-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
@@ -3257,7 +3257,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Hourly Rate ($ / hr)</label>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Hourly Rate (USD / hr)</label>
                       <input type="number" required value={manageHourlyRate} onChange={e => setManageHourlyRate(e.target.value ? Number(e.target.value) : "")} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
                     </div>
                     <div>
@@ -3447,7 +3447,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Monthly Salary ($)</label>
+                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Monthly Salary (USD)</label>
                   <div className="relative">
                     <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-ink-3" />
                     <input type="number" required value={empSalary} onChange={e => setEmpSalary(e.target.value ? Number(e.target.value) : "")} placeholder="e.g. 3500" className="h-10 w-full pl-9 pr-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
@@ -3564,7 +3564,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                 {/* Visual stats cards row */}
                 <div className="grid grid-cols-3 gap-4">
                   <div className="p-3 border border-hairline/60 rounded-xl bg-surface-2/15 text-center">
-                    <span className="block text-[10px] text-ink-3 font-semibold">Monthly Salary</span>
+                    <span className="block text-[10px] text-ink-3 font-semibold">Monthly Salary (USD)</span>
                     <span className="text-sm font-black text-accent mt-0.5 block">${selectedEmployee.salary || 0}</span>
                   </div>
                   <div className="p-3 border border-hairline/60 rounded-xl bg-surface-2/15 text-center">
@@ -3692,7 +3692,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Monthly Salary ($)</label>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Monthly Salary (USD)</label>
                       <input type="number" required value={manageEmpSalary} onChange={e => setManageEmpSalary(e.target.value ? Number(e.target.value) : "")} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
                     </div>
                   </div>

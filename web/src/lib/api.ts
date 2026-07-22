@@ -1274,6 +1274,8 @@ export interface Payout {
   deductions: number;
   bonus: number;
   netAmount: number;
+  /** Always USD — see STAFF_PAY_CURRENCY. Carried so a screen never assumes. */
+  currency: string;
   paymentMethod: PayoutMethod;
   status: PayoutStatus;
   paymentDate: string | null;

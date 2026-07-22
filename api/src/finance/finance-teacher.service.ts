@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { DEFAULT_CURRENCY } from '../common/currency';
+import { STAFF_PAY_CURRENCY } from '../common/currency';
 import { round2 } from './finance.config';
 
 @Injectable()
@@ -40,7 +40,7 @@ export class FinanceTeacherService {
         bonus: latest ? Number(latest.bonus) : 0,
         deductions: latest ? Number(latest.deductions) : 0,
         netPay: latest ? Number(latest.netAmount) : 0,
-        currency: latest?.currency ?? DEFAULT_CURRENCY,
+        currency: latest?.currency ?? STAFF_PAY_CURRENCY,
         status: latest?.status ?? 'NONE',
         lifetimePaid: paidTotal,
       },
@@ -60,9 +60,9 @@ export class FinanceTeacherService {
         bonus: Number(p.bonus),
         deductions: Number(p.deductions),
         netAmount: Number(p.netAmount),
-        // Every other money row in the system names its currency; a payslip did
-        // not, so it was read as dollars whichever country the teacher is in.
-        currency: p.currency,
+        // Staff pay is USD everywhere, but the row still names it so the screen
+        // never has to assume — see STAFF_PAY_CURRENCY.
+        currency: p.currency ?? STAFF_PAY_CURRENCY,
         status: p.status,
         paymentDate: p.paymentDate,
         referenceNumber: p.referenceNumber,

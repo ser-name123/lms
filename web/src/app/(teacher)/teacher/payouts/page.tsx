@@ -65,7 +65,7 @@ export default function TeacherPayouts() {
 
   return (
     <>
-      <Topbar title="Payout History" subtitle="Track your wage and salary payments ledger history" />
+      <Topbar title="Payout History" subtitle="Track your wage and salary payments ledger history — all amounts in USD" />
 
       <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
         
@@ -76,7 +76,7 @@ export default function TeacherPayouts() {
               <DollarSign className="size-6" />
             </div>
             <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Cumulative Earnings</span>
+              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Cumulative Earnings (USD)</span>
               <h4 className="text-xl font-black text-ink leading-none mt-1">
                 ${cumulativeEarnings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </h4>
@@ -88,7 +88,7 @@ export default function TeacherPayouts() {
               <Wallet className="size-6" />
             </div>
             <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Last Paid Amount</span>
+              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Last Paid Amount (USD)</span>
               <h4 className="text-xl font-black text-ink leading-none mt-1">
                 ${lastPayout.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </h4>

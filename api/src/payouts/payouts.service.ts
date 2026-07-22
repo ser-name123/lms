@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { Role, PayoutStatus, PayoutMethod } from '../generated/prisma/enums';
 import { ListPayoutsDto, CreatePayoutDto, UpdatePayoutDto, BulkGeneratePayoutsDto } from './dto';
+import { STAFF_PAY_CURRENCY } from '../common/currency';
 import type { Prisma } from '../generated/prisma/client';
 
 /* The only User fields a payout response should ever carry. Prevents
@@ -141,6 +142,7 @@ export class PayoutsService {
         deductions,
         bonus,
         netAmount,
+        currency: STAFF_PAY_CURRENCY,
         paymentMethod: dto.paymentMethod,
         status: dto.status ?? PayoutStatus.PENDING,
         paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : null,
@@ -244,6 +246,7 @@ export class PayoutsService {
           deductions: 0,
           bonus: 0,
           netAmount: baseSalary,
+          currency: STAFF_PAY_CURRENCY,
           paymentMethod: PayoutMethod.BANK_TRANSFER,
           status: PayoutStatus.PENDING,
           billingPeriodStart: start,
@@ -401,6 +404,7 @@ export class PayoutsService {
             deductions: seededCount % 5 === 0 ? 50 : 0,
             bonus: seededCount % 4 === 0 ? 100 : 0,
             netAmount: base - (seededCount % 5 === 0 ? 50 : 0) + (seededCount % 4 === 0 ? 100 : 0),
+            currency: STAFF_PAY_CURRENCY,
             paymentMethod: PayoutMethod.BANK_TRANSFER,
             status,
             paymentDate,

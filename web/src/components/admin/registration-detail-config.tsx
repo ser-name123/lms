@@ -107,7 +107,7 @@ export const TEACHER_DETAIL_SECTIONS: SectionDef[] = [
       { key: "passingYear", label: "Passing Year" },
       { key: "experienceYears", label: "Experience (yr)" },
       { key: "currentEmployer", label: "Current Employer" },
-      { key: "expectedSalary", label: "Expected Salary" },
+      { key: "expectedSalary", label: "Expected Salary (USD)" },
       { key: "subjects", label: "Subjects" },
       { key: "languages", label: "Languages" },
       { key: "teachingMode", label: "Teaching Mode", type: "select", options: ["ONLINE", "OFFLINE", "HYBRID"] },

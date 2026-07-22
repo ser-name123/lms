@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { currencyForCountry } from '../common/currency';
+import { STAFF_PAY_CURRENCY } from '../common/currency';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -209,9 +209,6 @@ export class PayrollService {
           id: true,
           role: true,
           salary: true,
-          // Their country decides the currency on the payslip: every other money
-          // row names its currency, a payout named none and was read as dollars.
-          country: true,
           teacherProfile: { select: { id: true, hourlyRate: true } },
         },
       }),
@@ -242,7 +239,11 @@ export class PayrollService {
           deductions: 0,
           bonus,
           netAmount: round2(amount + bonus),
-          currency: currencyForCountry(emp.country),
+          // Staff are paid in USD wherever they live — the rates this amount was
+          // computed from (salary, hourlyRate, the payroll config) are all USD,
+          // so stamping the payout with the employee's country currency
+          // relabelled the figure without converting it.
+          currency: STAFF_PAY_CURRENCY,
           paymentMethod: PayoutMethod.BANK_TRANSFER,
           status: PayoutStatus.PENDING,
           billingPeriodStart: start,
@@ -293,18 +294,22 @@ export class PayrollService {
 
     const name = `${payout.user.firstName} ${payout.user.lastName}`;
     const period = `${payout.billingPeriodStart.toLocaleDateString('en-US')} – ${payout.billingPeriodEnd.toLocaleDateString('en-US')}`;
+    // Name the currency on every figure: an unlabelled "3500" in an email is
+    // read as whatever the reader is used to.
+    const cur = payout.currency ?? STAFF_PAY_CURRENCY;
+    const amt = (v: Prisma.Decimal | number) => `${cur} ${Number(v).toFixed(2)}`;
     const body =
       `Payslip ${payslipNo}\n\n` +
       `Employee: ${name}\nPeriod: ${period}\n` +
       `Model: ${payout.payrollModel ?? 'FIXED'}\n` +
       `Classes: ${payout.classesCount ?? 0} · Hours: ${payout.hoursCount ?? 0} · Students: ${payout.studentsCount ?? 0}\n` +
-      `Gross: ${Number(payout.amount)}\nBonus: ${Number(payout.bonus)}\nDeductions: ${Number(payout.deductions)}\n` +
-      `Net Pay: ${Number(payout.netAmount)}\nStatus: ${payout.status}`;
+      `Gross: ${amt(payout.amount)}\nBonus: ${amt(payout.bonus)}\nDeductions: ${amt(payout.deductions)}\n` +
+      `Net Pay: ${amt(payout.netAmount)}\nStatus: ${payout.status}`;
 
     await this.notifications.createFor(payout.userId, {
       type: 'PAYSLIP_ISSUED',
       title: `Payslip ${payslipNo}`,
-      body: `Your payslip for ${period} is ready. Net pay: ${Number(payout.netAmount)}.`,
+      body: `Your payslip for ${period} is ready. Net pay: ${amt(payout.netAmount)}.`,
       link: '/teacher/payouts',
     });
     await this.emails

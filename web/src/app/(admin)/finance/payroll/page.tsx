@@ -395,7 +395,7 @@ export default function PayrollConfigPage() {
               {/* Rate fields — shown only for the relevant model */}
               {(formModel === "FIXED" || formModel === "HYBRID") && (
                 <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Base Salary ($)</label>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Base Salary (USD)</label>
                   <input
                     type="number"
                     min="0"
@@ -409,7 +409,7 @@ export default function PayrollConfigPage() {
 
               {(formModel === "PER_CLASS" || formModel === "HYBRID") && (
                 <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Class Rate ($)</label>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Class Rate (USD)</label>
                   <input
                     type="number"
                     min="0"
@@ -423,7 +423,7 @@ export default function PayrollConfigPage() {
 
               {(formModel === "PER_HOUR" || formModel === "HYBRID") && (
                 <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Hour Rate ($)</label>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Hour Rate (USD)</label>
                   <input
                     type="number"
                     min="0"
@@ -437,7 +437,7 @@ export default function PayrollConfigPage() {
 
               {(formModel === "PER_STUDENT" || formModel === "HYBRID") && (
                 <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Student Rate ($)</label>
+                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Per Student Rate (USD)</label>
                   <input
                     type="number"
                     min="0"
@@ -450,7 +450,7 @@ export default function PayrollConfigPage() {
               )}
 
               <div>
-                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Standard Bonus ($)</label>
+                <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Standard Bonus (USD)</label>
                 <input
                   type="number"
                   min="0"

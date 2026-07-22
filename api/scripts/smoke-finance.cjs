@@ -111,6 +111,52 @@ async function main() {
       console.log('TEACHER:');
       const td = await get(users.TEACHER, '/finance/teacher/dashboard');
       ok(td.cards && Array.isArray(td.payslips), 'teacher payroll dashboard');
+
+      /*
+       * Staff are paid in USD wherever they live. Payroll used to stamp the
+       * payout with the employee's country currency, so a teacher in the UAE
+       * got a row saying AED while every screen printed a dollar sign — the
+       * same figure read two ways, with nothing converted.
+       *
+       * Park the teacher in the UAE (the exact input that produced AED) and
+       * assert the generated payout still says USD.
+       */
+      const prevCountry = (
+        await db.query(`SELECT country FROM "User" WHERE id=$1`, [users.TEACHER])
+      ).rows[0]?.country ?? null;
+      try {
+        await db.query(`UPDATE "User" SET country='United Arab Emirates' WHERE id=$1`, [
+          users.TEACHER,
+        ]);
+        // A period far enough back that a real payroll run cannot collide.
+        // Matched as a range, not an equality: the API stores the period start
+        // in server-local time, so '2019-01-01' lands before UTC midnight
+        // anywhere east of Greenwich and an `= $1::date` never matches.
+        const start = '2019-01-01', end = '2019-01-31';
+        const within = [users.TEACHER, '2018-12-30', '2019-01-02'];
+        await req(users.ADMIN, 'POST', '/finance/payroll/generate', {
+          billingPeriodStart: start, billingPeriodEnd: end,
+        });
+        const row = (
+          await db.query(
+            `SELECT currency FROM "Payout"
+              WHERE "userId"=$1 AND "billingPeriodStart" BETWEEN $2::date AND $3::date`,
+            within,
+          )
+        ).rows[0];
+        ok(row, 'payroll run generated a payout for the UAE teacher');
+        ok(row && row.currency === 'USD',
+          `UAE teacher is paid in USD (got ${row ? row.currency : 'no row'})`);
+        // Every staff member gets a row from a run, not just this teacher.
+        await db.query(
+          `DELETE FROM "Payout" WHERE "billingPeriodStart" BETWEEN $1::date AND $2::date`,
+          [within[1], within[2]],
+        );
+      } finally {
+        await db.query(`UPDATE "User" SET country=$2 WHERE id=$1`, [
+          users.TEACHER, prevCountry,
+        ]);
+      }
     }
 
     console.log('RBAC:');

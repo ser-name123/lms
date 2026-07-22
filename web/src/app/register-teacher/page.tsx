@@ -497,7 +497,10 @@ export default function TeacherRegisterPage() {
               <Field label="Passing Year" value={form.passingYear} onChange={(v) => set("passingYear", v)} placeholder="e.g. 2019" />
               <Field label="Experience (years)" value={form.experienceYears} onChange={(v) => set("experienceYears", v)} placeholder="e.g. 5" />
               <Field label="Current Employer" value={form.currentEmployer} onChange={(v) => set("currentEmployer", v)} placeholder="(optional)" />
-              <Field label="Expected Salary" value={form.expectedSalary} onChange={(v) => set("expectedSalary", v)} placeholder="e.g. 40000 / month" />
+              {/* The academy pays staff in USD wherever they live. Unlabelled,
+                  applicants answered in their own currency and "40000" was read
+                  as dollars on the admin screen. */}
+              <Field label="Expected Salary (USD)" value={form.expectedSalary} onChange={(v) => set("expectedSalary", v)} placeholder="e.g. 800 / month (USD)" />
               <Field label="Subjects" value={form.subjects} onChange={(v) => set("subjects", v)} placeholder="e.g. Quran, Tajweed, Arabic" className="sm:col-span-2" />
               <Field label="Languages" value={form.languages} onChange={(v) => set("languages", v)} placeholder="e.g. English, Urdu, Arabic" className="sm:col-span-2" />
               <div className="sm:col-span-2">

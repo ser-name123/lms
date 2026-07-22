@@ -17,6 +17,14 @@ export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
 
 export const DEFAULT_CURRENCY: Currency = "USD";
 
+/**
+ * What staff are paid in — always USD, wherever they live. Mirrors the server's
+ * STAFF_PAY_CURRENCY. Families are billed in their own currency; the people the
+ * academy pays are not, so salary, rates and payslips are one currency and
+ * payroll totals add up without a conversion nobody stored.
+ */
+export const STAFF_PAY_CURRENCY: Currency = "USD";
+
 export function isCurrency(value: unknown): value is Currency {
   return SUPPORTED_CURRENCIES.includes(value as Currency);
 }

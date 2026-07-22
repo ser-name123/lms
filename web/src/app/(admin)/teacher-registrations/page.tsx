@@ -536,7 +536,7 @@ export default function TeacherRegistrationsPage() {
                 <Row label="Passing Year" value={selected.passingYear} />
                 <Row label="Experience" value={selected.experienceYears ? `${selected.experienceYears} yr` : null} />
                 <Row label="Current Employer" value={selected.currentEmployer} />
-                <Row label="Expected Salary" value={selected.expectedSalary} />
+                <Row label="Expected Salary (USD)" value={selected.expectedSalary} />
                 <Row label="Subjects" value={selected.subjects} />
                 <Row label="Languages" value={selected.languages} />
                 <Row label="Teaching Mode" value={selected.teachingMode} />
