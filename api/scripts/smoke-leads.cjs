@@ -574,9 +574,16 @@ const isoDay = (offsetDays) =>
      * one. Asserted before the happy path: if this ever stops refusing, the
      * booking below would pass either way and prove nothing.
      */
-    // The guard falls back to the lead's assigned teacher, so the refusal only
-    // means anything while the lead has none. Assert that first, or this check
-    // could pass for the wrong reason.
+    /*
+     * The guard falls back to the lead's assigned teacher, so the refusal only
+     * means anything while the lead has none. Website bookings now pick a
+     * teacher up front, so the lead arrives here with one — clear it, then
+     * assert it is really gone. Without both steps this check quietly stops
+     * exercising the guard the moment auto-assign finds somebody.
+     */
+    await db.query(`UPDATE "Lead" SET "assignedTeacherId" = NULL WHERE id = $1`, [
+      first.body.id,
+    ]);
     const { rows: leadTeacher } = await db.query(
       `SELECT "assignedTeacherId" FROM "Lead" WHERE id = $1`,
       [first.body.id],

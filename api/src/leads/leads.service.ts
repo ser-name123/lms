@@ -2333,7 +2333,10 @@ export class LeadsService implements OnModuleInit {
             type: 'TRIAL_SCHEDULED',
             title: 'New Trial Class',
             body: `Trial with ${lead.studentFirstName} ${lead.studentLastName} on ${new Date(trial.scheduledAt).toLocaleString()}.`,
-            link: `/teacher/trials`,
+            // Trials were merged into Live Classes and the standalone item left
+            // the teacher's nav, so this used to land them somewhere they can
+            // no longer navigate back to.
+            link: `/teacher/live-class`,
           })
           .catch(() => undefined);
       }

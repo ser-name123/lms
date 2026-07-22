@@ -190,17 +190,39 @@ function isoDay(offset) {
     // ── Nobody free: unassigned, but flagged ─────────────────────────────────
     console.log('\nWhen nobody is free');
 
-    // Withdraw both teachers' approval; the day now has no published
-    // availability at all, so the public form falls back to default hours and
-    // there is genuinely nobody to pick.
+    // Withdraw this run's own teachers so they cannot be picked.
     await db.query(
       `UPDATE "TeacherProfile" SET "availabilityApproved" = false WHERE id = ANY($1)`,
       [[teacherIds.male, teacherIds.female]],
     );
 
-    const fbDate = isoDay(4);
-    const fbSlots = await req('GET', `/leads/availability?date=${fbDate}`, null);
-    check('the day falls back to default hours', fbSlots.body?.fallback === true);
+    /*
+     * Find a day nobody has published for, rather than assuming one. This check
+     * originally hard-coded a date and passed only because the database
+     * happened to have no other approved teacher; the moment a real one
+     * published their week, the "nobody is free" scenario silently became
+     * "somebody is free" and three assertions failed for the wrong reason.
+     *
+     * `fallback: true` is exactly the condition — the API reports it when no
+     * approved teacher has published anything for that weekday.
+     */
+    let fbDate = null;
+    let fbSlots = null;
+    for (let d = 2; d <= 30; d++) {
+      const probe = await req('GET', `/leads/availability?date=${isoDay(d)}`, null);
+      if (probe.body?.fallback === true && (probe.body.slots || []).length) {
+        fbDate = isoDay(d);
+        fbSlots = probe;
+        break;
+      }
+    }
+    check(
+      'a day exists that nobody has published for',
+      !!fbDate,
+      'every bookable day is covered by some approved teacher, so this scenario cannot be exercised here',
+    );
+    if (!fbDate) throw new Error('cannot exercise the nobody-free path on this database');
+    console.log(`  (using ${fbDate}, which nobody has published for)`);
 
     // book() hard-codes the first date, so this one is posted directly.
     const b3b = await req('POST', '/leads', null, {
