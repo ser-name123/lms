@@ -37,6 +37,7 @@ export class EmailsService {
           return {
             transporter: nodemailer.createTransport(transportOptions),
             from: custom.from || custom.user,
+            host: transportOptions.host,
           };
         }
       }
@@ -66,6 +67,7 @@ export class EmailsService {
           auth: { user, pass },
         }),
         from,
+        host,
       };
     }
 
@@ -75,6 +77,7 @@ export class EmailsService {
         auth: { user, pass },
       }),
       from,
+      host: 'smtp.gmail.com',
     };
   }
 
@@ -197,8 +200,42 @@ export class EmailsService {
    * From domain has not authorised this relay to send for it. The result says
    * so rather than reporting a clean success nobody can act on.
    */
+  /*
+   * Whether the From domain has authorised the relay we are sending through.
+   *
+   * Consumer domains publish an SPF record naming only their own servers, so
+   * relaying @gmail.com through, say, Brevo fails SPF and DKIM alignment and
+   * the receiver files it as spam — mail leaves, is accepted, and never
+   * arrives. Sending @gmail.com through Gmail's OWN SMTP is the opposite: it
+   * aligns and is exactly right.
+   *
+   * So the check is not "is the sender a consumer domain" but "is it a consumer
+   * domain being sent through somebody else's relay". The first version of this
+   * warned on the domain alone, which would have fired on a perfectly aligned
+   * Gmail setup and sent someone chasing DNS records they did not need.
+   */
+  private static readonly PROVIDER_HOSTS: Record<string, string[]> = {
+    'gmail.com': ['smtp.gmail.com'],
+    'googlemail.com': ['smtp.gmail.com'],
+    'yahoo.com': ['smtp.mail.yahoo.com'],
+    'outlook.com': ['smtp-mail.outlook.com', 'smtp.office365.com'],
+    'hotmail.com': ['smtp-mail.outlook.com', 'smtp.office365.com'],
+  };
+
+  private static alignmentWarning(domain: string, host?: string): string | null {
+    const own = EmailsService.PROVIDER_HOSTS[domain.toLowerCase()];
+    if (!own) return null; // A domain the academy controls — its own DNS decides.
+    if (host && own.includes(host.toLowerCase())) return null; // Aligned.
+    return (
+      `The sender address is at ${domain}, but this is being relayed through ` +
+      `${host ?? 'another server'}, which ${domain} does not authorise. Messages can be ` +
+      `accepted here and still land in spam. Either send through ${own[0]}, or use an ` +
+      `address at a domain you control and verify it with your mail provider.`
+    );
+  }
+
   async sendTestEmail(to?: string) {
-    const { from } = await this.getTransporter();
+    const { from, host } = await this.getTransporter();
     const target = to?.trim() || from;
     try {
       const info = await this.sendMail(
@@ -212,17 +249,7 @@ export class EmailsService {
         to: target,
         from,
         response: info.response ?? null,
-        /*
-         * The common cause of "accepted but never arrives": sending as an
-         * address at a domain the academy does not control, through a relay
-         * that domain has not authorised. The receiver fails SPF/DKIM
-         * alignment and files it as spam.
-         */
-        warning: ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(
-          domain.toLowerCase(),
-        )
-          ? `The sender address is at ${domain}, which does not authorise this relay to send on its behalf. Messages may be accepted here and still land in spam. Use an address at a domain you control and verify it with your mail provider.`
-          : null,
+        warning: EmailsService.alignmentWarning(domain, host),
       };
     } catch (e) {
       const err = e as { code?: string; responseCode?: number; message?: string };
