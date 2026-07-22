@@ -59,6 +59,10 @@ async function req(method, path, auth, payload, expect = 200) {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+// Teachers whose approval this run switched off, so the finally block can put
+// it back exactly as it was even if an assertion throws.
+let restoreApproved = [];
+
 // A date a few days out, as YYYY-MM-DD in UTC. Same bookable window the
 // public form uses (not today, not beyond a month).
 function isoDay(offset) {
@@ -190,39 +194,37 @@ function isoDay(offset) {
     // ── Nobody free: unassigned, but flagged ─────────────────────────────────
     console.log('\nWhen nobody is free');
 
-    // Withdraw this run's own teachers so they cannot be picked.
+    /*
+     * "Nobody is free" has to be made, not found.
+     *
+     * This first hard-coded a date and withdrew only this run's own teachers,
+     * which proved something only while no *other* teacher had published
+     * availability. A real teacher published their week and three assertions
+     * failed for the wrong reason. Searching for an unpublished day instead
+     * just moved the problem: once every weekday is covered the scenario
+     * becomes untestable and the suite goes permanently red, which is its own
+     * kind of useless.
+     *
+     * So the run withdraws approval from every teacher for the length of this
+     * one section and puts it back in the finally block — the state is
+     * captured first so restoring is exact, not a guess.
+     */
+    const { rows: wereApproved } = await db.query(
+      `SELECT id FROM "TeacherProfile" WHERE "availabilityApproved" = true`,
+    );
+    restoreApproved = wereApproved.map((r) => r.id);
     await db.query(
       `UPDATE "TeacherProfile" SET "availabilityApproved" = false WHERE id = ANY($1)`,
-      [[teacherIds.male, teacherIds.female]],
+      [restoreApproved],
     );
 
-    /*
-     * Find a day nobody has published for, rather than assuming one. This check
-     * originally hard-coded a date and passed only because the database
-     * happened to have no other approved teacher; the moment a real one
-     * published their week, the "nobody is free" scenario silently became
-     * "somebody is free" and three assertions failed for the wrong reason.
-     *
-     * `fallback: true` is exactly the condition — the API reports it when no
-     * approved teacher has published anything for that weekday.
-     */
-    let fbDate = null;
-    let fbSlots = null;
-    for (let d = 2; d <= 30; d++) {
-      const probe = await req('GET', `/leads/availability?date=${isoDay(d)}`, null);
-      if (probe.body?.fallback === true && (probe.body.slots || []).length) {
-        fbDate = isoDay(d);
-        fbSlots = probe;
-        break;
-      }
-    }
+    const fbDate = isoDay(4);
+    const fbSlots = await req('GET', `/leads/availability?date=${fbDate}`, null);
     check(
-      'a day exists that nobody has published for',
-      !!fbDate,
-      'every bookable day is covered by some approved teacher, so this scenario cannot be exercised here',
+      'with nobody approved, the day falls back to default hours',
+      fbSlots.body?.fallback === true,
+      JSON.stringify(fbSlots.body).slice(0, 140),
     );
-    if (!fbDate) throw new Error('cannot exercise the nobody-free path on this database');
-    console.log(`  (using ${fbDate}, which nobody has published for)`);
 
     // book() hard-codes the first date, so this one is posted directly.
     const b3b = await req('POST', '/leads', null, {
@@ -308,6 +310,14 @@ function isoDay(offset) {
       !(dash2.body?.upcomingTasks || []).some((t) => t.kind === 'TRIAL_NEEDS_TEACHER' && t.id === t3[0].id),
     );
   } finally {
+    // Restore first: leaving a real teacher unapproved would take them out of
+    // every booking screen, and that must not depend on the run succeeding.
+    if (restoreApproved.length) {
+      await db.query(
+        `UPDATE "TeacherProfile" SET "availabilityApproved" = true WHERE id = ANY($1)`,
+        [restoreApproved],
+      );
+    }
     await cleanup();
     await db.end();
   }

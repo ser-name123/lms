@@ -9,9 +9,5 @@ import { AttendanceService } from './attendance.service';
   imports: [PrismaModule, EmailsModule, NotificationsModule],
   controllers: [AttendanceController],
   providers: [AttendanceService],
-  // Exported so the subscription rollover can regenerate a batch's classes
-  // through the same generator the attendance screens use, rather than growing
-  // a second copy of the weekly-schedule logic that could drift from it.
-  exports: [AttendanceService],
 })
 export class AttendanceModule {}

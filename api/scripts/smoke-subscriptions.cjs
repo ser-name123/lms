@@ -417,6 +417,50 @@ const ids = {};
       'the owning coach sees them',
       ownerList.ok && (ownerList.body.items || []).some((r) => r.student?.id === ids.student),
     );
+
+    /*
+     * ── A package somebody is waiting on cannot be deleted ─────────────────
+     *
+     * The subscription references are ON DELETE SET NULL, so without a guard
+     * the delete succeeds and the damage is invisible: a student told their
+     * change was approved simply never gets it. Both delete paths are checked
+     * — the single one had no guard at all before.
+     */
+    console.log('\nDeleting a package somebody is waiting on');
+
+    // The catalogue page deletes LmsPackage rows, so the guard needs one to
+    // aim at; it is matched to the relational Package by id.
+    const { rows: lms } = await db.query(
+      `INSERT INTO "LmsPackage" (id,title,price,billing,level,courses,features,status,description)
+       VALUES ($1,$2,75,'Monthly','All',ARRAY[]::text[],ARRAY[]::text[],'Active','smoke') RETURNING id`,
+      [packages.big, `${MARKER}-8 Hours`],
+    );
+    check('a catalogue row exists for it', !!lms[0]?.id);
+
+    // Queue it for next cycle again, then try to delete it.
+    await db.query(
+      `INSERT INTO "SubscriptionNextCycle" (id,"studentId","nextPackageId","updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,now())
+       ON CONFLICT ("studentId") DO UPDATE SET "nextPackageId" = EXCLUDED."nextPackageId"`,
+      [ids.student, packages.big],
+    );
+
+    const delOne = await req('DELETE', `/lms-data/packages/${packages.big}`, adminToken, undefined, 400);
+    check('a single delete is refused', delOne.ok, `status ${delOne.status}`);
+    // POST is 201 in Nest, not 200.
+    const delMany = await req('POST', '/lms-data/packages/bulk-delete', adminToken, { ids: [packages.big] }, 201);
+    check(
+      'and a bulk delete refuses it too, with a reason',
+      delMany.ok && delMany.body?.failed === 1 && /next cycle/i.test(JSON.stringify(delMany.body?.failures ?? '')),
+      JSON.stringify(delMany.body).slice(0, 160),
+    );
+    const { rows: stillThere } = await db.query(
+      `SELECT id FROM "Package" WHERE id = $1`, [packages.big],
+    );
+    check('the package is still there', stillThere.length === 1);
+
+    await db.query(`DELETE FROM "SubscriptionNextCycle" WHERE "studentId" = $1`, [ids.student]);
+    await db.query(`DELETE FROM "LmsPackage" WHERE id = $1`, [packages.big]);
   } finally {
     await cleanup();
     await db.end();

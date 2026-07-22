@@ -285,7 +285,59 @@ export class LmsDataService implements OnModuleInit {
     }
     return lmsPkg;
   }
+  /*
+   * Everything that would be quietly broken by deleting this package.
+   *
+   * The subscription references are foreign keys with ON DELETE SET NULL, so
+   * without this the delete succeeds and the damage is invisible: a queued
+   * change loses its package and the student, who was told their request was
+   * approved, simply never gets it.
+   *
+   * Shared by both delete paths. A rule that holds for a bulk selection and
+   * not for a single click is not a rule.
+   */
+  private async assertPackageDeletable(id: string, title: string) {
+    const [onTrials, pendingRequests, queued] = await Promise.all([
+      /*
+       * Named rather than joined: LmsPackage is the flat catalogue and the
+       * relational Package that enrolments point at is a separate table, so
+       * the only link is the name a coach chose from a list.
+       */
+      this.prisma.leadTrial.count({ where: { preferredPackage: title } }),
+      this.prisma.subscriptionRequest.count({
+        where: { requestedPackageId: id, status: 'PENDING' },
+      }),
+      this.prisma.subscriptionNextCycle.count({ where: { nextPackageId: id } }),
+    ]);
+
+    if (onTrials > 0) {
+      throw new BadRequestException(
+        `"${title}" is the package chosen on ${onTrials} trial${onTrials > 1 ? 's' : ''}. ` +
+          'Deleting it would leave those families billed for something that no longer exists.',
+      );
+    }
+    if (pendingRequests > 0) {
+      throw new BadRequestException(
+        `${pendingRequests} student${pendingRequests > 1 ? 's have' : ' has'} asked to move to "${title}" and ${pendingRequests > 1 ? 'are' : 'is'} waiting for a decision. ` +
+          'Decide those requests before deleting it.',
+      );
+    }
+    if (queued > 0) {
+      throw new BadRequestException(
+        `"${title}" is already approved to start next cycle for ${queued} student${queued > 1 ? 's' : ''}. ` +
+          'Deleting it would cancel that change without telling them.',
+      );
+    }
+  }
+
   async deletePackage(id: string) {
+    const pkg = await this.prisma.lmsPackage.findUnique({
+      where: { id },
+      select: { title: true },
+    });
+    if (!pkg) throw new NotFoundException('Package not found.');
+    await this.assertPackageDeletable(id, pkg.title);
+
     await this.prisma.package.delete({ where: { id } }).catch(() => null);
     return this.prisma.lmsPackage.delete({ where: { id } });
   }
@@ -395,20 +447,7 @@ export class LmsDataService implements OnModuleInit {
         select: { title: true },
       });
       if (!pkg) throw new NotFoundException('Package not found.');
-      /*
-       * Named rather than joined: LmsPackage is the flat catalogue and the
-       * relational Package that enrolments point at is a separate table, so
-       * the only link is the name a coach chose from a list.
-       */
-      const inUse = await this.prisma.leadTrial.count({
-        where: { preferredPackage: pkg.title },
-      });
-      if (inUse > 0) {
-        throw new BadRequestException(
-          `"${pkg.title}" is the package chosen on ${inUse} trial${inUse > 1 ? 's' : ''}. ` +
-            'Deleting it would leave those families billed for something that no longer exists.',
-        );
-      }
+      await this.assertPackageDeletable(id, pkg.title);
       await this.prisma.package.delete({ where: { id } }).catch(() => null);
       await this.prisma.lmsPackage.delete({ where: { id } });
       return pkg.title;
