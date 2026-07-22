@@ -119,8 +119,10 @@ const isoDay = (offsetDays) =>
     const smokePkg = (
       await db.query(
         // Package has no updatedAt column — only createdAt.
-        `INSERT INTO "Package" (id,name,description,price,"classesPerMonth",active)
-         VALUES (gen_random_uuid(),$1,'smoke',40.00,8,true) RETURNING id, name, price`,
+        // Priced in all three, so a conversion can be checked to bill in the
+        // family's own currency rather than always in dollars.
+        `INSERT INTO "Package" (id,name,description,"priceUSD","priceAED","priceGBP","classesPerMonth",active)
+         VALUES (gen_random_uuid(),$1,'smoke',40.00,160.00,32.00,8,true) RETURNING id, name, "priceUSD"`,
         [`${MARKER}-package`],
       )
     ).rows[0];
@@ -1287,6 +1289,9 @@ const isoDay = (offsetDays) =>
       bookingFor(`${MARKER}-family@example.test`, familySlot, {
         sessionFor: 'FAMILY_MEMBER',
         siblings: [{ firstName: 'Yusuf', lastName: 'Lead' }, { firstName: 'Maryam' }],
+        // A UAE family, so the conversion below can be checked to bill in
+        // dirhams rather than always in dollars.
+        country: 'United Arab Emirates',
       }),
       201,
     );
@@ -1376,7 +1381,7 @@ const isoDay = (offsetDays) =>
     const studentIds = (converted.convertedStudents ?? []).map((s) => s.id);
     const raised = (
       await db.query(
-        `SELECT i.id, i.number, i.amount, i.status, i."studentId", i."dueAt",
+        `SELECT i.id, i.number, i.amount, i.currency, i.status, i."studentId", i."dueAt",
                 (SELECT count(*) FROM "InvoiceItem" it WHERE it."invoiceId" = i.id) AS items
            FROM "Invoice" i WHERE i."studentId" = ANY($1::text[]) ORDER BY i.number`,
         [studentIds],
@@ -1412,10 +1417,31 @@ const isoDay = (offsetDays) =>
       enrolled.length > 0 && enrolled.every((e) => e.packageId === smokePkg.id),
       enrolled.map((e) => e.packageId).join(', '),
     );
+    /*
+     * A UAE family is billed the dirham amount the academy typed in — not the
+     * dollar figure, and not a converted one. The three prices exist precisely
+     * so nothing here moves with an exchange rate.
+     */
     check(
       'it bills the package the family chose, without the coach re-entering it',
-      raised.length > 0 && raised.every((r) => Number(r.amount) === 40),
+      raised.length > 0 && raised.every((r) => Number(r.amount) === 160),
       raised.map((r) => r.amount).join(', '),
+    );
+    check(
+      'and in the currency of the country they booked from',
+      raised.length > 0 && raised.every((r) => r.currency === 'AED'),
+      raised.map((r) => r.currency).join(', '),
+    );
+    const currencies = (
+      await db.query(
+        `SELECT DISTINCT "billingCurrency" c FROM "StudentProfile" WHERE id = ANY($1::text[])`,
+        [studentIds],
+      )
+    ).rows;
+    check(
+      'each converted student is stamped with that currency for good',
+      currencies.length === 1 && currencies[0].c === 'AED',
+      currencies.map((r) => r.c).join(', '),
     );
     check(
       'it is SENT, not a draft — the welcome email tells the family it exists',
@@ -1466,8 +1492,10 @@ const isoDay = (offsetDays) =>
       'coachId missing on a converted student',
     );
     check(
-      'the package price lands on the student record too',
-      profiles.length > 0 && profiles.every((p) => Number(p.fees) === 40),
+      // The dirham amount, matching the invoice — not the dollar one. These
+      // two disagreeing is what "fees" quietly meaning USD would look like.
+      'the package price lands on the student record too, in their currency',
+      profiles.length > 0 && profiles.every((p) => Number(p.fees) === 160),
       profiles.map((p) => p.fees).join(', '),
     );
 

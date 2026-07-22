@@ -1,6 +1,7 @@
 "use client";
 
 import { authHeader, bulkDeletePackages, fetchFeePlans, type FeePlan } from "@/lib/api";
+import { money } from "@/lib/currency";
 
 import { useState, useEffect, useCallback } from "react";
 import { 
@@ -122,7 +123,11 @@ export default function PackagesPage() {
 
   // Add/Edit form fields
   const [formTitle, setFormTitle] = useState("");
-  const [formPrice, setFormPrice] = useState<number>(29);
+  // One amount per currency, typed in rather than converted: a rate that moved
+  // overnight would bill a family a different figure each cycle.
+  const [formPriceUSD, setFormPriceUSD] = useState<number>(29);
+  const [formPriceAED, setFormPriceAED] = useState<string>("");
+  const [formPriceGBP, setFormPriceGBP] = useState<string>("");
   const [formBilling, setFormBilling] = useState("Monthly");
   // How many classes the package actually buys. Typed in, not guessed from the
   // feature list — this number is billed on and shown to students.
@@ -144,7 +149,7 @@ export default function PackagesPage() {
   const totalPackagesCount = packages.length;
   const activePackagesCount = packages.filter(p => p.status === "Active").length;
   const avgPackagePrice = totalPackagesCount > 0 
-    ? Math.round(packages.reduce((sum, p) => sum + p.price, 0) / totalPackagesCount) 
+    ? Math.round(packages.reduce((sum, p) => sum + p.priceUSD, 0) / totalPackagesCount) 
     : 0;
   const kidsAudienceCount = packages.filter(p => p.level === "Kids").length;
 
@@ -172,9 +177,9 @@ export default function PackagesPage() {
     .sort((a, b) => {
       switch (sortBy) {
         case "price-desc":
-          return b.price - a.price;
+          return b.priceUSD - a.priceUSD;
         case "price-asc":
-          return a.price - b.price;
+          return a.priceUSD - b.priceUSD;
         case "title-asc":
           return a.title.localeCompare(b.title);
         case "title-desc":
@@ -231,7 +236,9 @@ export default function PackagesPage() {
 
   const handleOpenAddModal = () => {
     setFormTitle("");
-    setFormPrice(29);
+    setFormPriceUSD(29);
+    setFormPriceAED("");
+    setFormPriceGBP("");
     setFormBilling("Monthly");
     // Reset these too. Without it, opening Edit on a package and then Create
     // carried that package's classes/month and fee plan into the new one —
@@ -249,14 +256,16 @@ export default function PackagesPage() {
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle || formPrice < 0) {
+    if (!formTitle || formPriceUSD < 0) {
       Swal.fire({ title: "Fields Required", text: "Please enter a package title and valid price.", icon: "error" });
       return;
     }
 
     const newPkg = {
       title: formTitle,
-      price: Number(formPrice) || 0,
+      priceUSD: Number(formPriceUSD) || 0,
+      priceAED: formPriceAED === "" ? null : Number(formPriceAED),
+      priceGBP: formPriceGBP === "" ? null : Number(formPriceGBP),
       billing: formBilling,
       classesPerMonth: Number(formClasses) || null,
       feePlanId: formFeePlan || null,
@@ -292,7 +301,9 @@ export default function PackagesPage() {
   const handleOpenEditModal = (pkg: typeof INITIAL_PACKAGES[0]) => {
     setSelectedPackage(pkg);
     setFormTitle(pkg.title);
-    setFormPrice(pkg.price);
+    setFormPriceUSD(pkg.priceUSD);
+    setFormPriceAED(pkg.priceAED == null ? "" : String(pkg.priceAED));
+    setFormPriceGBP(pkg.priceGBP == null ? "" : String(pkg.priceGBP));
     setFormBilling(pkg.billing);
     setFormClasses(pkg.classesPerMonth ?? 8);
     setFormFeePlan(pkg.feePlanId ?? "");
@@ -308,14 +319,16 @@ export default function PackagesPage() {
   const handleEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPackage) return;
-    if (!formTitle || formPrice < 0) {
+    if (!formTitle || formPriceUSD < 0) {
       Swal.fire({ title: "Fields Required", text: "Please enter a package title and valid price.", icon: "error" });
       return;
     }
 
     const updatedPayload = {
       title: formTitle,
-      price: Number(formPrice) || 0,
+      priceUSD: Number(formPriceUSD) || 0,
+      priceAED: formPriceAED === "" ? null : Number(formPriceAED),
+      priceGBP: formPriceGBP === "" ? null : Number(formPriceGBP),
       billing: formBilling,
       classesPerMonth: Number(formClasses) || null,
       feePlanId: formFeePlan || null,
@@ -383,7 +396,8 @@ export default function PackagesPage() {
         <div class="text-left mt-3 text-sm space-y-3.5">
           <div class="flex items-center justify-between border-b pb-2">
             <strong>Pricing Tier:</strong> 
-            <span class="text-emerald-500 font-bold text-base">$${pkg.price} / ${pkg.billing}</span>
+            <span class="text-emerald-500 font-bold text-base">${money(pkg.priceUSD, "USD")} / ${pkg.billing}</span>
+            <div class="text-xs mt-1">${pkg.priceAED == null ? "No AED price" : money(pkg.priceAED, "AED")} · ${pkg.priceGBP == null ? "No GBP price" : money(pkg.priceGBP, "GBP")}</div>
           </div>
           <p><strong>Audience Level:</strong> ${pkg.level === "All" ? "All Levels" : pkg.level}</p>
           <p><strong>Status:</strong> ${pkg.status}</p>
@@ -610,8 +624,24 @@ export default function PackagesPage() {
                             <div className="text-xs text-ink-3 italic mt-1.5 truncate max-w-xs">{pkg.description}</div>
                           </td>
                           <td className="px-6 py-4">
+                            {/*
+                              All three, not just the dollar figure. A package
+                              priced in one currency is invisible to families in
+                              the other two, and this row is the only place that
+                              shows up before somebody reports it missing.
+                            */}
                             <div className="text-sm font-bold text-emerald-500">
-                              ${pkg.price}
+                              {money(pkg.priceUSD, "USD")}
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] font-semibold">
+                              {(["AED", "GBP"] as const).map((c) => {
+                                const amount = c === "AED" ? pkg.priceAED : pkg.priceGBP;
+                                return (
+                                  <span key={c} className={amount == null ? "text-critical" : "text-ink-2"}>
+                                    {amount == null ? `No ${c} price` : money(amount, c)}
+                                  </span>
+                                );
+                              })}
                             </div>
                             <div className="text-xs text-ink-3 flex items-center gap-1 mt-1 font-semibold">
                               <CalendarDays className="size-3 text-accent" /> {pkg.billing} billing
@@ -796,16 +826,51 @@ export default function PackagesPage() {
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price ($ USD)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={formPrice}
-                    onChange={(e) => setFormPrice(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+                <div className="col-span-3">
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price per currency</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        required
+                        placeholder="USD"
+                        value={formPriceUSD}
+                        onChange={(e) => setFormPriceUSD(Number(e.target.value))}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">$ USD</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="AED"
+                        value={formPriceAED}
+                        onChange={(e) => setFormPriceAED(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">AED · UAE</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="GBP"
+                        value={formPriceGBP}
+                        onChange={(e) => setFormPriceGBP(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">£ GBP · UK</p>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-ink-3">
+                    Each amount is charged as typed — nothing is converted, so a moving exchange rate can never change what a family is billed.
+                    Leave one blank and this package is simply not offered in that currency.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Classes / month</label>
@@ -1000,16 +1065,51 @@ export default function PackagesPage() {
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price ($ USD)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    required
-                    value={formPrice}
-                    onChange={(e) => setFormPrice(Number(e.target.value))}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
+                <div className="col-span-3">
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price per currency</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        required
+                        placeholder="USD"
+                        value={formPriceUSD}
+                        onChange={(e) => setFormPriceUSD(Number(e.target.value))}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">$ USD</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="AED"
+                        value={formPriceAED}
+                        onChange={(e) => setFormPriceAED(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">AED · UAE</p>
+                    </div>
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="GBP"
+                        value={formPriceGBP}
+                        onChange={(e) => setFormPriceGBP(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      <p className="mt-1 text-[10px] font-bold text-ink-3">£ GBP · UK</p>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-ink-3">
+                    Each amount is charged as typed — nothing is converted, so a moving exchange rate can never change what a family is billed.
+                    Leave one blank and this package is simply not offered in that currency.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Classes / month</label>

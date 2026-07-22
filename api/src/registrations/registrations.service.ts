@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { courseForCode } from '../common/catalogue-course';
+import { currencyForCountry } from '../common/currency';
 import { EmailsService } from '../emails/emails.service';
 import {
   Role,
@@ -374,6 +375,7 @@ export class RegistrationsService {
       const profile = await tx.studentProfile.create({
         data: {
           studentCode,
+          billingCurrency: currencyForCountry(reg.country),
           phone: reg.studentMobile,
           gender: reg.gender,
           guardianName:

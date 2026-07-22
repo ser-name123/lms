@@ -334,7 +334,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 
     const pkgCreated = await req('POST', '/lms-data/packages', adminToken, {
       title: `${MARKER} 8 Hours`,
-      price: 75,
+      priceUSD: 75,
+      priceAED: 275,
+      priceGBP: 60,
       billing: 'Monthly',
       // The feature copy says 4; the typed field says 16. The typed field wins
       // — the old code read a number out of this sentence by regex.
@@ -356,7 +358,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
     const badPlan = await req('POST', '/lms-data/packages', adminToken, {
       title: `${MARKER} Bogus`,
-      price: 10, billing: 'Monthly', level: 'All', courses: [], features: [],
+      priceUSD: 10, billing: 'Monthly', level: 'All', courses: [], features: [],
       status: 'Active', description: 'x', classesPerMonth: 4,
       feePlanId: '00000000-0000-0000-0000-000000000000',
     });
@@ -364,15 +366,40 @@ const today = () => new Date().toISOString().slice(0, 10);
     const { rows: pkgLeft } = await db.query(`SELECT id FROM "LmsPackage" WHERE title = $1`, [`${MARKER} Bogus`]);
     check('  and no catalogue row was left behind', pkgLeft.length === 0, `${pkgLeft.length} found`);
 
+    check('  the AED amount is stored as typed', Number(prel?.priceAED) === 275, String(prel?.priceAED));
+    check('  and the GBP amount too', Number(prel?.priceGBP) === 60, String(prel?.priceGBP));
+
+    // ── 6b. A currency nobody priced stays empty ────────────────────────────
+    /*
+     * The three amounts are typed in, never converted — a rate that moved
+     * overnight would bill a family a different figure each cycle. So a
+     * currency left blank must stay null: "free" and "not sold here" are
+     * different answers and only one of them should reach a family.
+     */
+    console.log('\n6b. An unpriced currency stays unpriced');
+
+    const partial = await req('POST', '/lms-data/packages', adminToken, {
+      title: `${MARKER} USD only`,
+      priceUSD: 30, priceAED: '', priceGBP: null,
+      billing: 'Monthly', level: 'All', courses: [], features: [],
+      status: 'Active', description: 'only priced in dollars', classesPerMonth: 4,
+    });
+    check('a package priced in one currency is accepted', partial.status === 201, `got ${partial.status}`);
+    const partialRel = await pkgRow(partial.body?.id);
+    check('  USD is stored', Number(partialRel?.priceUSD) === 30, String(partialRel?.priceUSD));
+    check('  an empty AED is null, not 0', partialRel?.priceAED === null, String(partialRel?.priceAED));
+    check('  an empty GBP is null, not 0', partialRel?.priceGBP === null, String(partialRel?.priceGBP));
+
     console.log('\n7. Package update, including clearing the link');
     const pkgUpdated = await req('PUT', `/lms-data/packages/${packageId}`, adminToken, {
-      title: `${MARKER} 8 Hours`, price: 80, billing: 'Monthly', classesPerMonth: 16,
+      title: `${MARKER} 8 Hours`, priceUSD: 80, priceAED: 294, priceGBP: 64, billing: 'Monthly', classesPerMonth: 16,
       level: 'All', courses: [], features: [], status: 'Inactive', description: 'y',
       feePlanId: '',
     });
     check('PUT returns 200', pkgUpdated.status === 200, `got ${pkgUpdated.status}`);
     const prel2 = await pkgRow(packageId);
-    check('  price propagated', Number(prel2?.price) === 80, String(prel2?.price));
+    check('  USD price propagated', Number(prel2?.priceUSD) === 80, String(prel2?.priceUSD));
+    check('  and so did the AED and GBP amounts', Number(prel2?.priceAED) === 294 && Number(prel2?.priceGBP) === 64, `${prel2?.priceAED} / ${prel2?.priceGBP}`);
     check('  Inactive turned the Package off', prel2?.active === false);
     check('  an empty fee plan clears the link rather than storing ""', prel2?.feePlanId === null, String(prel2?.feePlanId));
 
@@ -485,6 +512,48 @@ const today = () => new Date().toISOString().slice(0, 10);
     await db.query(`DELETE FROM "Course" WHERE id = $1`, [orphanId]);
     await db.query(`DELETE FROM "LmsCourse" WHERE id = $1`, [orphanId]);
 
+    // ── 8c. A student is quoted in their own currency ───────────────────────
+    /*
+     * The point of three prices: a family in Dubai sees dirhams, one in London
+     * pounds, everyone else dollars — and a package the academy has not priced
+     * in that currency is not offered at all rather than shown at the dollar
+     * figure wearing the wrong symbol.
+     */
+    console.log('\n8c. The student panel quotes the family\'s currency');
+
+    const asStudent = token(studentUserId, 'STUDENT', emails.student);
+
+    // Put them back on the fully-priced package first.
+    await req('POST', `/student-management/${studentId}/course`, adminToken, {
+      courseId, packageId, status: 'ACTIVE',
+    });
+
+    for (const [currency, expected] of [['USD', 80], ['AED', 294], ['GBP', 64]]) {
+      await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = $1 WHERE id = $2`, [currency, studentId]);
+      const mine = await req('GET', '/subscriptions/me', asStudent);
+      check(`on ${currency} the panel says ${currency}`, mine.body?.currency === currency, mine.body?.currency);
+      check(`  and quotes ${expected}`, Number(mine.body?.package?.price) === expected, String(mine.body?.package?.price));
+    }
+
+    // The USD-only package must not be offered to a family billed in dirhams.
+    await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = 'AED' WHERE id = $1`, [studentId]);
+    let options = await req('GET', '/subscriptions/me/packages', asStudent);
+    check(
+      'a package with no AED price is not offered to an AED family',
+      Array.isArray(options.body) && !options.body.some((p) => p.id === partial.body?.id),
+      JSON.stringify(options.body).slice(0, 120),
+    );
+
+    await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = 'USD' WHERE id = $1`, [studentId]);
+    options = await req('GET', '/subscriptions/me/packages', asStudent);
+    check(
+      'and it is offered to a USD family',
+      Array.isArray(options.body) && options.body.some((p) => p.id === partial.body?.id),
+      JSON.stringify(options.body).slice(0, 120),
+    );
+
+    await req('DELETE', `/lms-data/packages/${partial.body?.id}`, adminToken);
+
     // ── 9. Who is allowed to do any of this ─────────────────────────────────
     console.log('\n9. Roles');
 
@@ -502,7 +571,7 @@ const today = () => new Date().toISOString().slice(0, 10);
     check('a coach can edit a course', coachEdit.status === 200, `got ${coachEdit.status}`);
 
     const coachPkg = await req('POST', '/lms-data/packages', coachToken, {
-      title: `${MARKER} Coach Package`, price: 20, billing: 'Monthly', classesPerMonth: 4,
+      title: `${MARKER} Coach Package`, priceUSD: 20, billing: 'Monthly', classesPerMonth: 4,
       level: 'All', courses: [], features: [], status: 'Active', description: 'by the coach',
     });
     check('a coach can create a package', coachPkg.status === 201, `got ${coachPkg.status}`);
@@ -518,7 +587,7 @@ const today = () => new Date().toISOString().slice(0, 10);
     });
     check('an unauthenticated caller cannot create a course', anonCourse.status === 401, `got ${anonCourse.status}`);
     const teacherPkg = await req('POST', '/lms-data/packages', teacherToken, {
-      title: `${MARKER} Teacher Package`, price: 1, billing: 'Monthly', level: 'All',
+      title: `${MARKER} Teacher Package`, priceUSD: 1, billing: 'Monthly', level: 'All',
       courses: [], features: [], status: 'Active', description: 'x',
     });
     check('a teacher cannot create a package', teacherPkg.status === 403, `got ${teacherPkg.status}`);

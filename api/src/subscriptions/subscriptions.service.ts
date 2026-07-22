@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { DEFAULT_CURRENCY, priceFor, type Currency } from '../common/currency';
 import { NotificationsService } from '../notifications/notifications.service';
 import { cycleMonths, addMonths } from '../finance/finance.config';
 import {
@@ -86,7 +87,17 @@ export class SubscriptionsService {
   }
 
   async currentFor(studentId: string) {
-    const [enrolment, batchLinks, assignment, queued] = await Promise.all([
+    const [profile, enrolment, batchLinks, assignment, queued] = await Promise.all([
+      /*
+       * The currency this family is billed in. Every amount below is read in
+       * it, and a package the academy has not priced in that currency reports
+       * null rather than the dollar figure — a number carrying the wrong
+       * currency symbol is worse than no number.
+       */
+      this.prisma.studentProfile.findUnique({
+        where: { id: studentId },
+        select: { billingCurrency: true },
+      }),
       this.prisma.enrollment.findFirst({
         where: { studentId, status: EnrollmentStatus.ACTIVE },
         orderBy: { startedAt: 'desc' },
@@ -115,9 +126,15 @@ export class SubscriptionsService {
       }),
       this.prisma.subscriptionNextCycle.findUnique({
         where: { studentId },
-        include: { nextPackage: { select: { id: true, name: true, classesPerMonth: true, price: true } } },
+        include: {
+          nextPackage: {
+            select: { id: true, name: true, classesPerMonth: true, priceUSD: true, priceAED: true, priceGBP: true },
+          },
+        },
       }),
     ]);
+
+    const currency = (profile?.billingCurrency ?? DEFAULT_CURRENCY) as Currency;
 
     // The cycle runs from one invoice date to the next; nextRunAt is the next
     // one, so the current cycle started a whole cycle before it.
@@ -131,12 +148,16 @@ export class SubscriptionsService {
       .filter((b) => b.daysOfWeek.length || b.startTime);
 
     return {
+      // What every amount in this payload is denominated in. The fee plan
+      // carries a currency of its own below; this one is the family's, and it
+      // is the one the screen must label its numbers with.
+      currency,
       package: enrolment?.package
         ? {
             id: enrolment.package.id,
             name: enrolment.package.name,
             classesPerMonth: enrolment.package.classesPerMonth,
-            price: Number(enrolment.package.price),
+            price: priceFor(enrolment.package, currency),
           }
         : null,
       course: enrolment?.course ?? null,
@@ -167,7 +188,7 @@ export class SubscriptionsService {
                   id: queued.nextPackage.id,
                   name: queued.nextPackage.name,
                   classesPerMonth: queued.nextPackage.classesPerMonth,
-                  price: Number(queued.nextPackage.price),
+                  price: priceFor(queued.nextPackage, currency),
                 }
               : null,
             days: queued.nextDays,
@@ -184,12 +205,27 @@ export class SubscriptionsService {
     const current = await this.currentForUser(userId);
     const packages = await this.prisma.package.findMany({
       where: { active: true },
-      orderBy: { price: 'asc' },
-      select: { id: true, name: true, price: true, classesPerMonth: true },
+      orderBy: { priceUSD: 'asc' },
+      select: {
+        id: true, name: true, classesPerMonth: true,
+        priceUSD: true, priceAED: true, priceGBP: true,
+      },
     });
+    /*
+     * A package the academy has not priced in this family's currency is not
+     * offered at all. Showing it with a dollar figure would have them request
+     * a change at a price that is not theirs, and the coach would approve a
+     * number nobody agreed to.
+     */
     return packages
       .filter((p) => p.id !== current.package?.id)
-      .map((p) => ({ ...p, price: Number(p.price) }));
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        classesPerMonth: p.classesPerMonth,
+        price: priceFor(p, current.currency),
+      }))
+      .filter((p) => p.price != null);
   }
 
   // ── Raising a request (Modules 3 and 5, with the Module 10 rules) ──────────
@@ -298,7 +334,7 @@ export class SubscriptionsService {
 
     const wanted = await this.prisma.package.findFirst({
       where: { id: dto.packageId, active: true },
-      select: { id: true, name: true, classesPerMonth: true, price: true },
+      select: { id: true, name: true, classesPerMonth: true, priceUSD: true, priceAED: true, priceGBP: true },
     });
     if (!wanted) throw new BadRequestException('Choose one of the packages listed.');
 
@@ -488,7 +524,7 @@ export class SubscriptionsService {
             },
           },
           requestedPackage: {
-            select: { id: true, name: true, price: true, classesPerMonth: true },
+            select: { id: true, name: true, priceUSD: true, priceAED: true, priceGBP: true, classesPerMonth: true },
           },
         },
       }),
@@ -552,7 +588,10 @@ export class SubscriptionsService {
           },
         },
         requestedPackage: {
-          select: { id: true, name: true, price: true, classesPerMonth: true, feePlanId: true },
+          select: {
+            id: true, name: true, classesPerMonth: true, feePlanId: true,
+            priceUSD: true, priceAED: true, priceGBP: true,
+          },
         },
       },
     });
@@ -567,12 +606,21 @@ export class SubscriptionsService {
 
     let comparison: any = null;
     if (request.type === SubscriptionRequestType.PACKAGE_CHANGE && request.requestedPackage) {
-      const oldPrice = current.package?.price ?? 0;
+      const oldPrice = current.package?.price ?? null;
       const oldHours = current.package?.classesPerMonth ?? 0;
+      /*
+       * Both sides in the family's own currency. A package the academy has not
+       * priced there reports null, and the difference stays null too rather
+       * than being computed against a dollar figure — a coach approving
+       * "+£12" that is really "+$12" is exactly the mistake to avoid.
+       */
+      const newPrice = priceFor(request.requestedPackage, current.currency);
       comparison = {
+        currency: current.currency,
         priceFrom: oldPrice,
-        priceTo: Number(request.requestedPackage.price),
-        priceDifference: Number(request.requestedPackage.price) - oldPrice,
+        priceTo: newPrice,
+        priceDifference:
+          oldPrice != null && newPrice != null ? newPrice - oldPrice : null,
         classesFrom: oldHours,
         classesTo: request.requestedPackage.classesPerMonth,
         classesDifference: request.requestedPackage.classesPerMonth - oldHours,

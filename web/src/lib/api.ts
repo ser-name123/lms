@@ -1,6 +1,7 @@
 "use client";
 
 import { authSnapshot, type Role, type User } from "@/store/auth";
+import type { Currency } from "./currency";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
@@ -2247,7 +2248,10 @@ export interface TrialReportInput {
 
 export interface TrialOptions {
   courses: { id: string; title: string; level: string | null }[];
-  packages: { id: string; name: string; price: number; classesPerMonth: number }[];
+  // Every currency at once: this list is shown against leads from all three
+  // markets, so the screen picks the one matching the family it is looking at.
+  packages: { id: string; name: string; classesPerMonth: number;
+              prices: Record<Currency, number | null> }[];
   levels: string[];
   weekdays: string[];
 }
@@ -2362,7 +2366,13 @@ export interface TrialInfoForm {
     preferredTime: string | null;
     preferredStartDate: string | null;
   };
-  packages: { id: string; name: string; price: number; classesPerMonth: number }[];
+  /** What this family is quoted in, from the country on their booking. */
+  currency: Currency;
+  /*
+   * Already resolved to their currency, and packages the academy has not
+   * priced there are absent rather than shown at a figure that is not theirs.
+   */
+  packages: { id: string; name: string; classesPerMonth: number; price: number | null }[];
   weekdays: string[];
 }
 
@@ -3924,6 +3934,8 @@ export interface SubscriptionPackage {
 }
 
 export interface CurrentSubscription {
+  /** What every amount in this payload is denominated in. */
+  currency: Currency;
   package: SubscriptionPackage | null;
   course: { id: string; title: string } | null;
   schedule: {
@@ -3979,9 +3991,16 @@ export interface StaffSubscriptionRequest extends MySubscriptionRequest {
 export interface SubscriptionRequestDetail extends StaffSubscriptionRequest {
   current: CurrentSubscription;
   comparison: {
-    priceFrom: number;
-    priceTo: number;
-    priceDifference: number;
+    /** The family's currency — every amount below is in it. */
+    currency: Currency;
+    /*
+     * Null when either side is not priced in that currency. The difference is
+     * null too rather than computed against a dollar figure: a coach approving
+     * "+£12" that is really "+$12" is exactly the mistake to avoid.
+     */
+    priceFrom: number | null;
+    priceTo: number | null;
+    priceDifference: number | null;
     classesFrom: number;
     classesTo: number;
     classesDifference: number;

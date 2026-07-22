@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { courseForCode } from '../common/catalogue-course';
+import { currencyForCountry, priceFor } from '../common/currency';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -1278,17 +1279,27 @@ export class LeadsService implements OnModuleInit {
       }),
       this.prisma.package.findMany({
         where: { active: true },
-        select: { id: true, name: true, price: true, classesPerMonth: true },
-        orderBy: { price: 'asc' },
+        select: {
+          id: true, name: true, classesPerMonth: true,
+          priceUSD: true, priceAED: true, priceGBP: true,
+        },
+        orderBy: { priceUSD: 'asc' },
       }),
     ]);
 
     return {
       courses: courses.map((c) => ({ id: c.id, title: c.title, level: c.level?.name ?? null })),
+      // All three amounts, because this list is shown against leads from every
+      // country — the screen picks the one that matches the family it is
+      // looking at rather than this list guessing on their behalf.
       packages: packages.map((p) => ({
         id: p.id,
         name: p.name,
-        price: Number(p.price),
+        prices: {
+          USD: priceFor(p, 'USD'),
+          AED: priceFor(p, 'AED'),
+          GBP: priceFor(p, 'GBP'),
+        },
         classesPerMonth: p.classesPerMonth,
       })),
       levels: TRIAL_LEVEL_OPTIONS as unknown as string[],
@@ -1603,7 +1614,9 @@ export class LeadsService implements OnModuleInit {
       where: { infoTokenHash: this.hashToken(token) },
       include: {
         lead: {
-          select: { studentFirstName: true, studentLastName: true, interestedSubject: true },
+          // country too: the family is quoted in their own currency, and this
+          // is the only place the public form can learn where they are.
+          select: { studentFirstName: true, studentLastName: true, interestedSubject: true, country: true },
         },
       },
     });
@@ -1942,6 +1955,7 @@ export class LeadsService implements OnModuleInit {
      * enrolment said they had none: their own subscription page showed
      * nothing and no package change could be raised against it.
      */
+    const leadCurrency = currencyForCountry(lead.country);
     const pkg = await this.packageForConversion(lead.id, packageId).catch(() => null);
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -1952,6 +1966,9 @@ export class LeadsService implements OnModuleInit {
         const profile = await tx.studentProfile.create({
           data: {
             studentCode: codes[i],
+            // Fixed at creation from the country the family gave, so a bill is
+            // never re-quoted because somebody opened the site abroad.
+            billingCurrency: leadCurrency,
             phone: lead.mobile,
             // Only the primary child's personal details were ever collected;
             // a sibling's gender and DOB are the coach's to fill in later.
@@ -2073,13 +2090,23 @@ export class LeadsService implements OnModuleInit {
      * click, whereas rolling the accounts back over a billing hiccup is not.
      */
     const invoices: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[] = [];
-    if (pkg) {
+    /*
+     * A family in Dubai is billed in dirhams, one in London in pounds, and
+     * everyone else in dollars — taken from the country on the lead, which the
+     * booking form already collects. If the academy has not priced this
+     * package in that currency there is nothing honest to invoice, so no
+     * invoice is raised and the coach is told, exactly as when no package was
+     * chosen at all.
+     */
+    const amount = pkg ? priceFor(pkg, leadCurrency) : null;
+    if (pkg && amount != null) {
       for (const student of created) {
         const invoice = await this.billing
           .createEnrolmentInvoice({
             studentId: student.id,
             label: `${pkg.name} — first month`,
-            amount: Number(pkg.price),
+            amount,
+            currency: leadCurrency,
           })
           .catch(() => null);
         if (invoice) invoices.push({ studentName: student.name, ...invoice });
@@ -2090,7 +2117,7 @@ export class LeadsService implements OnModuleInit {
        */
       await this.prisma.studentProfile.updateMany({
         where: { id: { in: created.map((c) => c.id) } },
-        data: { fees: pkg.price, nextPaymentDate: invoices[0]?.dueAt ?? null },
+        data: { fees: amount, nextPaymentDate: invoices[0]?.dueAt ?? null },
       });
       if (invoices.length) {
         await this.addActivity(
@@ -2373,7 +2400,7 @@ export class LeadsService implements OnModuleInit {
     lead: any,
     students: { id: string; code: string; name: string; email: string }[],
     passwords: string[],
-    pkg?: { name: string; price: any; classesPerMonth: number } | null,
+    pkg?: { name: string; classesPerMonth: number } | null,
     invoices?: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[],
   ) {
     const name = lead.parentName || `${lead.studentFirstName} ${lead.studentLastName}`;

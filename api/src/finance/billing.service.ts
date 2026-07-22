@@ -282,6 +282,9 @@ export class BillingService {
     label: string;
     amount: number;
     dueInDays?: number;
+    // The family's billing currency. Falls back to the academy default only
+    // when a caller has none to give — never converted from another.
+    currency?: string;
   }) {
     if (!(input.amount > 0)) return null;
 
@@ -307,7 +310,7 @@ export class BillingService {
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
         taxAmount: totals.taxAmount,
-        currency: cfg.currency,
+        currency: input.currency ?? cfg.currency,
         // SENT, not DRAFT: the family is told about it in the welcome email,
         // so it has to be a real bill they can see in their portal.
         status: InvoiceStatus.SENT,

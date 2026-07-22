@@ -177,6 +177,14 @@ model StudentProfile {
   guardianName    String?
   profession      String?
   fees            Decimal?  @db.Decimal(10, 2)
+
+  /*
+   * The currency this family is billed in, fixed when their account is made
+   * rather than resolved per request. A student who travels, or opens the site
+   * on holiday, must not find their monthly bill quoted in another currency —
+   * and an invoice already issued has its own currency column regardless.
+   */
+  billingCurrency String    @default("USD")
   joiningDate     DateTime?
   lastPaymentDate DateTime?
   nextPaymentDate DateTime?
@@ -440,7 +448,24 @@ model Package {
   id              String   @id @default(uuid())
   name            String   @unique
   description     String?
-  price           Decimal  @db.Decimal(10, 2)
+
+  /*
+   * One amount per currency the academy sells in, entered by hand.
+   *
+   * Deliberately not one price converted at an exchange rate: this figure is
+   * what a family is billed every month, and a rate that moves would bill them
+   * a different amount each cycle — which is the one thing the subscription
+   * module exists to prevent. USD is the column the single `price` used to be,
+   * renamed rather than duplicated so there is still exactly one number per
+   * currency.
+   *
+   * AED and GBP are nullable because the rows existed before they did. A
+   * missing one is never silently substituted with USD — a price shown in the
+   * wrong currency is worse than no price at all.
+   */
+  priceUSD        Decimal  @db.Decimal(10, 2)
+  priceAED        Decimal? @db.Decimal(10, 2)
+  priceGBP        Decimal? @db.Decimal(10, 2)
   classesPerMonth Int
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -1152,7 +1177,11 @@ model LmsKnowledgebase {
 model LmsPackage {
   id          String   @id @default(uuid())
   title       String
-  price       Float
+  // Mirrors Package's three amounts — see the note there for why these are
+  // entered rather than converted.
+  priceUSD    Float
+  priceAED    Float?
+  priceGBP    Float?
   billing     String
   level       String
   courses     String[]

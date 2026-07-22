@@ -119,8 +119,8 @@ const ids = {};
       ['big', `${MARKER}-8 Hours`, 75, 16, 'big'],
     ]) {
       const { rows } = await db.query(
-        `INSERT INTO "Package" (id,name,price,"classesPerMonth",active,"feePlanId")
-         VALUES (gen_random_uuid(),$1,$2,$3,true,$4) RETURNING id`,
+        `INSERT INTO "Package" (id,name,"priceUSD","priceAED","priceGBP","classesPerMonth",active,"feePlanId")
+         VALUES (gen_random_uuid(),$1,$2::numeric,$2::numeric*4,$2::numeric*0.8,$3,true,$4) RETURNING id`,
         [name, price, classes, plans[plan]],
       );
       packages[key] = rows[0].id;
@@ -510,7 +510,7 @@ const ids = {};
     // The catalogue page deletes LmsPackage rows, so the guard needs one to
     // aim at; it is matched to the relational Package by id.
     const { rows: lms } = await db.query(
-      `INSERT INTO "LmsPackage" (id,title,price,billing,level,courses,features,status,description)
+      `INSERT INTO "LmsPackage" (id,title,"priceUSD",billing,level,courses,features,status,description)
        VALUES ($1,$2,75,'Monthly','All',ARRAY[]::text[],ARRAY[]::text[],'Active','smoke') RETURNING id`,
       [packages.big, `${MARKER}-8 Hours`],
     );

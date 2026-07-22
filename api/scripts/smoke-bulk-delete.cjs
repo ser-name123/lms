@@ -241,7 +241,7 @@ async function req(method, path, auth, payload, expect = 200) {
     console.log('\n── Packages ──');
     const mkPackage = async (suffix) => {
       const { rows } = await db.query(
-        `INSERT INTO "LmsPackage" (id,title,price,billing,level,description)
+        `INSERT INTO "LmsPackage" (id,title,"priceUSD",billing,level,description)
          VALUES (gen_random_uuid(),$1,50,'MONTHLY','All Levels','smoke') RETURNING id`,
         [`${MARKER} ${suffix}`],
       );

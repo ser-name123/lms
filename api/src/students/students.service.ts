@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { courseForCode } from '../common/catalogue-course';
+import { currencyForCountry } from '../common/currency';
 import {
   Role,
   EnrollmentStatus,
@@ -57,7 +58,7 @@ const PROFILE_SELECT = {
         },
       },
       package: {
-        select: { id: true, name: true, price: true, classesPerMonth: true },
+        select: { id: true, name: true, priceUSD: true, priceAED: true, priceGBP: true, classesPerMonth: true },
       },
     },
   },
@@ -247,6 +248,9 @@ export class StudentsService {
       const profile = await tx.studentProfile.create({
         data: {
           studentCode,
+          // From the country on the account: UAE bills in dirhams, the UK in
+          // pounds, everyone else in dollars.
+          billingCurrency: currencyForCountry(dto.country),
           phone: dto.phone,
           gender: dto.gender,
           guardianName: dto.guardianName,

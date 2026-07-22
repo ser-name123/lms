@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { CalendarCheck, CheckCircle2, Loader2 } from "lucide-react";
+import { money } from "@/lib/currency";
 
 import {
   ApiError,
@@ -128,7 +129,7 @@ export default function TrialDetailsPage() {
                   <option value="">Not sure yet</option>
                   {form.packages.map((p) => (
                     <option key={p.id} value={p.name}>
-                      {p.name} — {p.classesPerMonth} classes a month
+                      {p.name} — {p.classesPerMonth} classes a month — {money(p.price, form.currency)}
                     </option>
                   ))}
                 </select>

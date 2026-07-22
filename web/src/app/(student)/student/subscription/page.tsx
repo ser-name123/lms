@@ -11,6 +11,7 @@ import {
   Send,
 } from "lucide-react";
 
+import { money, type Currency } from "@/lib/currency";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
@@ -104,6 +105,16 @@ export default function StudentSubscriptionPage() {
                     <p className="text-[11px] text-ink-3">
                       {sub.package.classesPerMonth} classes / month
                     </p>
+                    {/*
+                      In this family's own currency, which is fixed on their
+                      account — opening the site from another country does not
+                      re-quote what they pay.
+                    */}
+                    <p className="text-[11px] font-bold text-ink-2">
+                      {money(sub.package.price, sub.currency, { emptyText: "Price not set" })}
+                      {" / "}
+                      month
+                    </p>
                   </>
                 ) : (
                   <p className="text-sm text-ink-3">Not set</p>
@@ -151,7 +162,7 @@ export default function StudentSubscriptionPage() {
                     {sub.nextCycle.package && (
                       <li>
                         Package → <b>{sub.nextCycle.package.name}</b> ·{" "}
-                        {sub.nextCycle.package.classesPerMonth} classes/month
+                        {sub.nextCycle.package.classesPerMonth} classes/month · {money(sub.nextCycle.package.price, sub.currency)}
                       </li>
                     )}
                     {(sub.nextCycle.days.length > 0 || sub.nextCycle.time) && (
@@ -202,6 +213,7 @@ export default function StudentSubscriptionPage() {
                 {form === "package" && (
                   <PackageForm
                     packages={packages}
+                    currency={sub.currency}
                     onDone={() => {
                       setForm(null);
                       load();
@@ -299,9 +311,13 @@ function InfoTile({
 
 function PackageForm({
   packages,
+  currency,
   onDone,
 }: {
   packages: SubscriptionPackage[];
+  // Passed rather than detected here: this family's currency is the one on
+  // their account, not the one the browser happens to be sitting in.
+  currency: Currency;
   onDone: () => void;
 }) {
   const [packageId, setPackageId] = useState("");
@@ -350,7 +366,7 @@ function PackageForm({
           <option value="">— Choose a package —</option>
           {packages.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} · {p.classesPerMonth} classes/month
+              {p.name} · {p.classesPerMonth} classes/month · {money(p.price, currency)}
             </option>
           ))}
         </select>

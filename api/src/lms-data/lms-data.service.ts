@@ -25,7 +25,9 @@ export class LmsDataService implements OnModuleInit {
               id: lp.id,
               name: lp.title,
               description: lp.description,
-              price: lp.price,
+              priceUSD: lp.priceUSD,
+              priceAED: lp.priceAED,
+              priceGBP: lp.priceGBP,
               classesPerMonth: classesFor(lp),
               active: lp.status === 'Active',
             }
@@ -427,10 +429,18 @@ export class LmsDataService implements OnModuleInit {
       orderBy: { title: 'asc' },
     });
   }
-  /** A package price can never be negative. */
+  /**
+   * A package price can never be negative, and a currency the academy has not
+   * priced stays empty rather than becoming 0 — "free" and "not sold here" are
+   * different answers, and only one of them should ever reach a family.
+   */
   private normalisePackage(data: any) {
     const out = { ...data };
-    if (out.price != null) out.price = Math.max(0, Number(out.price) || 0);
+    if (out.priceUSD != null) out.priceUSD = Math.max(0, Number(out.priceUSD) || 0);
+    for (const key of ['priceAED', 'priceGBP'] as const) {
+      if (out[key] === '' || out[key] === null) out[key] = null;
+      else if (out[key] != null) out[key] = Math.max(0, Number(out[key]) || 0);
+    }
     if (out.classesPerMonth != null && out.classesPerMonth !== '') {
       out.classesPerMonth = Math.max(1, Math.round(Number(out.classesPerMonth) || 0));
     }
@@ -453,7 +463,9 @@ export class LmsDataService implements OnModuleInit {
   private packageFields(lmsPkg: {
     title: string;
     description: string;
-    price: number;
+    priceUSD: number;
+    priceAED?: number | null;
+    priceGBP?: number | null;
     status: string;
     classesPerMonth?: number | null;
     features?: string[];
@@ -462,7 +474,9 @@ export class LmsDataService implements OnModuleInit {
     return {
       name: lmsPkg.title,
       description: lmsPkg.description,
-      price: lmsPkg.price,
+      priceUSD: lmsPkg.priceUSD,
+      priceAED: lmsPkg.priceAED ?? null,
+      priceGBP: lmsPkg.priceGBP ?? null,
       classesPerMonth: classesFor(lmsPkg),
       active: lmsPkg.status === 'Active',
       feePlanId: lmsPkg.feePlanId ?? null,

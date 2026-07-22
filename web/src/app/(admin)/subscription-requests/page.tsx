@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { money } from "@/lib/currency";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
@@ -51,7 +52,6 @@ const swalBg = () =>
 const fmtDate = (v: string | null | undefined) =>
   v ? new Date(v).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-const money = (n: number) => (n < 0 ? `−${Math.abs(n).toFixed(2)}` : n.toFixed(2));
 
 export default function SubscriptionRequestsPage() {
   const [items, setItems] = useState<StaffSubscriptionRequest[]>([]);
@@ -279,12 +279,22 @@ function ReviewDrawer({
                 What changes
               </p>
               <div className="grid grid-cols-2 gap-3">
+                {/*
+                  Both sides in the family's own currency, and no difference at
+                  all when either side is unpriced there — "+12" that silently
+                  compared pounds against dollars is the mistake worth ruling
+                  out on the screen where the coach clicks Approve.
+                */}
                 <Diff
-                  label="Price"
-                  from={money(request.comparison.priceFrom)}
-                  to={money(request.comparison.priceTo)}
-                  delta={`${request.comparison.priceDifference >= 0 ? "+" : ""}${money(request.comparison.priceDifference)}`}
-                  up={request.comparison.priceDifference > 0}
+                  label={`Price (${request.comparison.currency})`}
+                  from={money(request.comparison.priceFrom, request.comparison.currency)}
+                  to={money(request.comparison.priceTo, request.comparison.currency)}
+                  delta={
+                    request.comparison.priceDifference == null
+                      ? "—"
+                      : `${request.comparison.priceDifference >= 0 ? "+" : ""}${money(request.comparison.priceDifference, request.comparison.currency)}`
+                  }
+                  up={(request.comparison.priceDifference ?? 0) > 0}
                 />
                 <Diff
                   label="Classes / month"
