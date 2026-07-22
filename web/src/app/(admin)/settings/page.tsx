@@ -19,9 +19,8 @@ import {
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
-import { fetchSystemSettings, saveSystemSettings, fetchSmtpConfig, saveSmtpConfig, ApiError } from "@/lib/api";
+import { fetchSystemSettings, saveSystemSettings, fetchSmtpConfig, saveSmtpConfig, sendTestEmail, ApiError } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings";
-import { useAuth } from "@/store/auth";
 import { ImageCropperModal } from "@/components/image-cropper";
 import { ZoomIntegrationCard } from "@/components/admin/zoom-integration";
 import { StripeIntegrationCard } from "@/components/admin/stripe-integration";
@@ -174,6 +173,9 @@ export default function SettingsPage() {
   const [smtpTestEmail, setSmtpTestEmail] = useState("objectsquarerajan@gmail.com");
   const [smtpStatus, setSmtpStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [smtpErrorMsg, setSmtpErrorMsg] = useState("");
+  /** The relay's own reply, and the "accepted but will be filtered" warning. */
+  const [smtpResponse, setSmtpResponse] = useState<string | null>(null);
+  const [smtpWarning, setSmtpWarning] = useState<string | null>(null);
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -511,31 +513,29 @@ export default function SettingsPage() {
     setSmtpStatus("testing");
     setSmtpErrorMsg("");
 
+    /*
+     * This used to POST /emails/send and call any 2xx a success, which is how
+     * the screen could report "Dispatch Succeeded" while nothing ever reached
+     * an inbox. A relay accepting a message is not the same as it being
+     * delivered — the receiving side still bins mail whose From domain has not
+     * authorised that relay. The endpoint now returns the relay's own response
+     * and a warning for exactly that case, and both are shown.
+     */
     try {
-      const fd = new FormData();
-      fd.append("to", smtpTestEmail);
-      fd.append("subject", "AL FURQAN SMTP Connection Test");
-      fd.append("message", "Your SMTP transporter connection test is successful!");
-
-      const accessToken = useAuth.getState().accessToken;
-      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
-
-      const res = await fetch(`${apiBase}/emails/send`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: fd,
-      });
-
-      if (!res.ok) {
-        throw new Error("Transporter rejected or failed connection.");
+      const result = await sendTestEmail(smtpTestEmail);
+      setSmtpResponse(result.response);
+      setSmtpWarning(result.warning);
+      if (result.ok) {
+        setSmtpStatus("success");
+      } else {
+        setSmtpStatus("error");
+        setSmtpErrorMsg(result.error ?? "The relay did not accept the message.");
       }
-
-      setSmtpStatus("success");
     } catch (err) {
       setSmtpStatus("error");
-      setSmtpErrorMsg(err instanceof Error ? err.message : "Test dispatch failed.");
+      setSmtpResponse(null);
+      setSmtpWarning(null);
+      setSmtpErrorMsg(err instanceof ApiError ? err.message : "Test dispatch failed.");
     }
   };
 
@@ -1464,8 +1464,25 @@ export default function SettingsPage() {
                           <div className="flex items-start gap-3 p-3.5 rounded-xl border bg-good/5 border-good/20 text-good-ink">
                             <CheckCircle2 className="size-5 shrink-0" />
                             <div className="text-sm">
-                              <p className="font-bold">SMTP Test Dispatch Succeeded!</p>
-                              <p className="text-xs opacity-90 mt-0.5">Please check your inbox at {smtpTestEmail} for the test message.</p>
+                              {/* Deliberately not "delivered": the relay taking
+                                  the message is all this proves. */}
+                              <p className="font-bold">The mail relay accepted the message</p>
+                              <p className="text-xs opacity-90 mt-0.5">
+                                Check {smtpTestEmail}, including the spam folder.
+                              </p>
+                              {smtpResponse && (
+                                <p className="mt-1 font-mono text-[10px] opacity-75">{smtpResponse}</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {smtpWarning && (
+                          <div className="flex items-start gap-3 p-3.5 rounded-xl border bg-warning/5 border-warning/20">
+                            <AlertCircle className="size-5 shrink-0 text-warning" />
+                            <div className="text-sm">
+                              <p className="font-bold text-ink">Accepted, but likely to be filtered</p>
+                              <p className="text-xs text-ink-2 mt-0.5">{smtpWarning}</p>
                             </div>
                           </div>
                         )}

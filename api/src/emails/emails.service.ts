@@ -132,7 +132,17 @@ export class EmailsService {
     file?: Express.Multer.File,
     html?: string,
   ) {
-    this.logger.log(`Sending email to ${to} with subject "${subject}"`);
+    /*
+     * This used to log only here, BEFORE the send, and most of the 31 callers
+     * end in `.catch(() => undefined)`. So a rejected message and a delivered
+     * one produced exactly the same single line, and "email is not arriving"
+     * left no trace anywhere to look at. The outcome is logged below instead —
+     * including the relay's own response, which is what says whether it was
+     * accepted — and a failure is logged at error level here even though the
+     * caller will swallow it, because the caller swallowing it is precisely why
+     * nobody would otherwise find out.
+     */
+    this.logger.debug(`Sending email to ${to} with subject "${subject}"`);
     const { transporter, from } = await this.getTransporter();
 
     const mailOptions: nodemailer.SendMailOptions = {
@@ -151,6 +161,79 @@ export class EmailsService {
         : [],
     };
 
-    return transporter.sendMail(mailOptions);
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      /*
+       * A relay can accept a message for some recipients and refuse others in
+       * the same call, which resolves successfully. `rejected` is the only
+       * place that shows, so it is checked rather than assumed empty.
+       */
+      if (info.rejected?.length) {
+        this.logger.error(
+          `Email to ${to} ("${subject}") was REJECTED for ${info.rejected.join(', ')} — ${info.response ?? 'no response'}`,
+        );
+      } else {
+        this.logger.log(
+          `Email accepted for ${to} ("${subject}") — ${info.response ?? 'no response'}`,
+        );
+      }
+      return info;
+    } catch (e) {
+      const err = e as { code?: string; responseCode?: number; message?: string };
+      this.logger.error(
+        `Email to ${to} ("${subject}") FAILED — ` +
+          `${err.code ?? 'no code'}/${err.responseCode ?? '-'}: ${err.message ?? 'unknown error'}`,
+      );
+      throw e;
+    }
+  }
+
+  /**
+   * Sends a message to the configured sender address and reports what the relay
+   * said, for the admin settings screen.
+   *
+   * "Accepted by the relay" is not "delivered": the relay can take a message
+   * and the receiving side still bin it, which is exactly what happens when the
+   * From domain has not authorised this relay to send for it. The result says
+   * so rather than reporting a clean success nobody can act on.
+   */
+  async sendTestEmail(to?: string) {
+    const { from } = await this.getTransporter();
+    const target = to?.trim() || from;
+    try {
+      const info = await this.sendMail(
+        target,
+        'Test email from the AL FURQAN console',
+        'If you are reading this, the mail relay accepted and delivered a message from the console.',
+      );
+      const domain = String(from).split('@')[1] ?? '';
+      return {
+        ok: !info.rejected?.length,
+        to: target,
+        from,
+        response: info.response ?? null,
+        /*
+         * The common cause of "accepted but never arrives": sending as an
+         * address at a domain the academy does not control, through a relay
+         * that domain has not authorised. The receiver fails SPF/DKIM
+         * alignment and files it as spam.
+         */
+        warning: ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'].includes(
+          domain.toLowerCase(),
+        )
+          ? `The sender address is at ${domain}, which does not authorise this relay to send on its behalf. Messages may be accepted here and still land in spam. Use an address at a domain you control and verify it with your mail provider.`
+          : null,
+      };
+    } catch (e) {
+      const err = e as { code?: string; responseCode?: number; message?: string };
+      return {
+        ok: false,
+        to: target,
+        from,
+        response: null,
+        error: `${err.code ?? 'error'}: ${err.message ?? 'unknown'}`,
+        warning: null,
+      };
+    }
   }
 }

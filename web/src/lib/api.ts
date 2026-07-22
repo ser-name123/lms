@@ -139,6 +139,25 @@ export const deleteAdmin = (id: string) =>
 export const fetchSmtpConfig = () => 
   api<{ host: string; port: number; user: string; pass?: string; from: string; secure: boolean }>("/emails/smtp-config");
 
+/*
+ * Sends one message and reports what the relay said.
+ *
+ * "Saved" never meant "can send": the app swallows send failures at almost
+ * every call site, so without this the first sign of a broken relay was a
+ * family saying their invoice never arrived.
+ */
+export const sendTestEmail = (to?: string) =>
+  api<{
+    ok: boolean;
+    to: string;
+    from: string;
+    response: string | null;
+    error?: string;
+    /** Set when the sender domain cannot authorise this relay — the usual
+     *  reason mail is accepted here and still lands in spam. */
+    warning: string | null;
+  }>("/emails/smtp-test", { method: "POST", body: JSON.stringify({ to }) });
+
 export const saveSmtpConfig = (config: { host: string; port: number; user: string; pass: string; from: string; secure: boolean }) =>
   api<{ success: boolean }>("/emails/smtp-config", {
     method: "POST",
