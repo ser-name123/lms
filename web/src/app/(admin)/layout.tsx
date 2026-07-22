@@ -13,11 +13,32 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 }
 
+/*
+ * Routes no non-admin reaches, whatever prefix would otherwise let them.
+ *
+ * "/finance" is granted whole to coaches and supervisors, and payroll lives
+ * under it — so /finance/payroll opened for both while the API answers a coach
+ * 403 outright and refuses a supervisor every write on the page. A page that
+ * loads and then cannot do anything is worse than one that is not there.
+ *
+ * Staff pay stays with the admin: it is compensation, and the API already says
+ * so (@Roles(ADMIN) on every payroll write, ADMIN-only on /payouts).
+ */
+const ADMIN_ONLY_PREFIXES = ["/finance/payroll", "/payouts"];
+
 function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const pathname = usePathname();
 
   if (user && !["ADMIN", "SUPERVISOR", "ACADEMIC_COACH"].includes(user.role)) {
+    notFound();
+  }
+
+  if (
+    user &&
+    user.role !== "ADMIN" &&
+    ADMIN_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
     notFound();
   }
 
