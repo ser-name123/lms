@@ -42,15 +42,38 @@ const path = require('path');
       await client.query(`TRUNCATE ${quoted} RESTART IDENTITY CASCADE`);
     }
 
+    /*
+     * db-export replaces credential settings (Stripe keys, SMTP password) with
+     * a marker rather than writing them to a file. Restoring that marker as if
+     * it were the value would leave a config that parses to nonsense, so those
+     * rows are dropped instead: the setting comes back absent, the server falls
+     * back to its environment, and the admin re-enters the key in Settings. A
+     * restored copy that cannot charge cards until someone deliberately gives
+     * it a key is the safe default.
+     */
+    const REDACTED = '__REDACTED_ON_EXPORT__';
+    let droppedSecrets = 0;
+
     let inserted = 0;
     for (const name of names) {
-      const rows = tables[name] || [];
+      let rows = tables[name] || [];
+      if (name === 'SystemSetting') {
+        const before = rows.length;
+        rows = rows.filter((r) => r.value !== REDACTED);
+        droppedSecrets += before - rows.length;
+      }
       if (!rows.length) continue;
       await client.query(
         `INSERT INTO "${name}" SELECT * FROM jsonb_populate_recordset(NULL::"${name}", $1::jsonb)`,
         [JSON.stringify(rows)],
       );
       inserted += rows.length;
+    }
+
+    if (droppedSecrets) {
+      console.log(
+        `Skipped ${droppedSecrets} redacted credential setting(s) — re-enter them in Settings.`,
+      );
     }
 
     await client.query('COMMIT');

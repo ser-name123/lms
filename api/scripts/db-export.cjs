@@ -28,14 +28,40 @@ const path = require('path');
     ORDER BY table_name
   `);
 
+  /*
+   * SystemSetting rows that hold credentials.
+   *
+   * This file is written to disk, copied about and sometimes attached to a
+   * message. A backup carrying a live Stripe secret key or an SMTP password is
+   * a credential leak waiting for someone to be helpful with it, so those
+   * values are replaced with a marker. The row still exports, so an import
+   * restores the shape and the admin re-enters the secret in Settings — which
+   * is the correct outcome: a restored copy should not silently be able to
+   * charge cards.
+   */
+  const SECRET_SETTINGS = new Set(['STRIPE_CONFIG', 'SMTP_CONFIG']);
+  const REDACTED = '__REDACTED_ON_EXPORT__';
+
   const tables = {};
   let totalRows = 0;
+  let redactedCount = 0;
   for (const { table_name } of tableRows) {
     const r = await client.query(
       `SELECT COALESCE(jsonb_agg(to_jsonb(t.*)), '[]'::jsonb) AS data FROM "${table_name}" t`,
     );
-    tables[table_name] = r.rows[0].data;
+    let data = r.rows[0].data;
+    if (table_name === 'SystemSetting') {
+      data = data.map((row) => {
+        if (!SECRET_SETTINGS.has(row.key)) return row;
+        redactedCount++;
+        return { ...row, value: REDACTED };
+      });
+    }
+    tables[table_name] = data;
     totalRows += tables[table_name].length;
+  }
+  if (redactedCount) {
+    console.log(`Redacted ${redactedCount} credential setting(s) — re-enter them in Settings after an import.`);
   }
 
   await client.end();

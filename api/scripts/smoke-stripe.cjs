@@ -99,6 +99,75 @@ async function main() {
     ok(cfg.status === 200 && typeof cfg.body.configured === 'boolean', 'GET /payments/config');
     ok(cfg.body.webhooksConfigured === true, 'the webhook secret is loaded');
 
+    // ── Admin settings ───────────────────────────────────────────────────────
+    console.log('\nADMIN SETTINGS:');
+    const before = await req(users.ADMIN, 'GET', '/payments/settings');
+    ok(before.status === 200 && typeof before.body.hasSecretKey === 'boolean',
+      'GET /payments/settings');
+
+    /*
+     * The whole point of this screen: it tells the admin WHETHER each secret is
+     * set, never what it is. A key readable off a screen leaks through a
+     * screenshot or a shared session, so assert on the serialised body — a
+     * nested field would slip past a check on the top level only.
+     */
+    const serialised = JSON.stringify(before.body);
+    ok(!/sk_(test|live)_/.test(serialised), 'the secret key is not sent to the client');
+    ok(!serialised.includes(SECRET), 'the webhook secret is not sent to the client');
+
+    if (users.STUDENT) {
+      const asStudent = await fetch(`${BASE}/payments/settings`, {
+        headers: { Authorization: `Bearer ${tok(users.STUDENT)}` },
+      });
+      ok(asStudent.status === 403, `a student cannot read the keys (got ${asStudent.status})`);
+    }
+
+    /*
+     * Saving with blank secrets must KEEP them. The form never receives them,
+     * so it always posts blanks when only the publishable key changed — if
+     * blank meant "erase", editing that one field would silently turn payments
+     * off and the next family to pay would be the one to find out.
+     */
+    const marker = `pk_test_smoke_${Date.now()}`;
+    const storedSecret = `whsec_smoke_marker_${Date.now()}`;
+
+    /*
+     * Store a webhook secret that the environment does NOT also provide.
+     * Without this the env fallback refills the field after a blank save and
+     * the erasure is invisible — the assertion would pass while the stored
+     * value was being wiped on any server without the env var.
+     */
+    await req(users.ADMIN, 'PUT', '/payments/settings', { webhookSecret: storedSecret });
+
+    const saved = await req(users.ADMIN, 'PUT', '/payments/settings', {
+      publishableKey: marker,
+      // EXPLICITLY blank, not omitted: a password input the form cannot prefill
+      // posts "". Omitting the field would let an implementation that erases on
+      // blank slip through this test.
+      secretKey: '',
+      webhookSecret: '',
+    });
+    ok(saved.body.publishableKey === marker, 'the publishable key saves');
+
+    const row = (
+      await db.query(`SELECT value FROM "SystemSetting" WHERE key='STRIPE_CONFIG'`)
+    ).rows[0];
+    const kept = row ? JSON.parse(row.value).webhookSecret : null;
+    ok(kept === storedSecret,
+      `a blank webhook secret kept the stored one rather than erasing it (${kept === storedSecret ? 'kept' : `now "${kept}"`})`);
+    ok(saved.body.hasSecretKey === before.body.hasSecretKey,
+      'a blank secret key kept the stored one');
+
+    /*
+     * Hand the environment back: the setting row now shadows .env, and the
+     * signature tests below sign with the env secret. Removing the row entirely
+     * restores the original state rather than leaving a smoke marker behind.
+     */
+    await db.query(`DELETE FROM "SystemSetting" WHERE key='STRIPE_CONFIG'`);
+    const restored = await req(users.ADMIN, 'GET', '/payments/settings');
+    ok(restored.body.hasWebhookSecret === true,
+      'with no stored setting, the environment supplies the secret again');
+
     // ── Signature ────────────────────────────────────────────────────────────
     console.log('\nSIGNATURE:');
     const junk = JSON.stringify({ id: 'evt_junk', type: 'payment_intent.succeeded', data: { object: {} } });

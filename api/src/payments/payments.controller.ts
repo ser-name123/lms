@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Headers,
@@ -7,6 +8,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Req,
 } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -14,6 +16,7 @@ import type { Request } from 'express';
 
 import { PaymentsService } from './payments.service';
 import { StripeService } from './stripe.service';
+import { SaveStripeSettingsDto } from './dto';
 import { CurrentUser, Public, Roles, type AuthUser } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 
@@ -30,6 +33,39 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Publishable key and whether online payment is available' })
   config() {
     return this.payments.config();
+  }
+
+  /*
+   * The admin settings screen. ADMIN only, and deliberately narrower than the
+   * rest of the finance module: these are the credentials that move money, not
+   * a report about it.
+   *
+   * The response says WHETHER each secret is set, never what it is — a key that
+   * can be read back off a screen is a key that leaks through a screenshot, a
+   * support session or a browser cache.
+   */
+  @Get('settings')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Stripe configuration (secrets masked)' })
+  settings() {
+    return this.stripe.publicConfig();
+  }
+
+  @Put('settings')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Save Stripe keys. Blank fields keep the stored value.' })
+  async saveSettings(@Body() dto: SaveStripeSettingsDto) {
+    await this.stripe.saveConfig(dto);
+    return this.stripe.publicConfig();
+  }
+
+  @Post('settings/test')
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Ask Stripe whether the saved key works' })
+  testSettings() {
+    // A wrong key looks exactly like a right one until a family is mid-checkout.
+    return this.stripe.testConnection();
   }
 
   @Post('invoices/:invoiceId/intent')
@@ -77,7 +113,7 @@ export class PaymentsController {
 
     let event;
     try {
-      event = this.stripe.constructEvent(raw, signature);
+      event = await this.stripe.constructEvent(raw, signature);
     } catch (e) {
       throw new BadRequestException(
         `Signature verification failed: ${e instanceof Error ? e.message : 'unknown'}`,

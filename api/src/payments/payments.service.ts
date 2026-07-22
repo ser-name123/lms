@@ -42,11 +42,13 @@ export class PaymentsService {
   ) {}
 
   /** What the client needs to mount Stripe.js, and whether it is worth trying. */
-  config() {
+  async config() {
+    const cfg = await this.stripe.publicConfig();
     return {
-      configured: this.stripe.configured,
-      publishableKey: this.stripe.publishableKey,
-      webhooksConfigured: this.stripe.webhooksConfigured,
+      configured: cfg.configured,
+      publishableKey: cfg.publishableKey,
+      webhooksConfigured: cfg.hasWebhookSecret,
+      mode: cfg.mode,
     };
   }
 
@@ -133,7 +135,7 @@ export class PaymentsService {
 
     return {
       clientSecret: intent.client_secret,
-      publishableKey: this.stripe.publishableKey,
+      publishableKey: (await this.stripe.publicConfig()).publishableKey,
       amount: balance,
       currency: invoice.currency,
       invoiceNumber: invoice.number,

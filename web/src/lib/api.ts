@@ -1262,6 +1262,39 @@ export const saveZoomCredentials = (input: {
 export const disconnectZoom = () =>
   api<ZoomStatus>("/settings/integrations/zoom/disconnect", { method: "POST" });
 
+// ─── Stripe ───────────────────────────────────────────────────────────────────
+
+export type StripeSettings = {
+  configured: boolean;
+  /** Not a secret — it is embedded in the checkout page — so it round-trips. */
+  publishableKey: string | null;
+  /** The keys themselves are never sent to the browser, only whether they exist. */
+  hasSecretKey: boolean;
+  hasWebhookSecret: boolean;
+  /** Derived from the secret key's prefix, so it cannot disagree with it. */
+  mode: "live" | "test" | "unset";
+  webhookPath: string;
+};
+
+export const fetchStripeSettings = () => api<StripeSettings>("/payments/settings");
+
+/** Blank secrets keep the stored ones — the form never receives them to resend. */
+export const saveStripeSettings = (input: {
+  secretKey?: string;
+  publishableKey?: string;
+  webhookSecret?: string;
+}) =>
+  api<StripeSettings>("/payments/settings", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+
+export const testStripeConnection = () =>
+  api<{ ok: boolean; message: string; currencies?: string[] }>(
+    "/payments/settings/test",
+    { method: "POST" },
+  );
+
 // ─── Payout Calls & Types ──────────────────────────────────────────────────────
 
 export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";

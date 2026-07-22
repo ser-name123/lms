@@ -14,7 +14,8 @@ import {
   Wifi,
   Image as ImageIcon,
   Type,
-  Video
+  Video,
+  CreditCard
 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
@@ -23,8 +24,9 @@ import { useSettingsStore } from "@/store/settings";
 import { useAuth } from "@/store/auth";
 import { ImageCropperModal } from "@/components/image-cropper";
 import { ZoomIntegrationCard } from "@/components/admin/zoom-integration";
+import { StripeIntegrationCard } from "@/components/admin/stripe-integration";
 
-type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "zoom" | "loader";
+type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "zoom" | "stripe" | "loader";
 
 const POPULAR_FONTS = [
   // Clean / Modern Sans
@@ -614,6 +616,17 @@ export default function SettingsPage() {
               >
                 <Video className="size-4.5" />
                 Zoom Integration
+              </button>
+              <button
+                onClick={() => { setActiveTab("stripe"); setStatus(null); }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-bold transition-all duration-200 ${
+                  activeTab === "stripe"
+                    ? "bg-accent text-white"
+                    : "text-ink-2 hover:bg-surface-2"
+                }`}
+              >
+                <CreditCard className="size-4.5" />
+                Payments (Stripe)
               </button>
               <button
                 onClick={() => { setActiveTab("scripts"); setStatus(null); }}
@@ -1304,6 +1317,12 @@ export default function SettingsPage() {
                 {activeTab === "zoom" && (
                   <div className="animate-fade-in border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm">
                     <ZoomIntegrationCard />
+                  </div>
+                )}
+
+                {activeTab === "stripe" && (
+                  <div className="animate-fade-in border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm">
+                    <StripeIntegrationCard />
                   </div>
                 )}
 
