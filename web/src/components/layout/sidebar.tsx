@@ -184,6 +184,10 @@ export function Sidebar() {
     // allowlists above do not gate it — every role reaches its own inbox.
     { label: "Notifications", href: "/notifications", icon: Bell },
     { label: "Trial Classes", href: "/leads", icon: Sparkles },
+    // The coach list is a hand-written duplicate of navGroups, not a filter
+    // over it, so anything added for admins has to be added here too or a coach
+    // simply never sees it. This is one they decide, so it belongs in both.
+    { label: "Subscription Requests", href: "/subscription-requests", icon: ClipboardList },
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },

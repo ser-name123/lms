@@ -5,6 +5,7 @@ import { EmailsService } from '../emails/emails.service';
 import { FinanceSettingsService } from './finance-settings.service';
 import { BillingService } from './billing.service';
 import { PayrollService } from './payroll.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { Role } from '../generated/prisma/enums';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +21,7 @@ export class FinanceAutomationService implements OnModuleInit {
     private readonly settings: FinanceSettingsService,
     private readonly billing: BillingService,
     private readonly payroll: PayrollService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   onModuleInit() {
@@ -124,11 +126,34 @@ export class FinanceAutomationService implements OnModuleInit {
         autoGenerate: true,
         nextRunAt: { not: null, lte: now },
       },
-      select: { id: true, nextRunAt: true },
+      select: { id: true, studentId: true, nextRunAt: true },
       take: 500,
     });
     let count = 0;
     for (const a of assignments) {
+      /*
+       * A cycle turning is the moment an approved package or schedule change
+       * takes effect, so apply it here — before the invoice is raised, so the
+       * new package is what gets billed. The other way round would charge the
+       * family one more cycle of the package they asked to leave.
+       *
+       * Isolated per student: one student's queued change failing must not
+       * stop everybody else's invoices from being generated.
+       */
+      const applied = await this.subscriptions
+        .applyNextCycleFor(a.studentId)
+        .catch((e) => {
+          this.logger.error(
+            `Could not apply the queued subscription change for student ${a.studentId}: ${e?.message ?? e}`,
+          );
+          return null;
+        });
+      if (applied?.applied?.length) {
+        this.logger.log(
+          `Applied queued change for student ${a.studentId}: ${applied.applied.join('; ')}`,
+        );
+      }
+
       const created = await this.billing.generateForAssignment(
         a.id,
         a.nextRunAt ?? now,

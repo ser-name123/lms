@@ -224,6 +224,8 @@ model StudentProfile {
   feeAssignments StudentFeeAssignment[]
   scholarships   Scholarship[]
   parentLinks    ParentLink[]
+  subscriptionRequests SubscriptionRequest[]
+  nextCycle            SubscriptionNextCycle?
 }
 
 // A requested change (teacher / batch / course) that needs approval before it
@@ -247,6 +249,84 @@ model StudentTransfer {
 
   @@index([studentId, status])
   @@index([status])
+}
+
+enum SubscriptionRequestType {
+  PACKAGE_CHANGE
+  SCHEDULE_CHANGE
+}
+
+// PENDING → APPROVED → APPLIED, or PENDING → REJECTED. APPROVED and APPLIED are
+// deliberately separate: approving only writes the next cycle's settings, and
+// nothing the student can see changes until the cycle actually turns. Collapsing
+// them would tell a student their package changed while they are still being
+// billed and taught on the old one.
+enum SubscriptionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+// A student asking to change their package or their class schedule. Students
+// never edit either directly — they raise one of these, an academic coach
+// decides, and an approved change lands at the next billing cycle.
+model SubscriptionRequest {
+  id        String                    @id @default(uuid())
+  studentId String
+  student   StudentProfile            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  type      SubscriptionRequestType
+  status    SubscriptionRequestStatus @default(PENDING)
+  reason    String?
+
+  // PACKAGE_CHANGE
+  requestedPackageId String?
+  requestedPackage   Package? @relation(fields: [requestedPackageId], references: [id], onDelete: SetNull)
+
+  // SCHEDULE_CHANGE
+  requestedDays      String[]  @default([])
+  requestedTime      String? // "18:00", same shape as Batch.startTime
+  requestedStartDate DateTime?
+  // Which batch the change is for, and — when others share it — the batch the
+  // coach moves this student into instead of rewriting everyone's timetable.
+  batchId       String?
+  targetBatchId String?
+
+  // What the student was on when they asked, kept as text: the underlying rows
+  // can change or be deleted, and a decision has to stay readable afterwards.
+  fromLabel String?
+  toLabel   String?
+
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  reviewNotes   String?
+  appliedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, status])
+  @@index([status])
+}
+
+// What this student's subscription becomes when the current cycle ends. Written
+// only by an approval, read only by the rollover. Empty for almost every
+// student almost all the time — a row existing means something is queued.
+model SubscriptionNextCycle {
+  id        String         @id @default(uuid())
+  studentId String         @unique
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  nextPackageId String?
+  nextPackage   Package? @relation(fields: [nextPackageId], references: [id], onDelete: SetNull)
+
+  nextDays      String[]  @default([])
+  nextTime      String?
+  nextStartDate DateTime?
+  nextBatchId   String?
+
+  updatedAt DateTime @updatedAt
 }
 
 // Immutable log for a student — every meaningful action appends one row.
@@ -365,7 +445,21 @@ model Package {
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
 
-  enrollments Enrollment[]
+  /*
+   * The fee plan that bills this package. Packages and billing grew up apart —
+   * a package carried a price nobody charged, while invoices came from a fee
+   * plan that knew nothing about packages. Without this link, approving a
+   * "4 hours → 8 hours" change moves the student onto more classes and keeps
+   * billing them the old amount. Optional because a package may exist before
+   * anyone has decided how to bill it; the approval screen says so plainly
+   * rather than inventing a price.
+   */
+  feePlanId String?
+  feePlan   FeePlan? @relation(fields: [feePlanId], references: [id], onDelete: SetNull)
+
+  enrollments          Enrollment[]
+  subscriptionRequests SubscriptionRequest[]
+  nextCycles           SubscriptionNextCycle[]
 }
 
 // ─── Learning ─────────────────────────────────────────────────────────────────
@@ -2093,6 +2187,7 @@ model FeePlan {
 
   components  FeePlanComponent[]
   assignments StudentFeeAssignment[]
+  packages    Package[]
 
   @@index([active])
 }

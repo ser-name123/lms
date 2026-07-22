@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../prisma/prisma.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { EmailsModule } from '../emails/emails.module';
 
@@ -35,7 +36,7 @@ import { FinanceTeacherService } from './finance-teacher.service';
 import { FinanceAutomationService } from './finance-automation.service';
 
 @Module({
-  imports: [PrismaModule, NotificationsModule, EmailsModule],
+  imports: [PrismaModule, NotificationsModule, EmailsModule, SubscriptionsModule],
   controllers: [
     FinanceController,
     FeePlansController,

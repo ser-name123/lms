@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
   FileCheck2,
   TrendingUp,
+  Package as PackageIcon,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -39,6 +40,7 @@ const studentNavItems = [
   { label: "Assessments", href: "/student/assessments", icon: FileCheck2 },
   { label: "My Progress", href: "/student/progress", icon: TrendingUp },
   { label: "Knowledge Base", href: "/student/knowledgebase", icon: Library },
+  { label: "My Subscription", href: "/student/subscription", icon: PackageIcon },
   { label: "Billing & Invoices", href: "/student/invoices", icon: Receipt },
   { label: "Fees & Payments", href: "/student/fees", icon: Receipt },
   { label: "Support Chat", href: "/student/chat", icon: MessageCircle },

@@ -49,6 +49,15 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   TRIAL_SCHEDULED: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Trial scheduled' },
   TRIAL_ASSIGNED: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Trial assigned' },
   AVAILABILITY_SUBMITTED: { category: Cat.ACADEMIC, priority: Pri.LOW, channels: IN_APP, label: 'Availability submitted' },
+  // A student asking to change their package or schedule, and the two answers.
+  // The decision reaches them by email as well as in-app: it is the reply to
+  // something they asked for and may be days later, so the bell alone is not
+  // enough. SUBSCRIPTION_APPLIED is the one that says it has actually taken
+  // effect — approval only queues it for the next cycle.
+  SUBSCRIPTION_REQUEST: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP, label: 'Subscription change requested' },
+  SUBSCRIPTION_REQUEST_SUBMITTED: { category: Cat.ACADEMIC, priority: Pri.LOW, channels: IN_APP, label: 'Your request was submitted' },
+  SUBSCRIPTION_DECIDED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Subscription request decided' },
+  SUBSCRIPTION_APPLIED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Subscription change applied' },
 
   // ── Attendance ────────────────────────────────────────────────────────────
   ATTENDANCE_RESULT: { category: Cat.ATTENDANCE, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Attendance recorded' },

@@ -3896,3 +3896,149 @@ export const issuePayslip = (payoutId: string) =>
 // Student + teacher self-service
 export const fetchStudentFinance = () => api<any>("/finance/student/dashboard");
 export const fetchTeacherFinance = () => api<any>("/finance/teacher/dashboard");
+
+// ─── Subscriptions: a student asks, a coach decides, the cycle applies ────────
+//
+// Nothing here lets a student change their own package or timetable. They read
+// their subscription and raise a request; approval only writes what the next
+// cycle becomes.
+
+export type SubscriptionStatus = "ACTIVE" | "PAUSED" | "ENDED" | "NONE";
+export type SubscriptionRequestType = "PACKAGE_CHANGE" | "SCHEDULE_CHANGE";
+export type SubscriptionRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "APPLIED";
+
+export interface SubscriptionPackage {
+  id: string;
+  name: string;
+  classesPerMonth: number;
+  price: number;
+}
+
+export interface CurrentSubscription {
+  package: SubscriptionPackage | null;
+  course: { id: string; title: string } | null;
+  schedule: {
+    batchId: string;
+    batchName: string;
+    days: string[];
+    startTime: string | null;
+    endTime: string | null;
+    timeZone: string | null;
+  }[];
+  cycle: {
+    start: string | null;
+    end: string | null;
+    planName: string | null;
+    cycle: string | null;
+    currency: string | null;
+  };
+  status: SubscriptionStatus;
+  /** Already approved and waiting for the cycle to turn. */
+  nextCycle: {
+    package: SubscriptionPackage | null;
+    days: string[];
+    time: string | null;
+    startDate: string | null;
+    batchId: string | null;
+  } | null;
+}
+
+export interface MySubscriptionRequest {
+  id: string;
+  type: SubscriptionRequestType;
+  status: SubscriptionRequestStatus;
+  fromLabel: string | null;
+  toLabel: string | null;
+  reason: string | null;
+  reviewNotes: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  appliedAt: string | null;
+}
+
+export interface StaffSubscriptionRequest extends MySubscriptionRequest {
+  decidedByName: string | null;
+  student: { id: string; code: string; name: string; email: string } | null;
+  requestedPackage: SubscriptionPackage | null;
+  requestedDays: string[];
+  requestedTime: string | null;
+  requestedStartDate: string | null;
+  batchId: string | null;
+  targetBatchId: string | null;
+}
+
+export interface SubscriptionRequestDetail extends StaffSubscriptionRequest {
+  current: CurrentSubscription;
+  comparison: {
+    priceFrom: number;
+    priceTo: number;
+    priceDifference: number;
+    classesFrom: number;
+    classesTo: number;
+    classesDifference: number;
+    /** False when the new package names no fee plan — the bill cannot follow. */
+    billingLinked: boolean;
+  } | null;
+  schedule: {
+    batch: { id: string; name: string; days: string[]; startTime: string | null; endTime: string | null };
+    otherStudentsInBatch: number;
+    canRetimeInPlace: boolean;
+    teacher: {
+      id: string;
+      name: string;
+      availabilityApproved: boolean;
+      perDay: { day: string; free: boolean }[];
+    } | null;
+    teacherClashes: { batchId: string; name: string; days: string[]; startTime: string | null }[];
+    alternatives: { id: string; name: string; daysOfWeek: string[]; startTime: string | null; teacherId: string | null }[];
+  } | null;
+}
+
+// Student
+export const fetchMySubscription = () => api<CurrentSubscription>("/subscriptions/me");
+export const fetchMyPackageOptions = () => api<SubscriptionPackage[]>("/subscriptions/me/packages");
+export const fetchMySubscriptionRequests = () =>
+  api<MySubscriptionRequest[]>("/subscriptions/me/requests");
+export const requestPackageChange = (dto: { packageId: string; reason?: string }) =>
+  api<MySubscriptionRequest>("/subscriptions/me/requests/package", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+export const requestScheduleChange = (dto: {
+  days: string[];
+  time: string;
+  startDate?: string;
+  batchId?: string;
+  reason?: string;
+}) =>
+  api<MySubscriptionRequest>("/subscriptions/me/requests/schedule", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+// Staff
+export const fetchSubscriptionRequests = (params: {
+  page?: number;
+  limit?: number;
+  status?: string;
+  type?: string;
+  search?: string;
+} = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== "") q.set(k, String(v));
+  });
+  return api<{ items: StaffSubscriptionRequest[]; meta: { page: number; limit: number; total: number; totalPages: number } }>(
+    `/subscriptions/requests${q.toString() ? `?${q}` : ""}`,
+  );
+};
+export const fetchSubscriptionRequest = (id: string) =>
+  api<SubscriptionRequestDetail>(`/subscriptions/requests/${id}`);
+export const reviewSubscriptionRequest = (
+  id: string,
+  dto: { approve: boolean; notes?: string; targetBatchId?: string },
+) =>
+  api<StaffSubscriptionRequest>(`/subscriptions/requests/${id}/review`, {
+    method: "PATCH",
+    body: JSON.stringify(dto),
+  });

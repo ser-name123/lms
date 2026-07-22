@@ -28,6 +28,7 @@ import { TeacherRegistrationsModule } from './teacher-registrations/teacher-regi
 import { NotificationsModule } from './notifications/notifications.module';
 import { LeadsModule } from './leads/leads.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { TeacherManagementModule } from './teacher-management/teacher-management.module';
 import { StudentManagementModule } from './student-management/student-management.module';
 import { AssignmentsModule } from './assignments/assignments.module';
@@ -64,6 +65,8 @@ import { FinanceModule } from './finance/finance.module';
     NotificationsModule,
     LeadsModule,
     AttendanceModule,
+
+    SubscriptionsModule,
     TeacherManagementModule,
     StudentManagementModule,
     AssignmentsModule,

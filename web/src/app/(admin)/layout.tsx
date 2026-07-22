@@ -25,6 +25,9 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
     const allowedCoachPrefixes = [
       "/dashboard",
       "/leads",
+      // Coaches are the ones who decide these, so the guard has to let them in
+      // as well as the sidebar showing the link.
+      "/subscription-requests",
       "/evaluation",
       "/students",
       "/teachers",

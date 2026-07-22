@@ -73,6 +73,7 @@ export const navGroups: NavGroup[] = [
     label: "Academics",
     items: [
       { label: "Trial Classes", href: "/leads", icon: Sparkles },
+      { label: "Subscription Requests", href: "/subscription-requests", icon: ClipboardList },
       {
         label: "Students",
         icon: Users,
