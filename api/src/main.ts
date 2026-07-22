@@ -1,7 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { json, urlencoded } from 'express';
+import { json, raw, urlencoded } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
@@ -45,6 +45,15 @@ process.on('unhandledRejection', (reason) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  /*
+   * The Stripe webhook is signed over the EXACT bytes Stripe sent. Parsing the
+   * JSON and re-serialising it changes key order and whitespace, so the
+   * signature no longer verifies and every genuine event is rejected — the
+   * classic way this integration fails. Keep the raw Buffer for that one route
+   * and parse everything else as usual.
+   */
+  app.use('/api/payments/webhook', raw({ type: 'application/json' }));
 
   // Increase payload limits to support base64 image uploads (e.g. logo, favicon)
   app.use(json({ limit: '10mb' }));

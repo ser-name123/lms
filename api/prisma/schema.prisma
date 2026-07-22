@@ -185,6 +185,15 @@ model StudentProfile {
    * and an invoice already issued has its own currency column regardless.
    */
   billingCurrency String    @default("USD")
+
+  /*
+   * The family's Stripe customer, created the first time they pay and reused
+   * after. Kept so a returning family is not asked for their card again, and so
+   * refunds and disputes land on one customer rather than a new one per
+   * invoice. Null until they have paid online at least once.
+   */
+  stripeCustomerId String? @unique
+
   joiningDate     DateTime?
   lastPaymentDate DateTime?
   nextPaymentDate DateTime?
@@ -980,6 +989,32 @@ model Payment {
 
   @@index([invoiceId])
   @@index([status])
+}
+
+/*
+ * Every Stripe webhook we have already handled.
+ *
+ * Stripe redelivers: on a timeout, a non-2xx, or a retry from its dashboard the
+ * same event arrives again, and two deliveries of one payment_intent.succeeded
+ * would record the payment twice. The event id is the natural key, so the
+ * insert itself is the lock — a duplicate hits the unique constraint and is
+ * answered 200 without touching the invoice.
+ *
+ * Failures are kept too, with the error, so a payment that Stripe believes it
+ * delivered can be found rather than guessed at.
+ */
+model StripeWebhookEvent {
+  id          String   @id // Stripe's own event id (evt_...)
+  type        String
+  payload     Json
+  handled     Boolean  @default(false)
+  error       String?
+  invoiceId   String?
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([type])
+  @@index([handled])
 }
 
 // A payment receipt (first-class, numbered, e-mailable/downloadable).

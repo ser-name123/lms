@@ -35,6 +35,7 @@ import { AssignmentsModule } from './assignments/assignments.module';
 import { AssessmentsModule } from './assessments/assessments.module';
 import { ProgressModule } from './progress/progress.module';
 import { FinanceModule } from './finance/finance.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -73,6 +74,8 @@ import { FinanceModule } from './finance/finance.module';
     AssessmentsModule,
     ProgressModule,
     FinanceModule,
+
+    PaymentsModule,
   ],
   controllers: [HealthController],
   providers: [
