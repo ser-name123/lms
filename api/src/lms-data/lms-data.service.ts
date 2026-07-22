@@ -4,6 +4,8 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { CourseStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { bulkDelete } from '../common/bulk-delete';
 
@@ -58,35 +60,186 @@ export class LmsDataService implements OnModuleInit {
   }
 
   // 1. Courses
+  //
+  // A course exists in two places: this flat catalogue (LmsCourse), which is
+  // what the admin page edits, and the relational `Course`, which is what
+  // enrolments, batches, class sessions, assignments, assessments and
+  // subscriptions all point at. They share an id and are written together —
+  // a catalogue entry with no Course behind it is a course nobody can be put
+  // into, which is how this used to behave.
+  //
+  // Counts are read from the relational side rather than from the two stored
+  // columns. Those were typed in by hand, so they claimed 20 students for a
+  // course with no enrolments — and the delete guard believed them, refusing
+  // deletions for students who did not exist and allowing them for students
+  // who did.
   async getCourses() {
-    return this.prisma.lmsCourse.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+    const [courses, enrolments, teacherLinks] = await Promise.all([
+      this.prisma.lmsCourse.findMany({ orderBy: { createdAt: 'desc' } }),
+      this.prisma.enrollment.groupBy({
+        by: ['courseId'],
+        where: { status: { in: ['ACTIVE', 'TRIAL', 'PENDING'] } },
+        _count: { _all: true },
+      }),
+      this.prisma.course.findMany({
+        select: { id: true, _count: { select: { teachers: true } } },
+      }),
+    ]);
+
+    const students = new Map(enrolments.map((e) => [e.courseId, e._count._all]));
+    const teachers = new Map(teacherLinks.map((c) => [c.id, c._count.teachers]));
+
+    return courses.map((c) => ({
+      ...c,
+      studentsCount: students.get(c.id) ?? 0,
+      teachersCount: teachers.get(c.id) ?? 0,
+    }));
   }
 
-  /** Student/teacher counts can never be negative. */
+  /**
+   * The catalogue's words for a course's state, and the enum's.
+   *
+   * Kept as a pair of maps rather than one shared vocabulary because the
+   * catalogue's strings are what the admin page has always shown and the enum
+   * is what every relational reader switches on.
+   */
+  private static readonly COURSE_STATUS_TO_ENUM: Record<string, CourseStatus> = {
+    Active: CourseStatus.PUBLISHED,
+    Draft: CourseStatus.DRAFT,
+    Archived: CourseStatus.ARCHIVED,
+  };
+
+  /** Sanity-clamps the numbers the form sends. Counts are no longer stored. */
   private normaliseCourse(data: any) {
-    const out = { ...data };
-    if (out.studentsCount != null) {
-      out.studentsCount = Math.max(0, Math.round(Number(out.studentsCount) || 0));
-    }
-    if (out.teachersCount != null) {
-      out.teachersCount = Math.max(0, Math.round(Number(out.teachersCount) || 0));
+    const { studentsCount: _s, teachersCount: _t, ...out } = data;
+    if (out.price != null) out.price = Math.max(0, Number(out.price) || 0);
+    if (out.durationWeeks != null) {
+      out.durationWeeks = Math.max(1, Math.round(Number(out.durationWeeks) || 0));
     }
     return out;
   }
 
-  async createCourse(dto: any) {
-    return this.prisma.lmsCourse.create({ data: this.normaliseCourse(dto) });
-  }
-  async updateCourse(id: string, dto: any) {
-    const { id: _, ...data } = dto;
-    return this.prisma.lmsCourse.update({
-      where: { id },
-      data: this.normaliseCourse(data),
+  /** A slug the relational Course can hold, free of any already in use. */
+  private async freeCourseSlug(code: string, id: string) {
+    const base =
+      String(code)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'course';
+    const taken = await this.prisma.course.findFirst({
+      where: { slug: base, id: { not: id } },
+      select: { id: true },
     });
+    return taken ? `${base}-${id.slice(0, 8)}` : base;
   }
+
+  async createCourse(dto: any) {
+    const data = this.normaliseCourse(dto);
+    const id: string = data.id ?? randomUUID();
+    const slug = await this.freeCourseSlug(data.code, id);
+
+    /*
+     * One transaction, so the two rows cannot disagree. Previously the
+     * package equivalent of this wrote the catalogue row, then tried the
+     * relational row inside a try/catch that only logged — leaving a
+     * catalogue entry that nothing could reference and no sign anything
+     * had gone wrong.
+     */
+    const [lmsCourse] = await this.prisma.$transaction([
+      this.prisma.lmsCourse.create({ data: { ...data, id } }),
+      this.prisma.course.create({
+        data: {
+          id,
+          title: data.title,
+          slug,
+          description: data.description ?? null,
+          price: data.price ?? 0,
+          durationWeeks: data.durationWeeks ?? 12,
+          status:
+            LmsDataService.COURSE_STATUS_TO_ENUM[data.status] ?? CourseStatus.DRAFT,
+        },
+      }),
+    ]);
+    return lmsCourse;
+  }
+
+  async updateCourse(id: string, dto: any) {
+    const { id: _, ...raw } = dto;
+    const data = this.normaliseCourse(raw);
+    const existing = await this.prisma.lmsCourse.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Course not found.');
+
+    const code = data.code ?? existing.code;
+    const slug = await this.freeCourseSlug(code, id);
+    const status = data.status ?? existing.status;
+
+    const courseFields = {
+      title: data.title ?? existing.title,
+      slug,
+      description: data.description ?? existing.description,
+      price: data.price ?? existing.price ?? 0,
+      durationWeeks: data.durationWeeks ?? existing.durationWeeks ?? 12,
+      status: LmsDataService.COURSE_STATUS_TO_ENUM[status] ?? CourseStatus.DRAFT,
+    };
+
+    const [lmsCourse] = await this.prisma.$transaction([
+      this.prisma.lmsCourse.update({ where: { id }, data }),
+      // Upsert, not update: rows created before the two lists were joined may
+      // still have no relational half, and an edit is a fine moment to give
+      // them one.
+      this.prisma.course.upsert({
+        where: { id },
+        create: { id, ...courseFields },
+        update: courseFields,
+      }),
+    ]);
+    return lmsCourse;
+  }
+
+  /*
+   * Everything that would be quietly broken by deleting this course.
+   *
+   * Enrolments and batches cascade on the relational side, so without this
+   * the delete succeeds and takes a student's enrolment, their batch, and
+   * every class session in it along with it — silently.
+   */
+  private async assertCourseDeletable(id: string, title: string, code: string) {
+    const [enrolled, batches, material] = await Promise.all([
+      this.prisma.enrollment.count({ where: { courseId: id } }),
+      this.prisma.batch.count({ where: { courseId: id } }),
+      this.prisma.lmsKnowledgebase.count({ where: { courseCode: code } }),
+    ]);
+
+    if (enrolled > 0) {
+      throw new BadRequestException(
+        `"${title}" has ${enrolled} enrolled student${enrolled > 1 ? 's' : ''}. ` +
+          'Move them first — deleting it would take their enrolment with it.',
+      );
+    }
+    if (batches > 0) {
+      throw new BadRequestException(
+        `"${title}" has ${batches} batch${batches > 1 ? 'es' : ''} running on it. ` +
+          'Deleting it would delete those batches and every class session in them.',
+      );
+    }
+    if (material > 0) {
+      throw new BadRequestException(
+        `"${title}" has ${material} knowledgebase item${material > 1 ? 's' : ''} filed under it. ` +
+          'Remove or re-file those first.',
+      );
+    }
+  }
+
   async deleteCourse(id: string) {
+    const course = await this.prisma.lmsCourse.findUnique({
+      where: { id },
+      select: { title: true, code: true },
+    });
+    if (!course) throw new NotFoundException('Course not found.');
+    await this.assertCourseDeletable(id, course.title, course.code);
+
+    await this.prisma.course.delete({ where: { id } }).catch(() => null);
     return this.prisma.lmsCourse.delete({ where: { id } });
   }
 
@@ -232,57 +385,80 @@ export class LmsDataService implements OnModuleInit {
   private normalisePackage(data: any) {
     const out = { ...data };
     if (out.price != null) out.price = Math.max(0, Number(out.price) || 0);
+    if (out.classesPerMonth != null && out.classesPerMonth !== '') {
+      out.classesPerMonth = Math.max(1, Math.round(Number(out.classesPerMonth) || 0));
+    }
+    // An empty select means "no fee plan", which is a null column, not "".
+    if (out.feePlanId === '') out.feePlanId = null;
     return out;
   }
 
-  async createPackage(dto: any) {
-    const lmsPkg = await this.prisma.lmsPackage.create({
-      data: this.normalisePackage(dto),
+  /** Refuses a fee plan id that does not name a real plan. */
+  private async assertFeePlan(feePlanId?: string | null) {
+    if (!feePlanId) return;
+    const plan = await this.prisma.feePlan.findUnique({
+      where: { id: feePlanId },
+      select: { id: true },
     });
-    try {
-      await this.prisma.package.create({
-        data: {
-          id: lmsPkg.id,
-          name: lmsPkg.title,
-          description: lmsPkg.description,
-          price: lmsPkg.price,
-          classesPerMonth: classesFor(lmsPkg),
-          active: lmsPkg.status === 'Active',
-        },
-      });
-    } catch (err) {
-      console.error('Failed to sync Package creation:', err);
-    }
+    if (!plan) throw new BadRequestException('That fee plan no longer exists.');
+  }
+
+  /** The relational half of a package — what enrolments and billing read. */
+  private packageFields(lmsPkg: {
+    title: string;
+    description: string;
+    price: number;
+    status: string;
+    classesPerMonth?: number | null;
+    features?: string[];
+    feePlanId?: string | null;
+  }) {
+    return {
+      name: lmsPkg.title,
+      description: lmsPkg.description,
+      price: lmsPkg.price,
+      classesPerMonth: classesFor(lmsPkg),
+      active: lmsPkg.status === 'Active',
+      feePlanId: lmsPkg.feePlanId ?? null,
+    };
+  }
+
+  async createPackage(dto: any) {
+    const data = this.normalisePackage(dto);
+    await this.assertFeePlan(data.feePlanId);
+    const id: string = data.id ?? randomUUID();
+
+    /*
+     * One transaction. This used to write the catalogue row and then attempt
+     * the relational row inside a try/catch that only logged — so a failure
+     * left a package the admin could see, price and sell, that no enrolment
+     * could ever point at, with nothing on screen to say so.
+     */
+    const [lmsPkg] = await this.prisma.$transaction([
+      this.prisma.lmsPackage.create({ data: { ...data, id } }),
+      this.prisma.package.create({ data: { id, ...this.packageFields(data) } }),
+    ]);
     return lmsPkg;
   }
+
   async updatePackage(id: string, dto: any) {
-    const { id: _, ...data } = dto;
-    const lmsPkg = await this.prisma.lmsPackage.update({
-      where: { id },
-      data: this.normalisePackage(data),
-    });
-    try {
-      await this.prisma.package.upsert({
+    const { id: _, ...raw } = dto;
+    const data = this.normalisePackage(raw);
+    await this.assertFeePlan(data.feePlanId);
+    const existing = await this.prisma.lmsPackage.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Package not found.');
+
+    const merged = { ...existing, ...data };
+    const fields = this.packageFields(merged);
+
+    const [lmsPkg] = await this.prisma.$transaction([
+      this.prisma.lmsPackage.update({ where: { id }, data }),
+      this.prisma.package.upsert({
         where: { id },
-        create: {
-          id: lmsPkg.id,
-          name: lmsPkg.title,
-          description: lmsPkg.description,
-          price: lmsPkg.price,
-          classesPerMonth: classesFor(lmsPkg),
-          active: lmsPkg.status === 'Active',
-        },
-        update: {
-          name: lmsPkg.title,
-          description: lmsPkg.description,
-          price: lmsPkg.price,
-          classesPerMonth: classesFor(lmsPkg),
-          active: lmsPkg.status === 'Active',
-        },
-      });
-    } catch (err) {
-      console.error('Failed to sync Package update:', err);
-    }
+        create: { id, ...fields },
+        update: fields,
+      }),
+    ]);
     return lmsPkg;
   }
   /*
@@ -400,29 +576,13 @@ export class LmsDataService implements OnModuleInit {
     return bulkDelete(ids, async (id) => {
       const course = await this.prisma.lmsCourse.findUnique({
         where: { id },
-        select: { title: true, code: true, studentsCount: true },
+        select: { title: true, code: true },
       });
       if (!course) throw new NotFoundException('Course not found.');
-      if (course.studentsCount > 0) {
-        throw new BadRequestException(
-          `"${course.title}" has ${course.studentsCount} enrolled student${course.studentsCount > 1 ? 's' : ''}. ` +
-            'Move them first — deleting it would leave them without a course.',
-        );
-      }
-      /*
-       * Knowledgebase material is filed under a course code. Deleting the
-       * course would leave that material pointing at a code that no longer
-       * resolves, which reads as missing rather than as orphaned.
-       */
-      const material = await this.prisma.lmsKnowledgebase.count({
-        where: { courseCode: course.code },
-      });
-      if (material > 0) {
-        throw new BadRequestException(
-          `"${course.title}" has ${material} knowledgebase item${material > 1 ? 's' : ''} filed under it. ` +
-            'Remove or re-file those first.',
-        );
-      }
+      // Same guard the single-click delete uses. A rule that holds for a bulk
+      // selection and not for one row is not a rule.
+      await this.assertCourseDeletable(id, course.title, course.code);
+      await this.prisma.course.delete({ where: { id } }).catch(() => null);
       await this.prisma.lmsCourse.delete({ where: { id } });
       return course.title;
     });

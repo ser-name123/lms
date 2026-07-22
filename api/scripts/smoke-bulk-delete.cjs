@@ -140,18 +140,43 @@ async function req(method, path, auth, payload, expect = 200) {
     // ── Courses ──────────────────────────────────────────────────────────────
     console.log('\n── Courses ──');
 
-    const mkCourse = async (suffix, students) => {
+    /*
+     * `students` is the number typed into the old admin form, which is stored
+     * and no longer believed — `enrol` is whether a real Enrollment exists.
+     * The guard counts enrolments now, because the stored figure was a claim:
+     * it read 20 for a course nobody was enrolled in, and blocked the delete
+     * for students who did not exist.
+     *
+     * A relational Course is created alongside, which is what the admin panel
+     * does now and what an enrolment has to point at.
+     */
+    const mkCourse = async (suffix, students, enrol = false) => {
       const { rows } = await db.query(
         `INSERT INTO "LmsCourse" (id,code,title,description,category,level,"studentsCount","createdAt")
          VALUES (gen_random_uuid(),$1,$2,'smoke','Quran','Beginner',$3,now()) RETURNING id`,
         [`${MARKER}-${suffix}`, `${MARKER} ${suffix}`, students],
       );
-      made.lmsCourses.push(rows[0].id);
-      return rows[0].id;
+      const id = rows[0].id;
+      made.lmsCourses.push(id);
+      await db.query(
+        `INSERT INTO "Course" (id,title,slug,price,"updatedAt")
+         VALUES ($1,$2,$3,0,now())`,
+        [id, `${MARKER} ${suffix}`, `${MARKER}-${suffix}`.toLowerCase()],
+      );
+      if (enrol) {
+        await db.query(
+          `INSERT INTO "Enrollment" (id,"studentId","courseId",status,"updatedAt")
+           VALUES (gen_random_uuid(),$1,$2,'ACTIVE',now())`,
+          [student.id, id],
+        );
+      }
+      return id;
     };
 
-    const freeCourse = await mkCourse('free', 0);
-    const busyCourse = await mkCourse('busy', 4);
+    // The claimed count is deliberately the wrong way round: the course with
+    // nobody in it claims 4, and the one with a real student claims 0.
+    const freeCourse = await mkCourse('free', 4);
+    const busyCourse = await mkCourse('busy', 0, true);
 
     const courseRes = await req('POST', '/lms-data/courses/bulk-delete', adminToken, {
       ids: [freeCourse, busyCourse],
@@ -348,7 +373,12 @@ async function req(method, path, auth, payload, expect = 200) {
     await db.query(`DELETE FROM "AssessmentAttempt" WHERE "assessmentId" = ANY($1::text[])`, [made.assessments]);
     await db.query(`DELETE FROM "Assignment" WHERE id = ANY($1::text[])`, [made.assignments]);
     await db.query(`DELETE FROM "Assessment" WHERE id = ANY($1::text[])`, [made.assessments]);
-    await db.query(`DELETE FROM "Course" WHERE id = ANY($1::text[])`, [made.courses]);
+    // Catalogue courses now carry a relational Course of the same id, and
+    // enrolments cascade off it — so this list has to include them or the
+    // student profile below cannot be deleted.
+    await db.query(`DELETE FROM "Course" WHERE id = ANY($1::text[])`, [
+      [...made.courses, ...made.lmsCourses],
+    ]);
     await db.query(`DELETE FROM "LmsKnowledgebase" WHERE id = ANY($1::text[])`, [made.kb]);
     await db.query(`DELETE FROM "LmsPackage" WHERE id = ANY($1::text[])`, [made.packages]);
     await db.query(`DELETE FROM "LmsCourse" WHERE id = ANY($1::text[])`, [made.lmsCourses]);

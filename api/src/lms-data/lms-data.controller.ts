@@ -101,6 +101,7 @@ export class LmsDataController {
    * routes they would otherwise be swallowed by.
    */
   @Post('courses/bulk-delete')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Delete several courses, reporting each outcome' })
   bulkDeleteCourses(@Body() dto: BulkIdsDto) {
     return this.service.deleteCourses(dto.ids);
@@ -113,6 +114,7 @@ export class LmsDataController {
   }
 
   @Post('packages/bulk-delete')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Delete several packages, reporting each outcome' })
   bulkDeletePackages(@Body() dto: BulkIdsDto) {
     return this.service.deletePackages(dto.ids);
@@ -129,19 +131,25 @@ export class LmsDataController {
     return this.service.getCourses();
   }
 
+  // The academy coach runs the curriculum day to day — they decide which
+  // courses exist and which package a student sits on — so the catalogue
+  // writes are theirs as well as the admin's.
   @Post('courses')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Create a course' })
   createCourse(@Body() dto: any) {
     return this.service.createCourse(dto);
   }
 
   @Put('courses/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Update a course' })
   updateCourse(@Param('id') id: string, @Body() dto: any) {
     return this.service.updateCourse(id, dto);
   }
 
   @Delete('courses/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a course' })
   deleteCourse(@Param('id') id: string) {
@@ -270,18 +278,21 @@ export class LmsDataController {
   }
 
   @Post('packages')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Create a package' })
   createPackage(@Body() dto: any) {
     return this.service.createPackage(dto);
   }
 
   @Put('packages/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @ApiOperation({ summary: 'Update a package' })
   updatePackage(@Param('id') id: string, @Body() dto: any) {
     return this.service.updatePackage(id, dto);
   }
 
   @Delete('packages/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a package' })
   deletePackage(@Param('id') id: string) {

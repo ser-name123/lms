@@ -1087,6 +1087,21 @@ model LmsCourse {
   status        String   @default("Active")
   createdAt     String
   description   String
+
+  /*
+   * What a student actually enrols in.
+   *
+   * This catalogue and the relational `Course` grew up apart: an admin created
+   * a course here and it appeared on the courses page and nowhere else — no
+   * enrolment, no batch, no attendance, no subscription could point at it,
+   * because all of those reference `Course`. LmsPackage has mirrored into
+   * `Package` for a while; courses never did.
+   *
+   * These two fields are what `Course` needs and this row did not carry.
+   * Nullable because the rows existed before the columns did.
+   */
+  price         Float?
+  durationWeeks Int?
 }
 
 model LmsAssignment {
@@ -1156,6 +1171,14 @@ model LmsPackage {
    * feature line mentioning any number between 4 and 30 could set it.
    */
   classesPerMonth Int?
+
+  /*
+   * Which fee plan bills this package, mirrored onto the relational `Package`
+   * where the approval screen reads it. Held as a plain id rather than a
+   * relation: this catalogue is flat by design, and the enforced link lives on
+   * `Package.feePlanId`.
+   */
+  feePlanId String?
 }
 
 model LmsClass {

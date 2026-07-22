@@ -31,6 +31,11 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       "/evaluation",
       "/students",
       "/teachers",
+      // The catalogue behind the decisions above: which course a student is
+      // enrolled on and which package they are moved to. The sidebar shows
+      // both to coaches, so this list has to let them through.
+      "/courses",
+      "/packages",
       "/classes",
       "/meetings",
       "/attendance",

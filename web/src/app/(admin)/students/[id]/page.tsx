@@ -23,7 +23,7 @@ import {
   fetchStudentCommunication, sendStudentMgmtMessage, logStudentCommunication,
   fetchStudentTimeline, fetchStudentAudit, fetchStudentMgmtAttendance,
   fetchStudentMgmtAssignments, fetchStudentMgmtPerformance, fetchStudentAssessmentAttempts,
-  fetchStudentsCourses, fetchStudentsTeachers, fetchBatches,
+  fetchStudentsCourses, fetchStudentsTeachers, fetchBatches, fetchLmsPackages,
   fetchCoaches, assignStudentCoach,
   fetchStudentTransfers, requestStudentTransfer, approveTransfer, rejectTransfer,
   issueStudentCertificate, uploadStudentDocument,
@@ -321,24 +321,56 @@ function ParentTab({ s, onSaved }: { s: StudentManagement; onSaved: () => void }
 }
 
 // ── Course / Batch / Teacher assignment ───────────────────────────────────────
+
+/** "Mon, Wed 18:00–19:00", or "" for a batch nobody has given a timetable. */
+function batchSchedule(b: { daysOfWeek: string[]; startTime: string | null; endTime: string | null }) {
+  const days = b.daysOfWeek.map((d) => d.slice(0, 3)).join(", ");
+  const time = b.startTime ? `${b.startTime}${b.endTime ? `–${b.endTime}` : ""}` : "";
+  return [days, time].filter(Boolean).join(" ");
+}
+
 function AssignmentTab({ s, onSaved }: { s: StudentManagement; onSaved: () => void }) {
   const [courses, setCourses] = useState<{ id: string; title: string }[]>([]);
   const [teachers, setTeachers] = useState<{ id: string; user: { firstName: string; lastName: string } }[]>([]);
-  const [batches, setBatches] = useState<{ id: string; code: string; name: string }[]>([]);
-  const [cForm, setCForm] = useState({ courseId: "", teacherId: "", status: "ACTIVE" });
+  /*
+   * Batches carry the weekly schedule, so the list keeps days and times: a
+   * coach moving a student between batches is choosing a timetable, and
+   * "BATCH-0002 · ATT2 Batch" alone does not say which one.
+   */
+  const [batches, setBatches] = useState<{ id: string; code: string; name: string; daysOfWeek: string[]; startTime: string | null; endTime: string | null }[]>([]);
+  /*
+   * The package is what the student is billed on and what their subscription
+   * page reads. Assigning a course without one left `Enrollment.packageId`
+   * null, so the student's own subscription screen had nothing to show and no
+   * package change could be priced — and there was no way to set it anywhere
+   * in the admin panel.
+   */
+  const [packages, setPackages] = useState<{ id: string; title: string; classesPerMonth: number | null; price: number; status: string }[]>([]);
+  const [cForm, setCForm] = useState({ courseId: "", teacherId: "", packageId: "", status: "ACTIVE" });
   const [batchId, setBatchId] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     fetchStudentsCourses().then(setCourses).catch(() => undefined);
     fetchStudentsTeachers().then((t) => setTeachers(t.map((x) => ({ id: x.id, user: x.user })))).catch(() => undefined);
-    fetchBatches().then((r) => setBatches(r.map((b) => ({ id: b.id, code: b.code, name: b.name })))).catch(() => undefined);
+    fetchBatches().then((r) => setBatches(r.map((b) => ({ id: b.id, code: b.code, name: b.name, daysOfWeek: b.daysOfWeek ?? [], startTime: b.startTime ?? null, endTime: b.endTime ?? null })))).catch(() => undefined);
+    fetchLmsPackages().then((p) => setPackages(p.filter((x) => x.status === "Active"))).catch(() => undefined);
   }, []);
 
   const assign = async () => {
     if (!cForm.courseId) return toast("Pick a course", "error");
     setBusy(true);
-    try { await assignStudentCourse(s.id, { courseId: cForm.courseId, teacherId: cForm.teacherId || undefined, status: cForm.status }); onSaved(); toast("Course assigned"); setCForm({ courseId: "", teacherId: "", status: "ACTIVE" }); } catch (e) { fail(e); } finally { setBusy(false); }
+    try {
+      await assignStudentCourse(s.id, {
+        courseId: cForm.courseId,
+        teacherId: cForm.teacherId || undefined,
+        packageId: cForm.packageId || undefined,
+        status: cForm.status,
+      });
+      onSaved();
+      toast("Course assigned");
+      setCForm({ courseId: "", teacherId: "", packageId: "", status: "ACTIVE" });
+    } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const moveBatch = async () => {
     if (!batchId) return toast("Pick a batch", "error");
@@ -365,15 +397,27 @@ function AssignmentTab({ s, onSaved }: { s: StudentManagement; onSaved: () => vo
   const setEnrollStatus = async (enrollmentId: string, status: string) => {
     try { await updateStudentEnrollment(s.id, enrollmentId, { status }); onSaved(); toast("Enrollment updated"); } catch (e) { fail(e); }
   };
+  /*
+   * Re-assigning the same course is the upsert that owns packageId, so this
+   * changes the package in place. "" is sent deliberately — it is the only way
+   * to clear a package back to none.
+   */
+  const setEnrollPackage = async (courseId: string, packageId: string) => {
+    try { await assignStudentCourse(s.id, { courseId, packageId }); onSaved(); toast(packageId ? "Package updated" : "Package removed"); } catch (e) { fail(e); }
+  };
 
   return (
     <div className="space-y-4">
-      <SectionCard title="Assign Course + Teacher" action={<button onClick={assign} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-bold text-white disabled:opacity-50"><Plus className="size-3.5" /> Assign</button>}>
-        <div className="grid gap-3 sm:grid-cols-3">
+      <SectionCard title="Assign Course + Teacher + Package" action={<button onClick={assign} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-bold text-white disabled:opacity-50"><Plus className="size-3.5" /> Assign</button>}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <FieldSel label="Course" value={cForm.courseId} onChange={(v) => setCForm({ ...cForm, courseId: v })} options={["", ...courses.map((c) => c.id)]} render={(v) => v ? (courses.find((c) => c.id === v)?.title ?? v) : "Select course…"} />
           <FieldSel label="Teacher" value={cForm.teacherId} onChange={(v) => setCForm({ ...cForm, teacherId: v })} options={["", ...teachers.map((t) => t.id)]} render={(v) => v ? (() => { const t = teachers.find((x) => x.id === v); return t ? `${t.user.firstName} ${t.user.lastName}` : v; })() : "Select teacher…"} />
+          <FieldSel label="Package" value={cForm.packageId} onChange={(v) => setCForm({ ...cForm, packageId: v })} options={["", ...packages.map((p) => p.id)]} render={(v) => v ? (() => { const p = packages.find((x) => x.id === v); return p ? `${p.title}${p.classesPerMonth ? ` · ${p.classesPerMonth}/mo` : ""}` : v; })() : "No package"} />
           <FieldSel label="Status" value={cForm.status} onChange={(v) => setCForm({ ...cForm, status: v })} options={["ACTIVE", "TRIAL", "PENDING", "PAUSED", "COMPLETED", "CANCELLED"]} />
         </div>
+        <p className="mt-2 text-[11px] text-ink-3">
+          The package decides what the student is billed and what their own subscription page shows. Leave it empty only for a trial.
+        </p>
       </SectionCard>
 
       <SectionCard title="Enrollments (Course · Teacher · Progress)">
@@ -381,8 +425,12 @@ function AssignmentTab({ s, onSaved }: { s: StudentManagement; onSaved: () => vo
           <div className="space-y-2">
             {s.enrollments.map((e) => (
               <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-hairline px-3 py-2 text-sm">
-                <div className="min-w-0"><p className="font-bold text-ink">{e.course}</p><p className="truncate text-xs text-ink-3">{e.teacher || "No teacher"} · {e.package || "No package"} · {e.progress}%</p></div>
+                <div className="min-w-0"><p className="font-bold text-ink">{e.course}</p><p className="truncate text-xs text-ink-3">{e.teacher || "No teacher"} · {e.package ? `${e.package}${e.classesPerMonth ? ` (${e.classesPerMonth}/mo)` : ""}` : "No package"} · {e.progress}%</p></div>
                 <div className="flex items-center gap-2">
+                  <select value={e.packageId ?? ""} onChange={(ev) => setEnrollPackage(e.courseId, ev.target.value)} title="Package" className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink">
+                    <option value="">No package</option>
+                    {packages.map((p) => <option key={p.id} value={p.id}>{p.title}{p.classesPerMonth ? ` · ${p.classesPerMonth}/mo` : ""}</option>)}
+                  </select>
                   <select value={e.status} onChange={(ev) => setEnrollStatus(e.id, ev.target.value)} className="h-8 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold text-ink">
                     {["TRIAL", "PENDING", "ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"].map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
@@ -397,10 +445,10 @@ function AssignmentTab({ s, onSaved }: { s: StudentManagement; onSaved: () => vo
 
       <SectionCard title="Batch" action={<button onClick={moveBatch} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-hairline px-3 text-xs font-bold text-ink-2 hover:bg-surface-2">Change Batch</button>}>
         <div className="grid gap-3 sm:grid-cols-2">
-          <FieldSel label="Move to batch" value={batchId} onChange={setBatchId} options={["", ...batches.map((b) => b.id)]} render={(v) => v ? (() => { const b = batches.find((x) => x.id === v); return b ? `${b.code} · ${b.name}` : v; })() : "Select batch…"} />
+          <FieldSel label="Move to batch" value={batchId} onChange={setBatchId} options={["", ...batches.map((b) => b.id)]} render={(v) => v ? (() => { const b = batches.find((x) => x.id === v); return b ? `${b.code} · ${b.name}${batchSchedule(b) ? ` · ${batchSchedule(b)}` : ""}` : v; })() : "Select batch…"} />
           <div>
             <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-ink-3">Current</p>
-            {s.batches.length === 0 ? <p className="text-sm text-ink-3">Not in any batch</p> : s.batches.map((b) => <Badge key={b.id} tone="neutral">{b.code} · {b.name}</Badge>)}
+            {s.batches.length === 0 ? <p className="text-sm text-ink-3">Not in any batch</p> : s.batches.map((b) => <Badge key={b.id} tone="neutral">{b.code} · {b.name}{b.schedule ? ` · ${b.schedule}` : ""}</Badge>)}
           </div>
         </div>
       </SectionCard>

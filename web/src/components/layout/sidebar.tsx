@@ -22,6 +22,8 @@ import {
   HelpCircle,
   ClipboardCheck,
   TrendingUp,
+  BookOpen,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 
@@ -191,6 +193,11 @@ export function Sidebar() {
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
+    // The coach runs the curriculum, and both of these feed the decisions they
+    // already make: which course a student is enrolled on, and which package
+    // they sit on when a change is approved.
+    { label: "Courses", href: "/courses", icon: BookOpen },
+    { label: "Packages", href: "/packages", icon: Package },
     {
       label: "Schedule",
       icon: CalendarDays,

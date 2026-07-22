@@ -212,7 +212,9 @@ export class StudentManagementService {
         progress: e.progress,
         teacherId: e.teacherId,
         teacher: e.teacher ? `${e.teacher.user.firstName} ${e.teacher.user.lastName}` : null,
+        packageId: e.packageId,
         package: e.package?.name ?? null,
+        classesPerMonth: e.package?.classesPerMonth ?? null,
         startedAt: e.startedAt,
         completedAt: e.completedAt,
       })),
@@ -292,17 +294,30 @@ export class StudentManagementService {
       const t = await this.prisma.teacherProfile.findUnique({ where: { id: dto.teacherId }, select: { id: true } });
       if (!t) throw new BadRequestException('Teacher not found.');
     }
+    /*
+     * The package decides what this student is billed and what their own
+     * subscription page shows, so a bad id has to be refused rather than
+     * stored. An empty string is the form's way of saying "no package" and is
+     * a deliberate clear, not a missing field — see the update below.
+     */
+    if (dto.packageId) {
+      const p = await this.prisma.package.findUnique({ where: { id: dto.packageId }, select: { id: true } });
+      if (!p) throw new BadRequestException('Package not found.');
+    }
     const status = (dto.status as EnrollmentStatus) ?? EnrollmentStatus.ACTIVE;
     const enrollment = await this.prisma.enrollment.upsert({
       where: { studentId_courseId: { studentId: id, courseId: course.id } },
       create: {
         studentId: id, courseId: course.id, teacherId: dto.teacherId ?? null,
-        packageId: dto.packageId ?? null, status,
+        packageId: dto.packageId || null, status,
         startedAt: status === EnrollmentStatus.ACTIVE ? new Date() : null,
       },
       update: {
         teacherId: dto.teacherId ?? undefined,
-        packageId: dto.packageId ?? undefined,
+        // '' means the form chose "No package" — an explicit clear. `undefined`
+        // means the field was not sent at all and the current one stands.
+        // Collapsing the two left a package impossible to remove, silently.
+        packageId: dto.packageId === '' ? null : (dto.packageId ?? undefined),
         status,
       },
     });

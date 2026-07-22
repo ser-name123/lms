@@ -296,6 +296,14 @@ export const fetchStudentsCourses = () => api<{ id: string; title: string }[]>("
 // student on creation. Public GET.
 export const fetchLmsCourses = () =>
   api<{ id: string; code: string; title: string; category: string; level: string; status: string }[]>("/lms-data/courses");
+/*
+ * The package catalogue. Its ids are the relational Package ids, so what comes
+ * back here is what an enrolment's packageId points at — no second lookup.
+ * Public GET, same as the course list beside it.
+ */
+export const fetchLmsPackages = () =>
+  api<{ id: string; title: string; price: number; billing: string; level: string;
+        classesPerMonth: number | null; feePlanId: string | null; status: string }[]>("/lms-data/packages");
 // NOTE: LmsAssignment CRUD (/lms-data/assignments) was retired — assignments now
 // run through the unified AssignmentsModule (createAssignment/listAssignments/… below).
 export const fetchStudentsTeachers = () => api<{ id: string; user: { firstName: string; lastName: string; email: string } }[]>("/students/teachers");
@@ -3196,7 +3204,8 @@ export interface StudentActivityRow {
 }
 export interface StudentEnrollmentRow {
   id: string; courseId: string; course: string; status: string; progress: number;
-  teacherId: string | null; teacher: string | null; package: string | null;
+  teacherId: string | null; teacher: string | null;
+  packageId: string | null; package: string | null; classesPerMonth: number | null;
   startedAt: string | null; completedAt: string | null;
 }
 export interface StudentBatchRow {

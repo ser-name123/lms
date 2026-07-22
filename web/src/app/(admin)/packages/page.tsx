@@ -1,6 +1,6 @@
 "use client";
 
-import { authHeader, bulkDeletePackages } from "@/lib/api";
+import { authHeader, bulkDeletePackages, fetchFeePlans, type FeePlan } from "@/lib/api";
 
 import { useState, useEffect, useCallback } from "react";
 import { 
@@ -48,12 +48,35 @@ const statusBadgeTone: Record<string, Tone> = {
   Inactive: "critical"
 };
 
+/*
+ * These calls read the body without checking the status, so a refusal — "3
+ * students are waiting on a decision to move to this package" — arrived
+ * looking like a success: the row left the table and the dialog said
+ * "Deleted!". Now the server's reason is what gets shown.
+ */
+async function ok(res: Response) {
+  if (res.ok) return res;
+  const body = await res.json().catch(() => null);
+  throw new Error(
+    (Array.isArray(body?.message) ? body.message.join(", ") : body?.message) ||
+      `Request failed (${res.status})`,
+  );
+}
+
 export default function PackagesPage() {
   const [packages, setPackages] = useState(INITIAL_PACKAGES);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
 
   const [availableCourses, setAvailableCourses] = useState<any[]>([]);
+  /*
+   * The fee plan that bills this package. A package carried a price nobody
+   * charged while invoices came from a fee plan that knew nothing about
+   * packages, so approving a "4 hours → 8 hours" change moved the student onto
+   * more classes and kept billing them the old amount. Without a way to set
+   * the link, the approval screen could only say "billing not linked".
+   */
+  const [feePlans, setFeePlans] = useState<FeePlan[]>([]);
 
   const loadPackages = useCallback(() => {
     fetch(`${apiBase}/lms-data/packages`)
@@ -73,6 +96,12 @@ export default function PackagesPage() {
       .then((data: any[]) => {
         setAvailableCourses(data);
       })
+      .catch(console.error);
+
+    // Active plans only: an inactive plan is one nobody should be newly billed
+    // on, and the one already attached is shown by name regardless.
+    fetchFeePlans({ limit: 100, active: "true" })
+      .then((r) => setFeePlans(r.items))
       .catch(console.error);
   }, [apiBase, loadPackages]);
 
@@ -98,6 +127,7 @@ export default function PackagesPage() {
   // How many classes the package actually buys. Typed in, not guessed from the
   // feature list — this number is billed on and shown to students.
   const [formClasses, setFormClasses] = useState<number>(8);
+  const [formFeePlan, setFormFeePlan] = useState("");
   const [formLevel, setFormLevel] = useState("All");
   const [formCourses, setFormCourses] = useState<string[]>([]);
   const [formFeatures, setFormFeatures] = useState<string[]>([]);
@@ -182,6 +212,7 @@ export default function PackagesPage() {
     }).then((result) => {
       if (result.isConfirmed) {
         fetch(`${apiBase}/lms-data/packages/${id}`, { method: "DELETE", headers: authHeader() })
+          .then(ok)
           .then(() => {
             setPackages(prev => prev.filter(p => p.id !== id));
             Swal.fire({
@@ -192,7 +223,7 @@ export default function PackagesPage() {
             });
           })
           .catch(err => {
-            Swal.fire({ title: "Error", text: "Could not delete package.", icon: "error" });
+            Swal.fire({ title: "Could not delete", text: err.message, icon: "error" });
           });
       }
     });
@@ -202,6 +233,11 @@ export default function PackagesPage() {
     setFormTitle("");
     setFormPrice(29);
     setFormBilling("Monthly");
+    // Reset these too. Without it, opening Edit on a package and then Create
+    // carried that package's classes/month and fee plan into the new one —
+    // silently, since both fields look like plausible defaults.
+    setFormClasses(8);
+    setFormFeePlan("");
     setFormLevel("All");
     setFormCourses([]);
     setFormFeatures(["Course Access included", "Email support", "Completion Certificate"]);
@@ -223,6 +259,7 @@ export default function PackagesPage() {
       price: Number(formPrice) || 0,
       billing: formBilling,
       classesPerMonth: Number(formClasses) || null,
+      feePlanId: formFeePlan || null,
       level: formLevel,
       courses: formCourses,
       features: formFeatures.length > 0 ? formFeatures : ["General Access"],
@@ -235,6 +272,7 @@ export default function PackagesPage() {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(newPkg),
     })
+      .then(ok)
       .then(res => res.json())
       .then(savedPkg => {
         setPackages([savedPkg, ...packages]);
@@ -247,7 +285,7 @@ export default function PackagesPage() {
         });
       })
       .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not save package.", icon: "error" });
+        Swal.fire({ title: "Could not save", text: err.message, icon: "error" });
       });
   };
 
@@ -257,6 +295,7 @@ export default function PackagesPage() {
     setFormPrice(pkg.price);
     setFormBilling(pkg.billing);
     setFormClasses(pkg.classesPerMonth ?? 8);
+    setFormFeePlan(pkg.feePlanId ?? "");
     setFormLevel(pkg.level);
     setFormCourses(pkg.courses);
     setFormFeatures(pkg.features);
@@ -279,6 +318,7 @@ export default function PackagesPage() {
       price: Number(formPrice) || 0,
       billing: formBilling,
       classesPerMonth: Number(formClasses) || null,
+      feePlanId: formFeePlan || null,
       level: formLevel,
       courses: formCourses,
       features: formFeatures.length > 0 ? formFeatures : ["General Access"],
@@ -291,6 +331,7 @@ export default function PackagesPage() {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(updatedPayload),
     })
+      .then(ok)
       .then(res => res.json())
       .then(updatedPkg => {
         setPackages(prev => prev.map(p => p.id === updatedPkg.id ? updatedPkg : p));
@@ -303,7 +344,7 @@ export default function PackagesPage() {
         });
       })
       .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not update package.", icon: "error" });
+        Swal.fire({ title: "Could not update", text: err.message, icon: "error" });
       });
   };
 
@@ -803,6 +844,24 @@ export default function PackagesPage() {
                     <option value="Adults">Adults</option>
                   </select>
                 </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Billed by fee plan</label>
+                  <select
+                    value={formFeePlan}
+                    onChange={(e) => setFormFeePlan(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                  >
+                    <option value="">Not linked to billing</option>
+                    {feePlans.map((fp) => (
+                      <option key={fp.id} value={fp.id}>
+                        {fp.name} · {fp.cycle.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-ink-3">
+                    Without this, moving a student onto this package changes their classes but keeps billing them the old amount.
+                  </p>
+                </div>
               </div>
 
               {/* Linked Courses Checklist */}
@@ -988,6 +1047,24 @@ export default function PackagesPage() {
                     <option value="Kids">Kids</option>
                     <option value="Adults">Adults</option>
                   </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Billed by fee plan</label>
+                  <select
+                    value={formFeePlan}
+                    onChange={(e) => setFormFeePlan(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                  >
+                    <option value="">Not linked to billing</option>
+                    {feePlans.map((fp) => (
+                      <option key={fp.id} value={fp.id}>
+                        {fp.name} · {fp.cycle.replace(/_/g, " ").toLowerCase()}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-ink-3">
+                    Without this, moving a student onto this package changes their classes but keeps billing them the old amount.
+                  </p>
                 </div>
               </div>
 

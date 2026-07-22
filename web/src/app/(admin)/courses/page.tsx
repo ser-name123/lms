@@ -49,6 +49,21 @@ const levelBadgeTone: Record<string, Tone> = {
   Advanced: "critical"
 };
 
+/*
+ * Every call here used to read the body without looking at the status, so a
+ * refusal — "this course has 3 enrolled students" — arrived as a success:
+ * the row vanished from the table and the dialog said "Deleted!". The course
+ * was still there on reload. Now the server's reason is what gets shown.
+ */
+async function ok(res: Response) {
+  if (res.ok) return res;
+  const body = await res.json().catch(() => null);
+  throw new Error(
+    (Array.isArray(body?.message) ? body.message.join(", ") : body?.message) ||
+      `Request failed (${res.status})`,
+  );
+}
+
 export default function CoursesPage() {
   const [courses, setCourses] = useState(INITIAL_COURSES);
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
@@ -107,8 +122,18 @@ export default function CoursesPage() {
   const [formTitle, setFormTitle] = useState("");
   const [formCategory, setFormCategory] = useState("");
   const [formLevel, setFormLevel] = useState("Beginner");
-  const [formStudents, setFormStudents] = useState<number>(0);
-  const [formTeachers, setFormTeachers] = useState<number>(0);
+  /*
+   * Price and duration belong to the relational Course a student is actually
+   * enrolled in. Until this form carried them, creating a course here made a
+   * catalogue entry and nothing else — nobody could be enrolled in it.
+   *
+   * The student and teacher counts that used to sit in these two slots were
+   * typed in by hand and believed by the delete guard, so a course could claim
+   * 20 students it did not have. They are now counted from real enrolments and
+   * are not editable.
+   */
+  const [formPrice, setFormPrice] = useState<number>(0);
+  const [formWeeks, setFormWeeks] = useState<number>(12);
   const [formStatus, setFormStatus] = useState("Active");
   const [formDescription, setFormDescription] = useState("");
 
@@ -178,6 +203,7 @@ export default function CoursesPage() {
     }).then((result) => {
       if (result.isConfirmed) {
         fetch(`${apiBase}/lms-data/courses/${id}`, { method: "DELETE", headers: authHeader() })
+          .then(ok)
           .then(() => {
             setCourses(prev => prev.filter(c => c.id !== id));
             Swal.fire({
@@ -188,7 +214,7 @@ export default function CoursesPage() {
             });
           })
           .catch(err => {
-            Swal.fire({ title: "Error", text: "Could not delete course.", icon: "error" });
+            Swal.fire({ title: "Could not delete", text: err.message, icon: "error" });
           });
       }
     });
@@ -199,8 +225,8 @@ export default function CoursesPage() {
     setFormTitle("");
     setFormCategory(categories[0] || "");
     setFormLevel("Beginner");
-    setFormStudents(0);
-    setFormTeachers(0);
+    setFormPrice(0);
+    setFormWeeks(12);
     setFormStatus("Active");
     setFormDescription("");
     setShowAddModal(true);
@@ -227,8 +253,8 @@ export default function CoursesPage() {
       title: formTitle,
       category: formCategory,
       level: formLevel,
-      studentsCount: Number(formStudents) || 0,
-      teachersCount: Number(formTeachers) || 0,
+      price: Number(formPrice) || 0,
+      durationWeeks: Number(formWeeks) || 12,
       status: formStatus,
       createdAt: new Date().toISOString().split("T")[0],
       description: formDescription || "No description provided."
@@ -239,6 +265,7 @@ export default function CoursesPage() {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(newCourse),
     })
+      .then(ok)
       .then(res => res.json())
       .then(savedCourse => {
         setCourses([savedCourse, ...courses]);
@@ -251,7 +278,7 @@ export default function CoursesPage() {
         });
       })
       .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not save course.", icon: "error" });
+        Swal.fire({ title: "Could not save", text: err.message, icon: "error" });
       });
   };
 
@@ -261,8 +288,8 @@ export default function CoursesPage() {
     setFormTitle(course.title);
     setFormCategory(course.category);
     setFormLevel(course.level);
-    setFormStudents(course.studentsCount);
-    setFormTeachers(course.teachersCount);
+    setFormPrice(Number(course.price) || 0);
+    setFormWeeks(Number(course.durationWeeks) || 12);
     setFormStatus(course.status);
     setFormDescription(course.description);
     setShowEditModal(true);
@@ -280,8 +307,8 @@ export default function CoursesPage() {
       title: formTitle,
       category: formCategory,
       level: formLevel,
-      studentsCount: Number(formStudents) || 0,
-      teachersCount: Number(formTeachers) || 0,
+      price: Number(formPrice) || 0,
+      durationWeeks: Number(formWeeks) || 12,
       status: formStatus,
       description: formDescription || "No description provided."
     };
@@ -291,6 +318,7 @@ export default function CoursesPage() {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(updatedPayload),
     })
+      .then(ok)
       .then(res => res.json())
       .then(updatedCourse => {
         setCourses(prev => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
@@ -303,7 +331,7 @@ export default function CoursesPage() {
         });
       })
       .catch(err => {
-        Swal.fire({ title: "Error", text: "Could not update course.", icon: "error" });
+        Swal.fire({ title: "Could not update", text: err.message, icon: "error" });
       });
   };
 
@@ -752,22 +780,25 @@ export default function CoursesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Students Count</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price ($ USD)</label>
                   <input
                     type="number"
                     min="0"
-                    value={formStudents}
-                    onChange={(e) => setFormStudents(Number(e.target.value))}
+                    step="0.01"
+                    value={formPrice}
+                    onChange={(e) => setFormPrice(Number(e.target.value))}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                  <p className="mt-1 text-[10px] text-ink-3">Leave at 0 if the course is only ever sold inside a package.</p>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Teachers Count</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Duration (weeks)</label>
                   <input
                     type="number"
-                    min="0"
-                    value={formTeachers}
-                    onChange={(e) => setFormTeachers(Number(e.target.value))}
+                    min="1"
+                    max="260"
+                    value={formWeeks}
+                    onChange={(e) => setFormWeeks(Number(e.target.value))}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
@@ -875,22 +906,25 @@ export default function CoursesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Students Count</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Price ($ USD)</label>
                   <input
                     type="number"
                     min="0"
-                    value={formStudents}
-                    onChange={(e) => setFormStudents(Number(e.target.value))}
+                    step="0.01"
+                    value={formPrice}
+                    onChange={(e) => setFormPrice(Number(e.target.value))}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                  <p className="mt-1 text-[10px] text-ink-3">Leave at 0 if the course is only ever sold inside a package.</p>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Teachers Count</label>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Duration (weeks)</label>
                   <input
                     type="number"
-                    min="0"
-                    value={formTeachers}
-                    onChange={(e) => setFormTeachers(Number(e.target.value))}
+                    min="1"
+                    max="260"
+                    value={formWeeks}
+                    onChange={(e) => setFormWeeks(Number(e.target.value))}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
