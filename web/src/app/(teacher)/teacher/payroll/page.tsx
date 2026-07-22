@@ -14,6 +14,7 @@ import {
   Printer,
 } from "lucide-react";
 
+import { money as fmtMoney, DEFAULT_CURRENCY, type Currency } from "@/lib/currency";
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
@@ -32,6 +33,8 @@ type Payslip = {
   bonus: number;
   deductions: number;
   netAmount: number;
+  // What this payslip is paid in — from the teacher's own country.
+  currency: Currency;
   status: string;
   paymentDate: string | null;
   referenceNumber: string | null;
@@ -45,6 +48,7 @@ type TeacherFinance = {
     bonus: number;
     deductions: number;
     netPay: number;
+    currency: Currency;
     status: string;
     lifetimePaid: number;
   };
@@ -52,8 +56,9 @@ type TeacherFinance = {
   payslips: Payslip[];
 };
 
-const money = (v: number | null | undefined) =>
-  `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// A payslip names its own currency now, so nothing here assumes dollars.
+const money = (v: number | null | undefined, currency: Currency = DEFAULT_CURRENCY) =>
+  fmtMoney(v, currency);
 
 const statusTone = (status: string): Tone => {
   const s = (status || "").toUpperCase();
@@ -122,14 +127,14 @@ export default function TeacherPayroll() {
           <table>
             <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
             <tbody>
-              <tr><td>Gross Earnings</td><td style="text-align:right">${money(p.gross)}</td></tr>
-              <tr><td>Bonus / Incentives</td><td style="text-align:right" class="pos">+${money(p.bonus)}</td></tr>
-              <tr><td>Deductions</td><td style="text-align:right" class="neg">-${money(p.deductions)}</td></tr>
+              <tr><td>Gross Earnings</td><td style="text-align:right">${money(p.gross, p.currency)}</td></tr>
+              <tr><td>Bonus / Incentives</td><td style="text-align:right" class="pos">+${money(p.bonus, p.currency)}</td></tr>
+              <tr><td>Deductions</td><td style="text-align:right" class="neg">−${money(p.deductions, p.currency)}</td></tr>
             </tbody>
           </table>
           <div class="net">
             <span style="font-weight:700">Net Pay</span>
-            <span class="amt">${money(p.netAmount)}</span>
+            <span class="amt">${money(p.netAmount, p.currency)}</span>
           </div>
           <p class="muted" style="margin-top:32px; text-align:center">This is a computer-generated payslip and does not require a signature.</p>
           <script>window.onload = function(){ window.print(); }</script>
@@ -157,12 +162,12 @@ export default function TeacherPayroll() {
   const payslips = data?.payslips ?? [];
 
   const statCards = [
-    { label: "Current Month Salary", value: money(cards?.currentMonthSalary), icon: DollarSign, color: "accent" },
+    { label: "Current Month Salary", value: money(cards?.currentMonthSalary, cards?.currency), icon: DollarSign, color: "accent" },
     { label: "Classes Conducted", value: String(cards?.classesConducted ?? 0), icon: BookOpen, color: "good" },
     { label: "Hours Taught", value: String(cards?.hoursTaught ?? 0), icon: Clock, color: "warning" },
-    { label: "Bonus", value: money(cards?.bonus), icon: TrendingUp, color: "good" },
-    { label: "Deductions", value: money(cards?.deductions), icon: MinusCircle, color: "critical" },
-    { label: "Net Pay", value: money(cards?.netPay), icon: Wallet, color: "accent" },
+    { label: "Bonus", value: money(cards?.bonus, cards?.currency), icon: TrendingUp, color: "good" },
+    { label: "Deductions", value: money(cards?.deductions, cards?.currency), icon: MinusCircle, color: "critical" },
+    { label: "Net Pay", value: money(cards?.netPay, cards?.currency), icon: Wallet, color: "accent" },
   ] as const;
 
   const colorClass: Record<string, string> = {
@@ -191,7 +196,7 @@ export default function TeacherPayroll() {
           <div className="flex items-center gap-4">
             <div className="text-right">
               <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Lifetime Paid</span>
-              <h4 className="text-sm font-black text-ink mt-0.5">{money(cards?.lifetimePaid)}</h4>
+              <h4 className="text-sm font-black text-ink mt-0.5">{money(cards?.lifetimePaid, cards?.currency)}</h4>
             </div>
             {cards?.status && (
               <Badge tone={statusTone(cards.status)} className="uppercase text-[9px] font-black tracking-wider">

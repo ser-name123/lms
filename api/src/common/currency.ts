@@ -61,3 +61,30 @@ export function priceFor(pkg: PricedPackage | null | undefined, currency: Curren
 export function missingCurrencies(pkg: PricedPackage): Currency[] {
   return SUPPORTED_CURRENCIES.filter((c) => priceFor(pkg, c) == null);
 }
+
+type PricedComponent = {
+  amountUSD: unknown;
+  amountAED?: unknown;
+  amountGBP?: unknown;
+};
+
+/**
+ * The same rule for a fee plan's line items. Separate from `priceFor` only
+ * because the column names differ — the behaviour, including returning null
+ * rather than substituting the dollar figure, is deliberately identical.
+ */
+export function amountFor(
+  component: PricedComponent | null | undefined,
+  currency: Currency,
+): number | null {
+  if (!component) return null;
+  const raw =
+    currency === 'AED'
+      ? component.amountAED
+      : currency === 'GBP'
+        ? component.amountGBP
+        : component.amountUSD;
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}

@@ -65,7 +65,9 @@ const cycleLabel = (c: string) => CYCLES.find(x => x.value === c)?.label || c;
 const money = (amount: number, currency: string) =>
   `${currency} ${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-type ComponentRow = { type: FeeComponentType; label: string; amount: string };
+// One row per component, three amounts each. Held as strings so an empty box
+// stays empty rather than becoming 0 — "free" and "not sold here" differ.
+type ComponentRow = { type: FeeComponentType; label: string; amountUSD: string; amountAED: string; amountGBP: string };
 type Discount = { id: string; name?: string; label?: string; code?: string; type?: string; value?: number; amount?: number };
 type Assignment = {
   id: string;
@@ -110,14 +112,13 @@ export default function FeePlansPage() {
   const [editingPlan, setEditingPlan] = useState<FeePlan | null>(null);
   const [formName, setFormName] = useState("");
   const [formCycle, setFormCycle] = useState<FeePlanCycle>("MONTHLY");
-  const [formCurrency, setFormCurrency] = useState("INR");
   const [formDescription, setFormDescription] = useState("");
   const [formActive, setFormActive] = useState(true);
   const [formComponents, setFormComponents] = useState<ComponentRow[]>([
-    { type: "COURSE", label: "Course Fee", amount: "" }
+    { type: "COURSE", label: "Course Fee", amountUSD: "", amountAED: "", amountGBP: "" }
   ]);
 
-  const componentsTotal = formComponents.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const componentsTotal = formComponents.reduce((sum, c) => sum + (Number(c.amountUSD) || 0), 0);
 
   // ─── Assign plan modal ─────────────────────────────────────────────────────
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -184,7 +185,7 @@ export default function FeePlansPage() {
 
   // ─── Component row editor helpers ──────────────────────────────────────────
   const addComponentRow = () =>
-    setFormComponents(prev => [...prev, { type: "OTHER", label: "", amount: "" }]);
+    setFormComponents(prev => [...prev, { type: "OTHER", label: "", amountUSD: "", amountAED: "", amountGBP: "" }]);
 
   const removeComponentRow = (idx: number) =>
     setFormComponents(prev => prev.filter((_, i) => i !== idx));
@@ -197,10 +198,9 @@ export default function FeePlansPage() {
     setEditingPlan(null);
     setFormName("");
     setFormCycle("MONTHLY");
-    setFormCurrency("INR");
     setFormDescription("");
     setFormActive(true);
-    setFormComponents([{ type: "COURSE", label: "Course Fee", amount: "" }]);
+    setFormComponents([{ type: "COURSE", label: "Course Fee", amountUSD: "", amountAED: "", amountGBP: "" }]);
     setShowPlanModal(true);
   };
 
@@ -208,13 +208,14 @@ export default function FeePlansPage() {
     setEditingPlan(plan);
     setFormName(plan.name);
     setFormCycle(plan.cycle);
-    setFormCurrency(plan.currency || "INR");
     setFormDescription(plan.description || "");
     setFormActive(plan.active);
     setFormComponents(
       plan.components.length > 0
-        ? plan.components.map(c => ({ type: c.type, label: c.label, amount: String(c.amount) }))
-        : [{ type: "COURSE", label: "Course Fee", amount: "" }]
+        ? plan.components.map(c => ({ type: c.type, label: c.label, amountUSD: String(c.amountUSD),
+            amountAED: c.amountAED == null ? "" : String(c.amountAED),
+            amountGBP: c.amountGBP == null ? "" : String(c.amountGBP) }))
+        : [{ type: "COURSE", label: "Course Fee", amountUSD: "", amountAED: "", amountGBP: "" }]
     );
     setShowPlanModal(true);
   };
@@ -226,8 +227,13 @@ export default function FeePlansPage() {
       return;
     }
     const cleanComponents = formComponents
-      .filter(c => c.label.trim() && Number(c.amount) > 0)
-      .map(c => ({ type: c.type, label: c.label.trim(), amount: Number(c.amount) }));
+      .filter(c => c.label.trim() && Number(c.amountUSD) > 0)
+      .map(c => ({
+        type: c.type, label: c.label.trim(),
+        amountUSD: Number(c.amountUSD),
+        amountAED: c.amountAED === "" ? undefined : Number(c.amountAED),
+        amountGBP: c.amountGBP === "" ? undefined : Number(c.amountGBP),
+      }));
     if (cleanComponents.length === 0) {
       Swal.fire({ title: "No Components", text: "Add at least one fee component with a label and amount.", icon: "error" });
       return;
@@ -236,7 +242,6 @@ export default function FeePlansPage() {
     const dto = {
       name: formName.trim(),
       cycle: formCycle,
-      currency: formCurrency.trim() || "INR",
       description: formDescription.trim() || undefined,
       active: formActive,
       components: cleanComponents
@@ -382,8 +387,9 @@ export default function FeePlansPage() {
     });
   };
 
+  // Totals are quoted in USD, the one amount every component must carry.
   const planTotal = (plan: FeePlan) =>
-    plan.components.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    plan.components.reduce((sum, c) => sum + Number(c.amountUSD || 0), 0);
 
   return (
     <>
@@ -499,7 +505,18 @@ export default function FeePlansPage() {
                               <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline text-ink-3">{c.type}</span>
                               {c.label}
                             </span>
-                            <span className="text-ink font-bold">{money(Number(c.amount), plan.currency)}</span>
+                            {/* All three, so a component nobody priced in a
+                                currency is visible here rather than only when
+                                a family's invoice silently fails to generate. */}
+                            <span className="text-ink font-bold">
+                              {money(Number(c.amountUSD), "USD")}
+                              <span className={c.amountAED == null ? "text-critical" : "text-ink-3"}>
+                                {"  ·  "}{c.amountAED == null ? "no AED" : money(Number(c.amountAED), "AED")}
+                              </span>
+                              <span className={c.amountGBP == null ? "text-critical" : "text-ink-3"}>
+                                {"  ·  "}{c.amountGBP == null ? "no GBP" : money(Number(c.amountGBP), "GBP")}
+                              </span>
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -731,16 +748,13 @@ export default function FeePlansPage() {
                     {CYCLES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Currency</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. INR, USD"
-                    value={formCurrency}
-                    onChange={(e) => setFormCurrency(e.target.value.toUpperCase())}
-                    className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent uppercase"
-                  />
-                </div>
+                {/*
+                  The plan no longer names a currency. It prices its components
+                  in all three below, and an invoice is raised in the currency
+                  the student is billed in — one field here saying otherwise is
+                  what made a family's first invoice and every one after it
+                  disagree.
+                */}
               </div>
 
               <div>
@@ -783,14 +797,39 @@ export default function FeePlansPage() {
                       onChange={(e) => updateComponentRow(idx, { label: e.target.value })}
                       className="h-9 flex-1 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent"
                     />
+                    {/*
+                      One box per currency. USD is required — it is what a
+                      total is quoted in. Leave AED or GBP blank and families
+                      billed in it cannot be invoiced from this plan, which the
+                      package form refuses to link and the list flags in red.
+                    */}
                     <input
                       type="number"
                       min="0"
                       step="0.01"
-                      placeholder="Amount"
-                      value={c.amount}
-                      onChange={(e) => updateComponentRow(idx, { amount: e.target.value })}
-                      className="h-9 w-28 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold"
+                      placeholder="USD"
+                      required
+                      value={c.amountUSD}
+                      onChange={(e) => updateComponentRow(idx, { amountUSD: e.target.value })}
+                      className="h-9 w-24 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="AED"
+                      value={c.amountAED}
+                      onChange={(e) => updateComponentRow(idx, { amountAED: e.target.value })}
+                      className="h-9 w-24 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="GBP"
+                      value={c.amountGBP}
+                      onChange={(e) => updateComponentRow(idx, { amountGBP: e.target.value })}
+                      className="h-9 w-24 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold"
                     />
                     <button
                       type="button"
@@ -806,7 +845,7 @@ export default function FeePlansPage() {
 
                 <div className="flex items-center justify-between border-t border-hairline pt-3">
                   <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Computed Plan Total</span>
-                  <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">{money(componentsTotal, formCurrency || "INR")}</span>
+                  <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">{money(componentsTotal, "USD")}</span>
                 </div>
               </div>
 

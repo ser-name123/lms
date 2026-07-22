@@ -18,6 +18,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { fetchStudentInvoices, payStudentInvoice } from "@/lib/api";
+import { money, type Currency } from "@/lib/currency";
 
 export default function StudentInvoices() {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -73,7 +74,7 @@ export default function StudentInvoices() {
 
       Swal.fire({
         title: "Payment Received!",
-        text: `Your payment of $${Number(payingInvoice.amount).toLocaleString()} was processed successfully. Thank you!`,
+        text: `Your payment of ${money(Number(payingInvoice.amount), (payingInvoice.currency ?? "USD") as Currency)} was processed successfully. Thank you!`,
         icon: "success",
         confirmButtonColor: "#10b981",
       });
@@ -176,7 +177,7 @@ export default function StudentInvoices() {
                           {inv.dueAt ? new Date(inv.dueAt).toLocaleDateString() : "Upon Receipt"}
                         </td>
                         <td className="px-6 py-4 font-extrabold text-xs text-ink">
-                          ${Number(inv.amount).toLocaleString()}
+                          {money(Number(inv.amount), (inv.currency ?? "USD") as Currency)}
                         </td>
                         <td className="px-6 py-4 text-xs">
                           {isPaid ? "Stripe Checkout" : "Online card payment"}
@@ -250,7 +251,7 @@ export default function StudentInvoices() {
                 </div>
                 <div className="flex justify-between text-sm font-bold text-ink-2">
                   <span>Amount to pay:</span>
-                  <span className="text-emerald-600">${Number(payingInvoice.amount).toFixed(2)}</span>
+                  <span className="text-emerald-600">{money(Number(payingInvoice.amount), (payingInvoice.currency ?? "USD") as Currency)}</span>
                 </div>
               </div>
 

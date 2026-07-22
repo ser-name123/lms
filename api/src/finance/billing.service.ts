@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { amountFor, DEFAULT_CURRENCY, type Currency } from '../common/currency';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailsService } from '../emails/emails.service';
 import { FinanceSettingsService } from './finance-settings.service';
@@ -41,6 +43,8 @@ const STUDENT_SELECT = {
 
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -164,18 +168,37 @@ export class BillingService {
 
     // Resolve line items — explicit items win, else expand a fee plan.
     let items: InvoiceItemInput[] = dto.items ?? [];
-    let currency = dto.currency ?? cfg.currency;
+    /*
+     * Whoever raises this invoice says which currency, then the student they
+     * are raising it for, then the academy default — a fee plan no longer has
+     * one of its own to fall back to.
+     */
+    let currency = (dto.currency ?? cfg.currency) as Currency;
+    if (dto.studentId && !dto.currency) {
+      const billing = await this.prisma.studentProfile.findUnique({
+        where: { id: dto.studentId },
+        select: { billingCurrency: true },
+      });
+      if (billing) currency = billing.billingCurrency as Currency;
+    }
     if ((!items || items.length === 0) && dto.feePlanId) {
       const plan = await this.prisma.feePlan.findUnique({
         where: { id: dto.feePlanId },
         include: { components: true },
       });
       if (!plan) throw new NotFoundException('Fee plan not found');
-      currency = dto.currency ?? plan.currency;
+      const unpriced = plan.components.filter((c) => amountFor(c, currency) == null);
+      if (unpriced.length) {
+        throw new BadRequestException(
+          `"${plan.name}" has no ${currency} amount for ` +
+            `${unpriced.map((c) => `"${c.label}"`).join(', ')}. Set it on the fee plans page — ` +
+            'billing it at the dollar figure would charge the wrong amount.',
+        );
+      }
       items = plan.components.map((c) => ({
         type: c.type,
         label: c.label,
-        amount: Number(c.amount),
+        amount: amountFor(c, currency)!,
       }));
     }
     if (!items || items.length === 0) {
@@ -335,10 +358,39 @@ export class BillingService {
   async generateForAssignment(assignmentId: string, forDate: Date) {
     const assignment = await this.prisma.studentFeeAssignment.findUnique({
       where: { id: assignmentId },
-      include: { plan: { include: { components: true } } },
+      include: {
+        plan: { include: { components: true } },
+        student: { select: { billingCurrency: true } },
+      },
     });
     if (!assignment || !assignment.plan) return null;
     if (!assignment.plan.components.length) return null;
+
+    /*
+     * The currency comes from the family, not from the plan.
+     *
+     * The plan used to carry one, so a student enrolled in dirhams was
+     * invoiced in dirhams once and in dollars every cycle after — same
+     * package, two currencies, two amounts, and nothing on screen said so.
+     *
+     * A component the academy has not priced in this currency stops the
+     * invoice rather than being billed at the dollar figure. Loud on purpose:
+     * a missing price is a five-second fix on the fee plans page, whereas a
+     * family charged 40 dirhams instead of 160 may not notice for months.
+     */
+    const currency = (assignment.student?.billingCurrency ??
+      DEFAULT_CURRENCY) as Currency;
+    const unpriced = assignment.plan.components.filter(
+      (c) => amountFor(c, currency) == null,
+    );
+    if (unpriced.length) {
+      this.logger.error(
+        `Fee plan "${assignment.plan.name}" has no ${currency} amount for ` +
+          `${unpriced.map((c) => `"${c.label}"`).join(', ')}, so no invoice was raised ` +
+          `for student ${assignment.studentId}. Set it on the fee plans page.`,
+      );
+      return null;
+    }
 
     const periodStart = new Date(forDate);
     // Skip if we already billed this assignment for this period.
@@ -366,7 +418,7 @@ export class BillingService {
     const items = assignment.plan.components.map((c) => ({
       type: c.type as FeeComponentType,
       label: c.label,
-      amount: Number(c.amount),
+      amount: amountFor(c, currency)!,
     }));
     const totals = computeInvoiceTotals({
       items,
@@ -386,7 +438,7 @@ export class BillingService {
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
         taxAmount: totals.taxAmount,
-        currency: assignment.plan.currency,
+        currency,
         status: InvoiceStatus.SENT,
         feePlanId: assignment.planId,
         assignmentId: assignment.id,

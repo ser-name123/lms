@@ -41,6 +41,21 @@ export function detectCurrency(): Currency {
   return currencyForIso(detectCountry()?.iso2);
 }
 
+/**
+ * What a fee-plan component costs in one currency, or null when the academy
+ * has not priced it there. Mirrors the server's `amountFor`, including
+ * returning null rather than falling back to the dollar figure.
+ */
+export function amountIn(
+  component: { amountUSD: number; amountAED: number | null; amountGBP: number | null } | null | undefined,
+  currency: Currency,
+): number | null {
+  if (!component) return null;
+  const raw =
+    currency === "AED" ? component.amountAED : currency === "GBP" ? component.amountGBP : component.amountUSD;
+  return raw == null || !Number.isFinite(Number(raw)) ? null : Number(raw);
+}
+
 const SYMBOLS: Record<Currency, string> = { USD: "$", AED: "AED ", GBP: "£" };
 
 /**

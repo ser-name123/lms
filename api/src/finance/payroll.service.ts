@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { currencyForCountry } from '../common/currency';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -208,6 +209,9 @@ export class PayrollService {
           id: true,
           role: true,
           salary: true,
+          // Their country decides the currency on the payslip: every other money
+          // row names its currency, a payout named none and was read as dollars.
+          country: true,
           teacherProfile: { select: { id: true, hourlyRate: true } },
         },
       }),
@@ -238,6 +242,7 @@ export class PayrollService {
           deductions: 0,
           bonus,
           netAmount: round2(amount + bonus),
+          currency: currencyForCountry(emp.country),
           paymentMethod: PayoutMethod.BANK_TRANSFER,
           status: PayoutStatus.PENDING,
           billingPeriodStart: start,

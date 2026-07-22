@@ -31,9 +31,28 @@ export class FeeComponentInput {
   @MinLength(1)
   label!: string;
 
+  /*
+   * One amount per currency, as packages carry. A component used to hold a
+   * single figure and the plan named the currency, so a family enrolled in
+   * dirhams was billed in dollars from their second cycle on.
+   *
+   * AED and GBP are optional; a cycle that cannot be priced in the family's
+   * currency raises no invoice and says so, rather than billing them in
+   * somebody else's money.
+   */
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amountUSD!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amountAED?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amountGBP?: number;
 }
 
 export class CreateFeePlanDto {
@@ -47,10 +66,6 @@ export class CreateFeePlanDto {
   @IsOptional()
   @IsString()
   courseId?: string;
-
-  @IsOptional()
-  @IsString()
-  currency?: string;
 
   @IsOptional()
   @IsString()

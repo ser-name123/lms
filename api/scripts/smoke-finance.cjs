@@ -65,8 +65,10 @@ async function main() {
     ok(disc.id, 'create discount');
 
     const plan = await req(users.ADMIN, 'POST', '/finance/fee-plans', {
-      name: 'SMOKE Plan', cycle: 'MONTHLY', currency: 'USD',
-      components: [{ type: 'COURSE', label: 'Course Fee', amount: 100 }],
+      name: 'SMOKE Plan', cycle: 'MONTHLY',
+      // Priced in all three: a plan no longer names one currency, and a family
+      // billed in a currency it lacks cannot be invoiced from it.
+      components: [{ type: 'COURSE', label: 'Course Fee', amountUSD: 100, amountAED: 400, amountGBP: 80 }],
     });
     created.planId = plan.id;
     ok(plan.components.length === 1, 'create fee plan');

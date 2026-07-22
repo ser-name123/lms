@@ -3224,6 +3224,8 @@ export interface StudentBatchRow {
 }
 export interface StudentManagement {
   id: string; studentCode: string; status: string;
+  /* What this family is billed in; `fees` is an amount in it. */
+  billingCurrency: Currency;
   onHoldReason: string | null; onHoldAt: string | null;
   coachId: string | null; coach: string | null;
   user: { id: string; firstName: string; lastName: string; email: string; avatarUrl: string | null; country: string | null; timezone: string | null; lastLoginAt: string | null; createdAt: string };
@@ -3788,7 +3790,12 @@ export type FinanceInvoiceStatus =
   | "DRAFT" | "SENT" | "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED" | "VOID";
 export type PayrollModel = "FIXED" | "PER_CLASS" | "PER_HOUR" | "PER_STUDENT" | "HYBRID";
 
-export interface FeePlanComponent { id?: string; type: FeeComponentType; label: string; amount: number }
+export interface FeePlanComponent {
+  id?: string; type: FeeComponentType; label: string;
+  // One amount per currency, as packages carry. AED/GBP null means the academy
+  // has not priced it there, and a family billed in it cannot be invoiced.
+  amountUSD: number; amountAED: number | null; amountGBP: number | null;
+}
 export interface FeePlan {
   id: string; name: string; cycle: FeePlanCycle; courseId: string | null;
   currency: string; description: string | null; active: boolean;

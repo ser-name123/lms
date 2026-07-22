@@ -101,14 +101,14 @@ const ids = {};
       ['big', `${MARKER}-plan-8h`, 75],
     ]) {
       const { rows } = await db.query(
-        `INSERT INTO "FeePlan" (id,name,cycle,currency,active,"updatedAt")
-         VALUES (gen_random_uuid(),$1,'MONTHLY','USD',true,now()) RETURNING id`,
+        `INSERT INTO "FeePlan" (id,name,cycle,active,"updatedAt")
+         VALUES (gen_random_uuid(),$1,'MONTHLY',true,now()) RETURNING id`,
         [name],
       );
       plans[key] = rows[0].id;
       await db.query(
-        `INSERT INTO "FeePlanComponent" (id,"planId",type,label,amount)
-         VALUES (gen_random_uuid(),$1,'COURSE','Tuition',$2)`,
+        `INSERT INTO "FeePlanComponent" (id,"planId",type,label,"amountUSD","amountAED","amountGBP")
+         VALUES (gen_random_uuid(),$1,'COURSE','Tuition',$2::numeric,$2::numeric*4,$2::numeric*0.8)`,
         [plans[key], amount],
       );
     }

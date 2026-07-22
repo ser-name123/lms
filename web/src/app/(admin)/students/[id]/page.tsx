@@ -200,6 +200,10 @@ function OverviewTab({ s, onSaved }: { s: StudentManagement; onSaved: () => void
     { label: "Pending Assignments", value: s.cards.pendingAssignments },
     { label: "Completed Assignments", value: s.cards.completedAssignments },
     { label: "Fees Due (invoices)", value: s.cards.dueInvoices },
+    // Fixed when the account was made, from the country on it. Shown because
+    // every fee figure on this student is an amount in it and carried no
+    // currency of its own.
+    { label: "Billed in", value: s.billingCurrency },
   ];
   return (
     <div className="space-y-5">

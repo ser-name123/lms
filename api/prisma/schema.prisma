@@ -1265,6 +1265,12 @@ model Payout {
   deductions         Decimal      @default(0) @db.Decimal(10, 2)
   bonus              Decimal      @default(0) @db.Decimal(10, 2)
   netAmount          Decimal      @db.Decimal(10, 2)
+  /*
+   * What the teacher is paid in. Every other money row in the system names its
+   * currency; a payslip did not, so it was read as dollars wherever it was
+   * shown, whichever country the teacher is in.
+   */
+  currency           String       @default("USD")
   paymentMethod      PayoutMethod @default(BANK_TRANSFER)
   status             PayoutStatus @default(PENDING)
   paymentDate        DateTime?
@@ -2243,7 +2249,12 @@ model FeePlan {
   name        String
   cycle       FeePlanCycle @default(MONTHLY)
   courseId    String?      // optional link to a course (plain id, resolved in service)
-  currency    String       @default("USD")
+  /*
+   * No `currency` here any more. A plan prices its components in all three, and
+   * an invoice is raised in the currency the *student* is billed in — a field
+   * on the plan saying otherwise was the second source of truth that made
+   * recurring invoices disagree with the first one.
+   */
   description String?
   active      Boolean      @default(true)
   createdAt   DateTime     @default(now())
@@ -2262,7 +2273,20 @@ model FeePlanComponent {
   plan   FeePlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
   type   FeeComponentType @default(COURSE)
   label  String
-  amount Decimal          @db.Decimal(10, 2)
+
+  /*
+   * One amount per currency, exactly as a package carries. A plan used to hold
+   * a single figure plus a `currency` on the plan itself, so a family in Dubai
+   * got their first invoice in dirhams and every recurring one after it in
+   * dollars — the same package billed in two currencies at two amounts.
+   *
+   * AED and GBP are nullable because these rows predate them. A cycle that
+   * cannot be priced in the family's currency raises no invoice and says so,
+   * rather than billing them in somebody else's money.
+   */
+  amountUSD Decimal        @db.Decimal(10, 2)
+  amountAED Decimal?       @db.Decimal(10, 2)
+  amountGBP Decimal?       @db.Decimal(10, 2)
 
   @@index([planId])
 }

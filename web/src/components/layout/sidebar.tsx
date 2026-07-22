@@ -24,6 +24,7 @@ import {
   TrendingUp,
   BookOpen,
   Package,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -198,6 +199,9 @@ export function Sidebar() {
     // they sit on when a change is approved.
     { label: "Courses", href: "/courses", icon: BookOpen },
     { label: "Packages", href: "/packages", icon: Package },
+    // /finance has been in the coach's route allowlist all along; only the
+    // link was missing, so they could reach it by URL and never see it.
+    { label: "Finance", href: "/finance", icon: Wallet },
     {
       label: "Schedule",
       icon: CalendarDays,

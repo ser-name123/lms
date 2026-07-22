@@ -122,7 +122,9 @@ export class SubscriptionsService {
       this.prisma.studentFeeAssignment.findFirst({
         where: { studentId },
         orderBy: { createdAt: 'desc' },
-        include: { plan: { select: { id: true, name: true, cycle: true, currency: true } } },
+        // No currency on the plan any more — the family's own is what every
+        // amount in this payload is in, and it is reported at the top level.
+        include: { plan: { select: { id: true, name: true, cycle: true } } },
       }),
       this.prisma.subscriptionNextCycle.findUnique({
         where: { studentId },
@@ -148,9 +150,8 @@ export class SubscriptionsService {
       .filter((b) => b.daysOfWeek.length || b.startTime);
 
     return {
-      // What every amount in this payload is denominated in. The fee plan
-      // carries a currency of its own below; this one is the family's, and it
-      // is the one the screen must label its numbers with.
+      // What every amount in this payload is denominated in — the family's own,
+      // and now the only currency in the system's answer for them.
       currency,
       package: enrolment?.package
         ? {
@@ -176,7 +177,6 @@ export class SubscriptionsService {
         end: cycleEnd,
         planName: assignment?.plan?.name ?? null,
         cycle: assignment?.plan?.cycle ?? null,
-        currency: assignment?.plan?.currency ?? null,
       },
       status: this.statusOf(assignment),
       // What is already queued for next cycle, so the panel can say "changing

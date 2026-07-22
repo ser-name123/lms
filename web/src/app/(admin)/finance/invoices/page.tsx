@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/store/settings";
+import { amountIn, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES, type Currency } from "@/lib/currency";
 import {
   fetchFinanceInvoices,
   fetchFinanceInvoice,
@@ -141,7 +142,10 @@ export default function FinanceInvoicesPage() {
   const [genItems, setGenItems] = useState<LineItem[]>([{ type: "COURSE", label: "Course Fee", amount: "" }]);
   const [genDiscountId, setGenDiscountId] = useState("");
   const [genTaxPct, setGenTaxPct] = useState("");
-  const [genCurrency, setGenCurrency] = useState("INR");
+  // One of the three the academy sells in (it was a free-text box defaulting
+  // to a currency nothing else in the system uses), and the fee plan below is
+  // read in whichever is picked.
+  const [genCurrency, setGenCurrency] = useState<Currency>(DEFAULT_CURRENCY);
   const [genPeriodLabel, setGenPeriodLabel] = useState("");
   const [genDueDate, setGenDueDate] = useState("");
   const [genNotes, setGenNotes] = useState("");
@@ -214,7 +218,7 @@ export default function FinanceInvoicesPage() {
     setGenItems(prev => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
 
   const genSubtotal = itemSource === "plan"
-    ? (feePlans.find(p => p.id === genFeePlanId)?.components.reduce((s, c) => s + Number(c.amount || 0), 0) || 0)
+    ? (feePlans.find(p => p.id === genFeePlanId)?.components.reduce((s, c) => s + Number(amountIn(c, genCurrency) ?? 0), 0) || 0)
     : genItems.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const genTaxAmount = genSubtotal * (Number(genTaxPct) || 0) / 100;
   const genEstTotal = genSubtotal + genTaxAmount;
@@ -229,20 +233,15 @@ export default function FinanceInvoicesPage() {
     setGenItems([{ type: "COURSE", label: "Course Fee", amount: "" }]);
     setGenDiscountId("");
     setGenTaxPct("");
-    setGenCurrency(feePlans[0]?.currency || "INR");
+    setGenCurrency(DEFAULT_CURRENCY);
     setGenPeriodLabel("");
     setGenDueDate(new Date(Date.now() + 14 * 864e5).toISOString().split("T")[0]);
     setGenNotes("");
     setShowGenModal(true);
   };
 
-  // Keep currency synced to selected fee plan when using plan mode.
-  useEffect(() => {
-    if (itemSource === "plan" && genFeePlanId) {
-      const p = feePlans.find(fp => fp.id === genFeePlanId);
-      if (p?.currency) setGenCurrency(p.currency);
-    }
-  }, [genFeePlanId, itemSource]);
+  // A fee plan no longer carries a currency to sync from — it prices in all
+  // three, and whoever raises the invoice picks which one.
 
   const handleGenerate = (statusToSave: "DRAFT" | "SENT") => {
     if (recipientOption === "student" && !genStudentId) {
@@ -269,7 +268,7 @@ export default function FinanceInvoicesPage() {
     }
 
     const dto: Record<string, any> = {
-      currency: genCurrency.trim() || "INR",
+      currency: genCurrency,
       discountId: genDiscountId || undefined,
       taxPct: genTaxPct ? Number(genTaxPct) : undefined,
       periodLabel: genPeriodLabel.trim() || undefined,
@@ -774,14 +773,14 @@ export default function FinanceInvoicesPage() {
                       className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
                     >
                       {feePlans.length === 0 && <option value="">No fee plans available</option>}
-                      {feePlans.map(p => <option key={p.id} value={p.id}>{p.name} ({p.currency} {p.components.reduce((s, c) => s + Number(c.amount || 0), 0).toLocaleString()})</option>)}
+                      {feePlans.map(p => <option key={p.id} value={p.id}>{p.name} ({genCurrency} {p.components.reduce((s, c) => s + Number(amountIn(c, genCurrency) ?? 0), 0).toLocaleString()})</option>)}
                     </select>
                     {genFeePlanId && (
                       <div className="space-y-1 pt-1">
                         {feePlans.find(p => p.id === genFeePlanId)?.components.map((c, i) => (
                           <div key={i} className="flex items-center justify-between text-xs text-ink-3">
                             <span className="flex items-center gap-1.5"><span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline">{c.type}</span> {c.label}</span>
-                            <span className="font-bold text-ink">{money(Number(c.amount), genCurrency)}</span>
+                            <span className="font-bold text-ink">{money(amountIn(c, genCurrency), genCurrency)}</span>
                           </div>
                         ))}
                       </div>
@@ -819,7 +818,7 @@ export default function FinanceInvoicesPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Currency</label>
-                  <input type="text" value={genCurrency} onChange={(e) => setGenCurrency(e.target.value.toUpperCase())} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent uppercase" />
+                  <select value={genCurrency} onChange={(e) => setGenCurrency(e.target.value as Currency)} className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">{SUPPORTED_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}</select>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Due Date</label>

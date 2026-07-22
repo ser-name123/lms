@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import Swal from "sweetalert2";
 
+import { DEFAULT_CURRENCY, money, SUPPORTED_CURRENCIES, type Currency } from "@/lib/currency";
 import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -204,8 +205,14 @@ export default function InvoicesPage() {
 
   // Real bundles come from the admin's Packages catalogue (LmsPackage), not a
   // hardcoded list. Falls back to nothing until they load.
-  const [packages, setPackages] = useState<{ title: string; price: number }[]>([]);
+  // Priced in the currency this invoice is being raised in, so picking a
+  // bundle fills the box with the amount the family would actually be billed.
+  const [packages, setPackages] = useState<{ title: string; prices: Record<Currency, number | null> }[]>([]);
   
+  // What this invoice is denominated in. Was not asked for at all, so every
+  // invoice raised here was stored as the academy default and printed with a
+  // dollar sign whoever it was for.
+  const [formCurrency, setFormCurrency] = useState<Currency>(DEFAULT_CURRENCY);
   const [formBillingCycle, setFormBillingCycle] = useState<typeof BILLING_CYCLES[number]>("Monthly");
   const [formSubtotal, setFormSubtotal] = useState(150);
   const [formDiscount, setFormDiscount] = useState(0); // in percent
@@ -275,6 +282,10 @@ export default function InvoicesPage() {
       discount,
       tax,
       total: invoiceAmount,
+      // The invoice already knows what it is denominated in. This page printed
+      // a dollar sign regardless, so a dirham bill went out to the family
+      // reading as dollars.
+      currency: (inv.currency ?? "USD") as Currency,
       invoiceDate: inv.issuedAt ? inv.issuedAt.slice(0, 10) : "",
       dueDate: inv.dueAt ? inv.dueAt.slice(0, 10) : "",
       paymentMethod,
@@ -350,7 +361,14 @@ export default function InvoicesPage() {
       .then(res => res.json())
       .then((data: any[]) => {
         if (Array.isArray(data)) {
-          setPackages(data.map(p => ({ title: p.title, price: Number(p.price) || 0 })));
+          setPackages(data.map(p => ({
+            title: p.title,
+            prices: {
+              USD: p.priceUSD == null ? null : Number(p.priceUSD),
+              AED: p.priceAED == null ? null : Number(p.priceAED),
+              GBP: p.priceGBP == null ? null : Number(p.priceGBP),
+            },
+          })));
         }
       })
       .catch(err => console.warn("Failed to fetch packages", err));
@@ -384,9 +402,9 @@ export default function InvoicesPage() {
   // Set preset product details when the selected bundle (or the list) changes.
   useEffect(() => {
     if (productOption === "preset" && packages[presetIndex]) {
-      setFormSubtotal(packages[presetIndex].price);
+      setFormSubtotal(packages[presetIndex].prices[formCurrency] ?? 0);
     }
-  }, [productOption, presetIndex, packages]);
+  }, [productOption, presetIndex, packages, formCurrency]);
 
   // Reset page when filter triggers
   useEffect(() => {
@@ -408,7 +426,8 @@ export default function InvoicesPage() {
     setCustomProductTitle("");
     
     setFormBillingCycle("Monthly");
-    setFormSubtotal(packages[0]?.price ?? 0);
+    setFormCurrency(DEFAULT_CURRENCY);
+    setFormSubtotal(packages[0]?.prices[DEFAULT_CURRENCY] ?? 0);
     setFormDiscount(0);
     setFormTax(5);
     
@@ -522,6 +541,7 @@ export default function InvoicesPage() {
       number: newInvNumber,
       studentId: targetStudentId,
       amount: calculatedInvTotal,
+      currency: formCurrency,
       status: statusEnum,
       issuedAt: new Date(formInvoiceDate).toISOString(),
       dueAt: new Date(formDueDate).toISOString(),
@@ -562,6 +582,7 @@ export default function InvoicesPage() {
   const handleOpenEditModal = (inv: any) => {
     setSelectedInvoice(inv);
     setFormBillingCycle(inv.billingCycle as any);
+    setFormCurrency(inv.currency);
     setFormSubtotal(inv.subtotal);
     setFormDiscount(inv.discount);
     setFormTax(inv.tax);
@@ -715,9 +736,9 @@ export default function InvoicesPage() {
               <tr class="border-b border-zinc-100 text-zinc-800">
                 <td class="py-3 font-semibold text-sm">${inv.packageTitle}</td>
                 <td class="py-3 text-center text-zinc-500">${inv.billingCycle}</td>
-                <td class="py-3 text-right">$${inv.subtotal.toFixed(2)}</td>
-                <td class="py-3 text-right">$${(inv.subtotal * (1 - inv.discount / 100) * inv.tax / 100).toFixed(2)}</td>
-                <td class="py-3 text-right font-bold">$${inv.total.toFixed(2)}</td>
+                <td class="py-3 text-right">${money(inv.subtotal, inv.currency)}</td>
+                <td class="py-3 text-right">${money(inv.subtotal * (1 - inv.discount / 100) * inv.tax / 100, inv.currency)}</td>
+                <td class="py-3 text-right font-bold">${money(inv.total, inv.currency)}</td>
               </tr>
             </tbody>
           </table>
@@ -726,19 +747,19 @@ export default function InvoicesPage() {
             <div class="w-64 space-y-2 border-t pt-4">
               <div class="flex justify-between text-zinc-500">
                 <span>Subtotal:</span>
-                <span class="font-semibold text-zinc-800">$${inv.subtotal.toFixed(2)}</span>
+                <span class="font-semibold text-zinc-800">${money(inv.subtotal, inv.currency)}</span>
               </div>
               <div class="flex justify-between text-zinc-500">
                 <span>Discount applied (${inv.discount}%):</span>
-                <span class="font-semibold text-zinc-800">-$${(inv.subtotal * inv.discount / 100).toFixed(2)}</span>
+                <span class="font-semibold text-zinc-800">−${money(inv.subtotal * inv.discount / 100, inv.currency)}</span>
               </div>
               <div class="flex justify-between text-zinc-500">
                 <span>Tax accrued (${inv.tax}%):</span>
-                <span class="font-semibold text-zinc-800">+$${(inv.subtotal * (1 - inv.discount / 100) * inv.tax / 100).toFixed(2)}</span>
+                <span class="font-semibold text-zinc-800">+${money(inv.subtotal * (1 - inv.discount / 100) * inv.tax / 100, inv.currency)}</span>
               </div>
               <div class="flex justify-between text-sm font-bold border-t border-zinc-200 pt-2 text-zinc-900">
                 <span>Total Invoice Due:</span>
-                <span class="text-base text-emerald-800">$${inv.total.toFixed(2)}</span>
+                <span class="text-base text-emerald-800">${money(inv.total, inv.currency)}</span>
               </div>
             </div>
           </div>
@@ -1306,7 +1327,7 @@ export default function InvoicesPage() {
                         ) : (
                           packages.map((prod, idx) => (
                             <option key={idx} value={idx}>
-                              {prod.title} (${prod.price})
+                              {prod.title} (${money(prod.prices[formCurrency], formCurrency)})
                             </option>
                           ))
                         )}
@@ -1321,6 +1342,24 @@ export default function InvoicesPage() {
                       >
                         {BILLING_CYCLES.map(cycle => (
                           <option key={cycle} value={cycle}>{cycle}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/*
+                      Never asked for before, so every invoice raised here was
+                      stored as the academy default and printed with a dollar
+                      sign whoever it was for. Changing it re-prices the bundle
+                      above from the package's own amount for that currency.
+                    */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Currency</label>
+                      <select
+                        value={formCurrency}
+                        onChange={(e) => setFormCurrency(e.target.value as Currency)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      >
+                        {SUPPORTED_CURRENCIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
                     </div>
@@ -1347,6 +1386,24 @@ export default function InvoicesPage() {
                       >
                         {BILLING_CYCLES.map(cycle => (
                           <option key={cycle} value={cycle}>{cycle}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/*
+                      Never asked for before, so every invoice raised here was
+                      stored as the academy default and printed with a dollar
+                      sign whoever it was for. Changing it re-prices the bundle
+                      above from the package's own amount for that currency.
+                    */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Currency</label>
+                      <select
+                        value={formCurrency}
+                        onChange={(e) => setFormCurrency(e.target.value as Currency)}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                      >
+                        {SUPPORTED_CURRENCIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
                     </div>

@@ -156,6 +156,9 @@ export class StudentManagementService {
     return {
       id: s.id,
       studentCode: s.studentCode,
+      // What this family is billed in — fixed at account creation from their
+      // country. `fees` below is an amount in it, and had no currency of its own.
+      billingCurrency: s.billingCurrency,
       status: s.user.status,
       onHoldReason: s.onHoldReason,
       onHoldAt: s.onHoldAt,

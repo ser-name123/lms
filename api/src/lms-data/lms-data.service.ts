@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CourseStatus } from '../generated/prisma/enums';
+import { amountFor, priceFor, SUPPORTED_CURRENCIES } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { bulkDelete } from '../common/bulk-delete';
 
@@ -449,14 +450,34 @@ export class LmsDataService implements OnModuleInit {
     return out;
   }
 
-  /** Refuses a fee plan id that does not name a real plan. */
-  private async assertFeePlan(feePlanId?: string | null) {
+  /**
+   * Refuses a fee plan that cannot actually bill this package.
+   *
+   * Existing was the only thing checked, so an AED-priced package could be
+   * linked to a plan with no AED amounts — and the coach's approval screen
+   * would still say "billing linked" while every recurring invoice for a Dubai
+   * family silently failed to generate.
+   */
+  private async assertFeePlan(feePlanId: string | null | undefined, pkg: any) {
     if (!feePlanId) return;
     const plan = await this.prisma.feePlan.findUnique({
       where: { id: feePlanId },
-      select: { id: true },
+      select: { id: true, name: true, components: { select: { label: true, amountUSD: true, amountAED: true, amountGBP: true } } },
     });
     if (!plan) throw new BadRequestException('That fee plan no longer exists.');
+
+    // Only the currencies this package is actually sold in have to be billable.
+    const sold = SUPPORTED_CURRENCIES.filter((c) => priceFor(pkg, c) != null);
+    const unbillable = sold.filter((c) =>
+      plan.components.some((comp) => amountFor(comp, c) == null),
+    );
+    if (unbillable.length) {
+      throw new BadRequestException(
+        `This package is priced in ${unbillable.join(' and ')}, but "${plan.name}" has no ` +
+          `${unbillable.join('/')} amount, so those families could never be billed. ` +
+          'Price the fee plan in those currencies first.',
+      );
+    }
   }
 
   /** The relational half of a package — what enrolments and billing read. */
@@ -485,7 +506,7 @@ export class LmsDataService implements OnModuleInit {
 
   async createPackage(dto: any) {
     const data = this.normalisePackage(dto);
-    await this.assertFeePlan(data.feePlanId);
+    await this.assertFeePlan(data.feePlanId, data);
     const id: string = data.id ?? randomUUID();
 
     /*
@@ -504,11 +525,13 @@ export class LmsDataService implements OnModuleInit {
   async updatePackage(id: string, dto: any) {
     const { id: _, ...raw } = dto;
     const data = this.normalisePackage(raw);
-    await this.assertFeePlan(data.feePlanId);
     const existing = await this.prisma.lmsPackage.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Package not found.');
 
+    // Checked against the merged row, not the patch: a request that changes
+    // only the fee plan still has to be judged on every price the package has.
     const merged = { ...existing, ...data };
+    await this.assertFeePlan(merged.feePlanId, merged);
     const fields = this.packageFields(merged);
 
     const [lmsPkg] = await this.prisma.$transaction([

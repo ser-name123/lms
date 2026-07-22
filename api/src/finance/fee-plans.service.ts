@@ -67,14 +67,15 @@ export class FeePlansService {
         name: dto.name,
         cycle: dto.cycle,
         courseId: dto.courseId ?? null,
-        currency: dto.currency ?? 'USD',
         description: dto.description ?? null,
         active: dto.active ?? true,
         components: {
           create: dto.components.map((c) => ({
             type: c.type,
             label: c.label,
-            amount: c.amount,
+            amountUSD: c.amountUSD,
+            amountAED: c.amountAED ?? null,
+            amountGBP: c.amountGBP ?? null,
           })),
         },
       },
@@ -95,7 +96,6 @@ export class FeePlansService {
           name: dto.name,
           cycle: dto.cycle,
           courseId: dto.courseId,
-          currency: dto.currency,
           description: dto.description,
           active: dto.active,
           ...(dto.components
@@ -104,7 +104,9 @@ export class FeePlansService {
                   create: dto.components.map((c) => ({
                     type: c.type,
                     label: c.label,
-                    amount: c.amount,
+                    amountUSD: c.amountUSD,
+            amountAED: c.amountAED ?? null,
+            amountGBP: c.amountGBP ?? null,
                   })),
                 },
               }

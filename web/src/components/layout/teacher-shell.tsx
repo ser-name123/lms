@@ -21,6 +21,7 @@ import {
   CalendarClock,
   ClipboardCheck,
   FileCheck2,
+  Sparkles,
   TrendingUp,
 } from "lucide-react";
 

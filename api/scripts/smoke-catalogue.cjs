@@ -83,6 +83,10 @@ const today = () => new Date().toISOString().slice(0, 10);
     await db.query(`DELETE FROM "Course" WHERE title LIKE $1`, [`${MARKER}%`]);
     await db.query(`DELETE FROM "LmsPackage" WHERE title LIKE $1`, [`${MARKER}%`]);
     await db.query(`DELETE FROM "Package" WHERE name LIKE $1`, [`${MARKER}%`]);
+    await db.query(
+      `DELETE FROM "StudentFeeAssignment" WHERE "planId" IN (SELECT id FROM "FeePlan" WHERE name LIKE $1)`,
+      [`${MARKER}%`],
+    );
     await db.query(`DELETE FROM "FeePlan" WHERE name LIKE $1`, [`${MARKER}%`]);
   };
 
@@ -133,11 +137,18 @@ const today = () => new Date().toISOString().slice(0, 10);
     const studentId = sp[0].id;
 
     const { rows: planRows } = await db.query(
-      `INSERT INTO "FeePlan" (id,name,cycle,currency,active,"updatedAt")
-       VALUES (gen_random_uuid(),$1,'MONTHLY','USD',true,now()) RETURNING id`,
+      `INSERT INTO "FeePlan" (id,name,cycle,active,"updatedAt")
+       VALUES (gen_random_uuid(),$1,'MONTHLY',true,now()) RETURNING id`,
       [`${MARKER}-plan`],
     );
     const feePlanId = planRows[0].id;
+    // Priced in all three, so linking it to a package priced in all three is
+    // allowed — the mismatch case gets its own plan further down.
+    await db.query(
+      `INSERT INTO "FeePlanComponent" (id,"planId",type,label,"amountUSD","amountAED","amountGBP")
+       VALUES (gen_random_uuid(),$1,'COURSE','Tuition',75,275,60)`,
+      [feePlanId],
+    );
     check('fixtures built (coach, teacher, student, fee plan)', !!coachId && !!teacherId && !!studentId && !!feePlanId);
 
     // ── 1. Creating a course creates the row students are enrolled in ────────
@@ -553,6 +564,75 @@ const today = () => new Date().toISOString().slice(0, 10);
     );
 
     await req('DELETE', `/lms-data/packages/${partial.body?.id}`, adminToken);
+
+    // ── 8d. Billing follows the family, cycle after cycle ───────────────────
+    /*
+     * The gap this closes: a Dubai family was invoiced in dirhams on enrolment
+     * and in dollars every cycle after, because the first invoice used the
+     * package's price and every recurring one used the fee plan's single
+     * amount plus a currency on the plan itself.
+     */
+    console.log('\n8d. Recurring invoices follow the family, not the plan');
+
+    const { rows: planRows2 } = await db.query(
+      `INSERT INTO "FeePlan" (id,name,cycle,active,"updatedAt")
+       VALUES (gen_random_uuid(),$1,'MONTHLY',true,now()) RETURNING id`,
+      [`${MARKER}-plan-3cur`],
+    );
+    const plan3 = planRows2[0].id;
+    await db.query(
+      `INSERT INTO "FeePlanComponent" (id,"planId",type,label,"amountUSD","amountAED","amountGBP")
+       VALUES (gen_random_uuid(),$1,'COURSE','Tuition',80,294,64)`,
+      [plan3],
+    );
+
+    for (const [currency, expected] of [['USD', 80], ['AED', 294], ['GBP', 64]]) {
+      await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = $1 WHERE id = $2`, [currency, studentId]);
+      await db.query(`DELETE FROM "StudentFeeAssignment" WHERE "studentId" = $1`, [studentId]);
+      await db.query(`DELETE FROM "Invoice" WHERE "studentId" = $1`, [studentId]);
+      const assigned = await req('POST', '/finance/fee-plans/assign', adminToken, {
+        studentId, planId: plan3, generateNow: true,
+      });
+      check(`a ${currency} family is assigned the plan`, assigned.status === 201, `got ${assigned.status}`);
+      const { rows: inv } = await db.query(
+        `SELECT amount, currency FROM "Invoice" WHERE "studentId" = $1 ORDER BY "issuedAt" DESC LIMIT 1`,
+        [studentId],
+      );
+      check(`  the recurring invoice is in ${currency}`, inv[0]?.currency === currency, inv[0]?.currency);
+      check(`  and for ${expected}`, Number(inv[0]?.amount) === expected, String(inv[0]?.amount));
+    }
+
+    /*
+     * A plan that cannot price this family raises nothing and says so, rather
+     * than billing them the dollar figure — the failure mode being ruled out
+     * is a family charged 80 when they agreed to 294.
+     */
+    await db.query(`UPDATE "FeePlanComponent" SET "amountAED" = NULL WHERE "planId" = $1`, [plan3]);
+    await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = 'AED' WHERE id = $1`, [studentId]);
+    await db.query(`DELETE FROM "StudentFeeAssignment" WHERE "studentId" = $1`, [studentId]);
+    await db.query(`DELETE FROM "Invoice" WHERE "studentId" = $1`, [studentId]);
+    const refused = await req('POST', '/finance/fee-plans/assign', adminToken, {
+      studentId, planId: plan3, generateNow: true,
+    });
+    const { rows: none } = await db.query(
+      `SELECT id FROM "Invoice" WHERE "studentId" = $1`,
+      [studentId],
+    );
+    check('an unpriced currency raises no invoice at all', none.length === 0, `${none.length} raised`);
+    check('  rather than one in the wrong currency', refused.status < 500, `got ${refused.status}`);
+
+    await db.query(`DELETE FROM "StudentFeeAssignment" WHERE "studentId" = $1`, [studentId]);
+    await db.query(`DELETE FROM "Invoice" WHERE "studentId" = $1`, [studentId]);
+    await db.query(`UPDATE "StudentProfile" SET "billingCurrency" = 'USD' WHERE id = $1`, [studentId]);
+
+    // A package sold in AED cannot be linked to a plan that has no AED amount.
+    const mismatch = await req('PUT', `/lms-data/packages/${packageId}`, adminToken, {
+      feePlanId: plan3,
+    });
+    check('linking an AED package to a plan with no AED amount is refused', mismatch.status === 400, `got ${mismatch.status}`);
+    check('  and says which currency is missing', /AED/.test(String(mismatch.body?.message)), mismatch.body?.message);
+
+    await db.query(`DELETE FROM "FeePlan" WHERE id = $1`, [plan3]);
 
     // ── 9. Who is allowed to do any of this ─────────────────────────────────
     console.log('\n9. Roles');
