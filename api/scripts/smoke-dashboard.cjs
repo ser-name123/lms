@@ -15,6 +15,9 @@ const path = require('path');
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:5000/api';
 const SECRET = process.env.JWT_ACCESS_SECRET;
+// Unique per run so a crashed run cannot collide with the next one on the
+// unique email index.
+const MARKER = `zz-smoke-dash-${Date.now()}`;
 
 let pass = 0;
 let fail = 0;
@@ -75,13 +78,31 @@ async function send(method, path, userId, payload, expect = 200) {
 
   // ── Resolve one user per role ────────────────────────────────────────────
   const roleUser = {};
+  // Throwaway users this run had to create because the database had no such
+  // role. Deleted in the finally block.
+  const mintedUserIds = [];
   for (const role of ['ADMIN', 'SUPERVISOR', 'ACADEMIC_COACH', 'TEACHER', 'STUDENT']) {
     const { rows } = await db.query(
       `SELECT id, email FROM "User" WHERE role=$1 AND status='ACTIVE' ORDER BY "createdAt" LIMIT 1`,
       [role],
     );
-    if (!rows.length) throw new Error(`No ACTIVE ${role} user to test with`);
-    roleUser[role] = rows[0];
+    if (!rows.length) {
+      /*
+       * Mint one rather than refusing to run. Requiring the database to
+       * already hold every role meant this whole suite stopped the moment an
+       * academy had no supervisor — every check in it was skipped, which is
+       * worse than having no suite at all. Removed again in cleanup.
+       */
+      const created = await db.query(
+        `INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt")
+         VALUES (gen_random_uuid(),$1,'x','Smoke',$2,$3::"Role",'ACTIVE',now()) RETURNING id, email`,
+        [`${MARKER}-role-${role.toLowerCase()}@example.test`, role, role],
+      );
+      roleUser[role] = created.rows[0];
+      mintedUserIds.push(created.rows[0].id);
+    } else {
+      roleUser[role] = rows[0];
+    }
   }
 
   const { rows: studentRows } = await db.query(
@@ -148,7 +169,8 @@ async function send(method, path, userId, payload, expect = 200) {
     console.log('\n── Widgets ──');
     const reg = await get('/dashboard/widgets/registry', roleUser.ADMIN.id);
     check('GET /dashboard/widgets/registry', reg.ok, `status ${reg.status}`);
-    check('registry is seeded (57 widgets)', reg.ok && reg.body.length === 57, reg.ok ? `got ${reg.body.length}` : '');
+    // 58 since st.subscription joined the registry.
+    check('registry is seeded (58 widgets)', reg.ok && reg.body.length === 58, reg.ok ? `got ${reg.body.length}` : '');
 
     const regAsStudent = await get('/dashboard/widgets/registry', roleUser.STUDENT.id, 403);
     check('STUDENT blocked from widget registry', regAsStudent.ok, `status ${regAsStudent.status}`);
@@ -322,6 +344,13 @@ async function send(method, path, userId, payload, expect = 200) {
     check('an invalid range falls back to the default',
       (await get('/dashboard/super-admin?range=bogus', roleUser.ADMIN.id, 400)).status === 400);
   } finally {
+    /*
+     * Any role user this run had to invent. Deleted by id, so a real account
+     * that happened to share a name can never be caught by it.
+     */
+    for (const id of mintedUserIds) {
+      await db.query(`DELETE FROM "User" WHERE id = $1`, [id]);
+    }
     // ── Cleanup: leave the database exactly as found ───────────────────────
     for (const id of createdAnnouncementIds) {
       await db.query(`DELETE FROM "Announcement" WHERE id=$1`, [id]);
