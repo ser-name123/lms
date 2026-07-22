@@ -41,6 +41,14 @@ async function main() {
   };
 
   const created = { invoiceId: null, discountId: null, planId: null };
+  /*
+   * Taking a payment notifies people, and those notifications outlive the
+   * invoice they came from. Every run left a few behind, and once enough had
+   * piled up they pushed smoke-notifications' marker broadcast off the first
+   * page of the coach's feed and failed a suite that had nothing to do with
+   * finance. A smoke test has to leave the database as it found it.
+   */
+  const runStart = new Date();
   try {
     console.log('ADMIN reads:');
     const dash = await get(users.ADMIN, '/finance/dashboard');
@@ -100,6 +108,45 @@ async function main() {
       ok(done.status === 'PAID' && done.receipts.length === 2, 'status PAID + 2 receipts');
     } else {
       console.log('  (no StudentProfile — invoice flow skipped)');
+    }
+
+    /*
+     * Currencies are never added together.
+     *
+     * Revenue used to be summed across every invoice regardless of currency, so
+     * an AED 1000 payment moved a dollar-labelled total by 1000 — about 3.7x the
+     * real amount — and net profit then subtracted USD payroll from it. The sum
+     * was arithmetically fine; only the units were wrong, so nothing complained.
+     */
+    if (studentProfileId) {
+      console.log('MULTI-CURRENCY:');
+      const before = (await get(users.ADMIN, '/finance/dashboard')).cards.totalRevenue;
+      let aedInvoiceId = null;
+      try {
+        const aed = await req(users.ADMIN, 'POST', '/finance/invoices', {
+          studentId: studentProfileId,
+          currency: 'AED',
+          items: [{ type: 'COURSE', label: 'AED probe', amount: 1000 }],
+          status: 'DRAFT',
+        });
+        aedInvoiceId = aed.id;
+        ok(aed.currency === 'AED', 'invoice can be raised in AED');
+        await req(users.ADMIN, 'POST', `/finance/invoices/${aed.id}/payments`, {
+          amount: 1000, method: 'CASH',
+        });
+
+        const dash = await get(users.ADMIN, '/finance/dashboard');
+        ok(dash.cards.totalRevenue === before,
+          `AED payment left the ${dash.currency} total alone (${before} → ${dash.cards.totalRevenue})`);
+
+        const line = (dash.byCurrency || []).find((l) => l.currency === 'AED');
+        ok(line && line.totalRevenue === 1000,
+          `AED revenue is reported on its own line (${line ? line.totalRevenue : 'missing'})`);
+        ok((dash.byCurrency || []).every((l) => typeof l.currency === 'string'),
+          'every currency line names its currency');
+      } finally {
+        if (aedInvoiceId) await db.query(`DELETE FROM "Invoice" WHERE id=$1`, [aedInvoiceId]);
+      }
     }
 
     if (users.STUDENT) {
@@ -173,6 +220,13 @@ async function main() {
     if (created.invoiceId) await db.query(`DELETE FROM "Invoice" WHERE id=$1`, [created.invoiceId]);
     if (created.planId) await db.query(`DELETE FROM "FeePlan" WHERE id=$1`, [created.planId]);
     if (created.discountId) await db.query(`DELETE FROM "Discount" WHERE id=$1`, [created.discountId]);
+    const swept = await db.query(
+      `DELETE FROM "Notification"
+        WHERE "createdAt" >= $1
+          AND type IN ('PAYMENT_RECEIVED','INVOICE_ISSUED','INVOICE_DUE','PAYSLIP_ISSUED')`,
+      [runStart],
+    );
+    if (swept.rowCount) console.log(`  (cleaned ${swept.rowCount} notification(s) this run created)`);
     await db.end();
   }
 

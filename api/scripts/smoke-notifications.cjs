@@ -291,7 +291,17 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
       broadcast.ok && broadcast.body.status === 'SENT' && broadcast.body.sentCount >= 1,
       JSON.stringify({ status: broadcast.body?.status, sent: broadcast.body?.sentCount }));
 
-    const coachFeed = await get('/notifications?limit=10', roleUser.ACADEMIC_COACH.id);
+    /*
+     * A deep enough page to hold the broadcast whatever else is in the feed.
+     *
+     * This asked for the first 10 and assumed a just-sent broadcast would be
+     * among them. The feed sorts by priority before recency, and the broadcast
+     * above is deliberately LOW — so once the coach had ten MEDIUM or HIGH
+     * notifications of their own, a correctly delivered broadcast ranked below
+     * the cut and the check failed. It was testing where the row sorts, not
+     * whether it arrived.
+     */
+    const coachFeed = await get('/notifications?limit=200', roleUser.ACADEMIC_COACH.id);
     check('the coach received the broadcast',
       coachFeed.ok && coachFeed.body.some((n) => n.title === `${MARKER} broadcast`));
 

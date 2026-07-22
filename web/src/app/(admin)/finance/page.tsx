@@ -19,6 +19,7 @@ import {
   BarChart3,
   Loader2,
   ArrowUpRight,
+  Globe,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -67,8 +68,18 @@ interface FinanceCards {
   overdueInvoices: number;
 }
 
+interface CurrencyLine {
+  currency: string;
+  totalRevenue: number;
+  collectedThisMonth: number;
+  outstanding: number;
+  isReportingCurrency: boolean;
+}
+
 interface FinanceDashboard {
   currency: string;
+  /** Revenue per currency invoiced in — never summed, never converted. */
+  byCurrency: CurrencyLine[];
   cards: FinanceCards;
   charts: {
     revenueSeries: { month: string; revenue: number }[];
@@ -94,6 +105,17 @@ export default function FinanceDashboardPage() {
   const currency = data?.currency ?? "$";
   const money = (n: number | null | undefined) =>
     `${currency} ${Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const moneyIn = (n: number | null | undefined, cur: string) =>
+    `${cur} ${Number(n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+  /*
+   * Every card and chart below is the reporting currency alone. Revenue billed
+   * in another currency is real money and must not vanish from the screen just
+   * because it cannot be added to the rest — it gets its own row, unconverted.
+   * Hidden until a second currency exists, so the usual single-currency academy
+   * sees no extra furniture.
+   */
+  const otherCurrencies = (data?.byCurrency ?? []).filter((l) => !l.isReportingCurrency);
 
   const c = data?.cards;
   const ch = data?.charts;
@@ -138,12 +160,41 @@ export default function FinanceDashboardPage() {
           </div>
         ) : (
           <>
+            {otherCurrencies.length > 0 && (
+              <Card className="border border-hairline bg-surface shadow-sm p-4 sm:p-5">
+                <div className="flex items-start gap-2 mb-3">
+                  <Globe className="size-4 text-accent mt-0.5 shrink-0" />
+                  <div>
+                    <h3 className="text-xs font-extrabold text-ink">Revenue billed in other currencies</h3>
+                    <p className="text-[11px] text-ink-3 mt-0.5">
+                      The cards and charts below are {currency} only. These amounts are shown as
+                      billed — the academy stores no exchange rate, so they are never added to the {currency} totals.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {otherCurrencies.map((line) => (
+                    <div key={line.currency} className="rounded-xl border border-hairline bg-surface-2/30 px-4 py-3">
+                      <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">
+                        {line.currency}
+                      </span>
+                      <p className="text-sm font-black text-ink mt-1">{moneyIn(line.totalRevenue, line.currency)}</p>
+                      <p className="text-[10px] text-ink-3 mt-1">
+                        {moneyIn(line.collectedThisMonth, line.currency)} this month ·{" "}
+                        {moneyIn(line.outstanding, line.currency)} outstanding
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
             {/* KPI Stat Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 select-none">
               <StatCard label="Total Revenue" value={money(c?.totalRevenue)} icon={DollarSign} color="text-emerald-500 bg-emerald-500/10" />
               <StatCard label="Collected Today" value={money(c?.collectedToday)} icon={Wallet} color="text-blue-500 bg-blue-500/10" />
               <StatCard label="Collected This Month" value={money(c?.collectedThisMonth)} icon={TrendingUp} color="text-accent bg-accent/10" />
-              <StatCard label="Net Profit" value={money(c?.netProfit)} icon={TrendingUp} color="text-emerald-500 bg-emerald-500/10" caption="Revenue minus expenses & payroll" />
+              <StatCard label="Net Profit" value={money(c?.netProfit)} icon={TrendingUp} color="text-emerald-500 bg-emerald-500/10" caption={`${currency} revenue minus expenses & payroll`} />
               <StatCard label="Pending Fees" value={money(c?.pendingFees)} icon={Clock} color="text-amber-500 bg-amber-500/10" />
               <StatCard label="Outstanding Balance" value={money(c?.outstandingBalance)} icon={AlertTriangle} color="text-rose-500 bg-rose-500/10" />
               <StatCard label="Expenses" value={money(c?.expenses)} icon={TrendingDown} color="text-rose-500 bg-rose-500/10" />

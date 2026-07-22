@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FinanceSettingsService } from './finance-settings.service';
 import { round2 } from './finance.config';
+import { SUPPORTED_CURRENCIES } from '../common/currency';
 
 interface MonthBucket {
   start: Date;
@@ -33,17 +34,49 @@ export class FinanceService {
     return out;
   }
 
-  private async paidSum(where: object): Promise<number> {
+  /*
+   * Money taken, in ONE currency.
+   *
+   * This used to sum every payment regardless of the invoice it settled, so an
+   * AED 1000 payment added 1000 to a figure the screen labelled in dollars —
+   * roughly 3.7x the real amount — and net profit then subtracted USD payroll
+   * from that inflated total. Nothing warned, because the sum is arithmetically
+   * fine; only the units were wrong.
+   *
+   * The academy prices every currency by hand and stores no exchange rate, so
+   * there is no honest way to add two of them together. Callers name the
+   * currency they want and get only that.
+   */
+  private async paidSum(where: object, currency: string): Promise<number> {
     const agg = await this.prisma.payment.aggregate({
-      where: { status: 'SUCCEEDED', ...where },
+      where: { status: 'SUCCEEDED', ...where, invoice: { currency } },
       _sum: { amount: true },
     });
     return Number(agg._sum.amount || 0);
   }
 
+  /** Which currencies actually have invoices — drives the per-currency strip. */
+  private async activeCurrencies(): Promise<string[]> {
+    const rows = await this.prisma.invoice.groupBy({
+      by: ['currency'],
+      _count: { _all: true },
+    });
+    const seen = rows.map((r) => r.currency);
+    return SUPPORTED_CURRENCIES.filter((c) => seen.includes(c));
+  }
+
   // ── Dashboard ───────────────────────────────────────────────────────────────
   async dashboard() {
     const cfg = await this.settings.getConfig();
+    /*
+     * Every card, chart and the profit line below is ONE currency — the
+     * academy's reporting currency. Costs are only ever in it (staff are paid
+     * in USD, expenses are recorded in it), so a profit computed against
+     * revenue from another currency would be subtracting apples from oranges.
+     * Revenue billed in the other currencies is reported beside it, unconverted
+     * and never folded in — see `byCurrency`.
+     */
+    const reportingCurrency = cfg.currency;
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -61,22 +94,22 @@ export class FinanceService {
       payrollPendingAgg,
       overdueCount,
     ] = await Promise.all([
-      this.paidSum({}),
-      this.paidSum({ paidAt: { gte: monthStart } }),
-      this.paidSum({ paidAt: { gte: dayStart } }),
+      this.paidSum({}, reportingCurrency),
+      this.paidSum({ paidAt: { gte: monthStart } }, reportingCurrency),
+      this.paidSum({ paidAt: { gte: dayStart } }, reportingCurrency),
       this.prisma.invoice.findMany({
-        where: { status: { in: OPEN_STATUSES as never } },
+        where: { status: { in: OPEN_STATUSES as never }, currency: reportingCurrency },
         select: { amount: true, paidAmount: true },
       }),
       this.prisma.refund.aggregate({
-        where: { status: 'PROCESSED' },
+        where: { status: 'PROCESSED', currency: reportingCurrency },
         _sum: { amount: true },
       }),
       this.prisma.scholarship.count({
         where: { status: { in: ['APPROVED', 'APPLIED'] as never } },
       }),
       this.prisma.invoice.aggregate({
-        where: { scholarshipId: { not: null } },
+        where: { scholarshipId: { not: null }, currency: reportingCurrency },
         _sum: { discountAmount: true },
       }),
       this.prisma.expense.aggregate({
@@ -111,7 +144,10 @@ export class FinanceService {
     const revenueSeries = await Promise.all(
       rev12.map(async (m) => ({
         month: m.label,
-        revenue: await this.paidSum({ paidAt: { gte: m.start, lte: m.end } }),
+        revenue: await this.paidSum(
+          { paidAt: { gte: m.start, lte: m.end } },
+          reportingCurrency,
+        ),
       })),
     );
 
@@ -119,7 +155,7 @@ export class FinanceService {
     const profitTrend = await Promise.all(
       trend6.map(async (m) => {
         const [rev, exp, pay] = await Promise.all([
-          this.paidSum({ paidAt: { gte: m.start, lte: m.end } }),
+          this.paidSum({ paidAt: { gte: m.start, lte: m.end } }, reportingCurrency),
           this.prisma.expense.aggregate({
             where: { status: 'APPROVED', paymentDate: { gte: m.start, lte: m.end } },
             _sum: { amount: true },
@@ -146,8 +182,37 @@ export class FinanceService {
       this.paymentMethodDistribution(),
     ]);
 
+    /*
+     * Revenue in every currency the academy has actually invoiced in, each on
+     * its own line. No total across them and no conversion: with no stored rate
+     * there is no honest single number, and a wrong one is worse than none.
+     */
+    const currencies = await this.activeCurrencies();
+    const byCurrency = await Promise.all(
+      currencies.map(async (currency) => {
+        const [revenue, thisMonth, open] = await Promise.all([
+          this.paidSum({}, currency),
+          this.paidSum({ paidAt: { gte: monthStart } }, currency),
+          this.prisma.invoice.findMany({
+            where: { status: { in: OPEN_STATUSES as never }, currency },
+            select: { amount: true, paidAmount: true },
+          }),
+        ]);
+        return {
+          currency,
+          totalRevenue: round2(revenue),
+          collectedThisMonth: round2(thisMonth),
+          outstanding: round2(
+            open.reduce((s, i) => s + (Number(i.amount) - Number(i.paidAmount)), 0),
+          ),
+          isReportingCurrency: currency === reportingCurrency,
+        };
+      }),
+    );
+
     return {
-      currency: cfg.currency,
+      currency: reportingCurrency,
+      byCurrency,
       cards: {
         totalRevenue: round2(totalRevenue),
         collectedToday: round2(collectedToday),
@@ -258,6 +323,8 @@ export class FinanceService {
 
   // ── Analytics (dedicated page) ──────────────────────────────────────────────
   async analytics() {
+    // Both trends are plotted as one line, so both are one currency.
+    const { currency } = await this.settings.getConfig();
     const now = new Date();
     const months = this.monthsBack(12, now);
     const [collectionTrend, outstandingTrend, methodDist, expenseBreakdown] =
@@ -265,7 +332,10 @@ export class FinanceService {
         Promise.all(
           months.map(async (m) => ({
             month: m.label,
-            collected: await this.paidSum({ paidAt: { gte: m.start, lte: m.end } }),
+            collected: await this.paidSum(
+              { paidAt: { gte: m.start, lte: m.end } },
+              currency,
+            ),
           })),
         ),
         Promise.all(
@@ -274,6 +344,7 @@ export class FinanceService {
               where: {
                 issuedAt: { gte: m.start, lte: m.end },
                 status: { in: OPEN_STATUSES as never },
+                currency,
               },
               select: { amount: true, paidAmount: true },
             });
@@ -291,7 +362,7 @@ export class FinanceService {
         this.paymentMethodDistribution(),
         this.expenseBreakdown(),
       ]);
-    return { collectionTrend, outstandingTrend, methodDist, expenseBreakdown };
+    return { currency, collectionTrend, outstandingTrend, methodDist, expenseBreakdown };
   }
 
   private async expenseBreakdown() {
@@ -374,12 +445,20 @@ export class FinanceService {
       amount: Number(p.amount),
       currency: p.invoice?.currency ?? 'USD',
     }));
-    const total = round2(rows.reduce((s, r) => s + r.amount, 0));
+    /*
+     * Each row already names its currency, but the summary added them all into
+     * one number — so a page of AED and USD receipts footed to a total in
+     * neither. One total per currency instead.
+     */
+    const totals: Record<string, number> = {};
+    for (const r of rows) {
+      totals[r.currency] = round2((totals[r.currency] ?? 0) + r.amount);
+    }
     return {
       type: 'collection',
       columns: ['receiptDate', 'invoice', 'student', 'method', 'amount', 'currency'],
       rows,
-      summary: { count: rows.length, total },
+      summary: { count: rows.length, totalsByCurrency: totals },
     };
   }
 
@@ -559,11 +638,15 @@ export class FinanceService {
   }
 
   private async pnlReport() {
+    // One currency, for the same reason as the dashboard: costs are only ever
+    // in the reporting currency, so profit against revenue billed in another
+    // would be subtracting units that were never comparable.
+    const { currency } = await this.settings.getConfig();
     const months = this.monthsBack(12);
     const rows = await Promise.all(
       months.map(async (m) => {
         const [rev, exp, pay] = await Promise.all([
-          this.paidSum({ paidAt: { gte: m.start, lte: m.end } }),
+          this.paidSum({ paidAt: { gte: m.start, lte: m.end } }, currency),
           this.prisma.expense.aggregate({
             where: { status: 'APPROVED', paymentDate: { gte: m.start, lte: m.end } },
             _sum: { amount: true },
@@ -587,6 +670,7 @@ export class FinanceService {
     );
     return {
       type: 'pnl',
+      currency,
       columns: ['month', 'revenue', 'expenses', 'payroll', 'profit'],
       rows,
       summary: {

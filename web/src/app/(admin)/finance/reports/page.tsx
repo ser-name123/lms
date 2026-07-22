@@ -178,7 +178,25 @@ export default function FinanceReportsPage() {
       .finally(() => setSavingConfig(false));
   };
 
-  const summaryEntries = report?.summary ? Object.entries(report.summary) : [];
+  /*
+   * A collection report foots one total per currency now — adding AED and USD
+   * receipts into a single figure gave a total in neither. Nested objects in the
+   * summary become one badge each, carrying their own currency; the old code
+   * ran String(value) over them and printed "[object Object]".
+   */
+  const summaryEntries: { key: string; label: string; value: unknown; currency?: string }[] =
+    report?.summary
+      ? Object.entries(report.summary).flatMap(([key, value]) =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? Object.entries(value as Record<string, unknown>).map(([cur, v]) => ({
+                key: `${key}.${cur}`,
+                label: `${humanize(key)} (${cur})`,
+                value: v,
+                currency: cur,
+              }))
+            : [{ key, label: humanize(key), value }],
+        )
+      : [];
 
   return (
     <>
@@ -222,15 +240,15 @@ export default function FinanceReportsPage() {
         {/* Summary badges */}
         {report && summaryEntries.length > 0 && (
           <div className="flex items-center gap-2.5 flex-wrap select-none">
-            {summaryEntries.map(([key, value]) => (
+            {summaryEntries.map(({ key, label, value, currency: rowCurrency }) => (
               <div
                 key={key}
                 className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-hairline bg-surface shadow-sm"
               >
-                <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">{humanize(key)}</span>
+                <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">{label}</span>
                 <span className="text-xs font-extrabold text-ink">
                   {typeof value === "number" && MONEY_KEYS.test(key)
-                    ? `${currency} ${value.toLocaleString("en-US")}`
+                    ? `${rowCurrency ?? currency} ${value.toLocaleString("en-US")}`
                     : typeof value === "number"
                       ? value.toLocaleString("en-US")
                       : String(value)}
