@@ -191,6 +191,51 @@ const today = () => new Date().toISOString().slice(0, 10);
     check('  Draft became DRAFT', rel3?.status === 'DRAFT', rel3?.status);
     check('  a partial update leaves the title alone', rel3?.title === `${MARKER} Tajweed II`, rel3?.title);
 
+    // ── 2b. Renaming the code takes everything filed under it along ──────────
+    /*
+     * Classes, assignments, assessments, material and registrations all name a
+     * course by its code as plain text — no foreign key holds them. Deleting a
+     * course was guarded; renaming one was not, so a rename detached all of
+     * them at once. Nothing errors; the rows just stop appearing.
+     */
+    console.log('\n2b. Renaming the course code re-files its dependents');
+
+    await db.query(
+      `INSERT INTO "LmsKnowledgebase" (id,title,"courseCode","courseTitle",format,"sizeMB",category,description)
+       VALUES (gen_random_uuid(),$1,$2,$3,'PDF',1,'Quran','smoke')`,
+      [`${MARKER} material`, `${MARKER}-C1`, `${MARKER} Tajweed II`],
+    );
+    await db.query(
+      `INSERT INTO "LmsAssessment" (id,title,"courseCode","courseTitle","questionsCount",duration,category,description)
+       VALUES (gen_random_uuid(),$1,$2,$3,10,30,'Quran','smoke')`,
+      [`${MARKER} quiz`, `${MARKER}-C1`, `${MARKER} Tajweed II`],
+    );
+
+    const renamed = await req('PUT', `/lms-data/courses/${courseId}`, adminToken, {
+      code: `${MARKER}-C1B`,
+      title: `${MARKER} Tajweed III`,
+    });
+    check('the rename is accepted', renamed.status === 200, `got ${renamed.status}`);
+
+    const filedUnder = async (table) =>
+      (await db.query(`SELECT "courseCode","courseTitle" FROM "${table}" WHERE title LIKE $1`, [`${MARKER}%`])).rows;
+
+    const kb = await filedUnder('LmsKnowledgebase');
+    check('material followed the new code', kb[0]?.courseCode === `${MARKER}-C1B`, kb[0]?.courseCode);
+    check('  and shows the new title, not the old one', kb[0]?.courseTitle === `${MARKER} Tajweed III`, kb[0]?.courseTitle);
+
+    const quiz = await filedUnder('LmsAssessment');
+    check('an assessment followed it too', quiz[0]?.courseCode === `${MARKER}-C1B`, quiz[0]?.courseCode);
+
+    // The relational half must not have been left behind by the rename.
+    const relRenamed = await courseRow(courseId);
+    check('the relational Course took the new title', relRenamed?.title === `${MARKER} Tajweed III`, relRenamed?.title);
+
+    await db.query(`DELETE FROM "LmsKnowledgebase" WHERE title LIKE $1`, [`${MARKER}%`]);
+    await db.query(`DELETE FROM "LmsAssessment" WHERE title LIKE $1`, [`${MARKER}%`]);
+    // Put the code back so the duplicate-code check below still collides.
+    await req('PUT', `/lms-data/courses/${courseId}`, adminToken, { code: `${MARKER}-C1` });
+
     // ── 3. A failed create leaves nothing behind ─────────────────────────────
     console.log('\n3. Create is all-or-nothing');
 
@@ -251,6 +296,38 @@ const today = () => new Date().toISOString().slice(0, 10);
     check('refused while a batch runs on it', delBatched.status === 400, `got ${delBatched.status}`);
     check('  and names the batches', String(delBatched.body?.message || '').includes('batch'), delBatched.body?.message);
     await db.query(`DELETE FROM "Batch" WHERE "courseId" = $1`, [courseId]);
+
+    // ── 5b. A batch is a weekly timetable ───────────────────────────────────
+    /*
+     * Class generation returns 0 for a batch with no days or times — quietly,
+     * since that is normal mid-setup. So an approved schedule change could
+     * roll over onto a batch like this and produce no classes at all, with
+     * nobody told. The form offered the fields; nothing made them stick.
+     */
+    console.log('\n5b. A batch cannot be created without a schedule');
+
+    const noSchedule = await req('POST', '/attendance/batches', adminToken, {
+      name: `${MARKER} scheduleless`, courseId, teacherId,
+    });
+    check('a batch with no weekly days is refused', noSchedule.status === 400, `got ${noSchedule.status}`);
+    check('  and says what it needs', /weekly days/i.test(String(noSchedule.body?.message)), noSchedule.body?.message);
+
+    const noTimes = await req('POST', '/attendance/batches', adminToken, {
+      name: `${MARKER} timeless`, courseId, teacherId, daysOfWeek: ['Monday'],
+    });
+    check('days without times is refused too', noTimes.status === 400, `got ${noTimes.status}`);
+
+    const goodBatch = await req('POST', '/attendance/batches', adminToken, {
+      name: `${MARKER} proper`, courseId, teacherId,
+      daysOfWeek: ['Monday', 'Wednesday'], startTime: '18:00', endTime: '19:00',
+    });
+    check('a batch with a full weekly pattern is created', goodBatch.status === 201, `got ${goodBatch.status}`);
+    const { rows: madeBatch } = await db.query(
+      `SELECT "daysOfWeek","startTime","endTime" FROM "Batch" WHERE name = $1`,
+      [`${MARKER} proper`],
+    );
+    check('  and it stored the pattern', madeBatch[0]?.daysOfWeek?.length === 2 && madeBatch[0]?.startTime === '18:00', JSON.stringify(madeBatch[0]));
+    await db.query(`DELETE FROM "Batch" WHERE name LIKE $1`, [`${MARKER}%`]);
 
     // ── 6. Packages: the fee plan link, and the transaction ──────────────────
     console.log('\n6. Package create carries billing');

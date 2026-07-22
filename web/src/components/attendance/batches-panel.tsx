@@ -92,6 +92,12 @@ function CreateBatchForm({ courses, teachers, onCancel, onCreated }: {
 
   const submit = async () => {
     if (!name || !courseId) { Swal.fire({ title: "Name + course required", icon: "info", background: swalBg() }); return; }
+    // Days default to none and nothing used to insist, which is how batches
+    // with no timetable got created — and no class can be generated for one.
+    if (!days.length || !startTime || !endTime) {
+      Swal.fire({ title: "Pick the weekly days and times", text: "A batch without them can have no classes generated for it.", icon: "info", background: swalBg() });
+      return;
+    }
     setBusy(true);
     try {
       await createBatch({ name, courseId, teacherId: teacherId || undefined, level: level || undefined, daysOfWeek: days, startTime, endTime, capacity: capacity ? Number(capacity) : undefined });

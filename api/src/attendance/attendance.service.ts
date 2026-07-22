@@ -92,6 +92,20 @@ export class AttendanceService implements OnModuleInit {
     if (!course) throw new BadRequestException('Course not found.');
     if (dto.teacherId) await this.assertTeacher(dto.teacherId);
 
+    /*
+     * A batch is a weekly timetable, and everything downstream assumes it has
+     * one. Class-session generation returns 0 for a batch with no days or no
+     * times — quietly, because that is a normal state for a batch mid-setup —
+     * so an approved schedule change could roll over onto a batch like this
+     * and produce no classes at all, with nobody told. The form has always
+     * offered these fields; nothing made them stick.
+     */
+    if (!dto.daysOfWeek?.length || !dto.startTime || !dto.endTime) {
+      throw new BadRequestException(
+        'A batch needs its weekly days and a start and end time — without them no classes can be generated for it.',
+      );
+    }
+
     const code = await this.nextCode('Batch', 'BATCH');
     const batch = await this.prisma.batch.create({
       data: {

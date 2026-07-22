@@ -183,6 +183,45 @@ export class LmsDataService implements OnModuleInit {
       status: LmsDataService.COURSE_STATUS_TO_ENUM[status] ?? CourseStatus.DRAFT,
     };
 
+    /*
+     * Renaming the code re-files everything filed under the old one.
+     *
+     * Classes, assignments, assessments, knowledgebase material and student
+     * registrations all reference a course by its code as plain text — there
+     * is no foreign key to stop the old value going stale. Deleting a course
+     * is guarded; renaming one was not, so changing "QR-101" to "QR-201"
+     * detached every one of those rows at once. They do not error, they just
+     * stop appearing, which reads as missing rather than as misfiled.
+     *
+     * The course's title is carried along too, since these rows cache it for
+     * display and a renamed course would otherwise show its old name.
+     */
+    const reFile =
+      code !== existing.code
+        ? [
+            this.prisma.lmsClass.updateMany({
+              where: { courseCode: existing.code },
+              data: { courseCode: code, courseTitle: courseFields.title },
+            }),
+            this.prisma.lmsAssignment.updateMany({
+              where: { courseCode: existing.code },
+              data: { courseCode: code, courseTitle: courseFields.title },
+            }),
+            this.prisma.lmsAssessment.updateMany({
+              where: { courseCode: existing.code },
+              data: { courseCode: code, courseTitle: courseFields.title },
+            }),
+            this.prisma.lmsKnowledgebase.updateMany({
+              where: { courseCode: existing.code },
+              data: { courseCode: code, courseTitle: courseFields.title },
+            }),
+            this.prisma.studentRegistration.updateMany({
+              where: { courseCode: existing.code },
+              data: { courseCode: code, courseTitle: courseFields.title },
+            }),
+          ]
+        : [];
+
     const [lmsCourse] = await this.prisma.$transaction([
       this.prisma.lmsCourse.update({ where: { id }, data }),
       // Upsert, not update: rows created before the two lists were joined may
@@ -193,6 +232,7 @@ export class LmsDataService implements OnModuleInit {
         create: { id, ...courseFields },
         update: courseFields,
       }),
+      ...reFile,
     ]);
     return lmsCourse;
   }
