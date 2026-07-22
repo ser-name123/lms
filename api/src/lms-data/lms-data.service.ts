@@ -24,7 +24,7 @@ export class LmsDataService implements OnModuleInit {
               name: lp.title,
               description: lp.description,
               price: lp.price,
-              classesPerMonth: parseClassesPerMonth(lp.features, lp.title),
+              classesPerMonth: classesFor(lp),
               active: lp.status === 'Active',
             }
           });
@@ -246,7 +246,7 @@ export class LmsDataService implements OnModuleInit {
           name: lmsPkg.title,
           description: lmsPkg.description,
           price: lmsPkg.price,
-          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          classesPerMonth: classesFor(lmsPkg),
           active: lmsPkg.status === 'Active',
         },
       });
@@ -269,14 +269,14 @@ export class LmsDataService implements OnModuleInit {
           name: lmsPkg.title,
           description: lmsPkg.description,
           price: lmsPkg.price,
-          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          classesPerMonth: classesFor(lmsPkg),
           active: lmsPkg.status === 'Active',
         },
         update: {
           name: lmsPkg.title,
           description: lmsPkg.description,
           price: lmsPkg.price,
-          classesPerMonth: parseClassesPerMonth(lmsPkg.features, lmsPkg.title),
+          classesPerMonth: classesFor(lmsPkg),
           active: lmsPkg.status === 'Active',
         },
       });
@@ -453,6 +453,22 @@ export class LmsDataService implements OnModuleInit {
       return pkg.title;
     });
   }
+}
+
+/*
+ * How many classes a month a package buys.
+ *
+ * Prefers what the academy actually typed in. The guess below is only for rows
+ * created before that field existed — it reads a number out of marketing copy
+ * and falls back to 8, and this number reaches a student's screen, decides the
+ * "hours difference" a coach approves, and rides along with the billing. It is
+ * a fallback, not a policy.
+ */
+function classesFor(pkg: { classesPerMonth?: number | null; features?: string[]; title?: string }): number {
+  if (typeof pkg.classesPerMonth === 'number' && pkg.classesPerMonth > 0) {
+    return pkg.classesPerMonth;
+  }
+  return parseClassesPerMonth(pkg.features ?? [], pkg.title ?? '');
 }
 
 function parseClassesPerMonth(features: string[] = [], title: string = ''): number {

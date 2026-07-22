@@ -345,6 +345,85 @@ const ids = {};
     );
     check('THE BILLING MOVED WITH THE PACKAGE', planNow[0].planId === plans.big, planNow[0].planId);
 
+    /*
+     * Module 7's real payload: the sessions. Moving the batch is invisible to
+     * a family — what they see is their calendar.
+     */
+    /*
+     * Read the wall clock as Postgres stores it. startsAt is `timestamp
+     * without time zone`, so letting the driver build a JS Date applies the
+     * machine's offset and an 18:00 class reads back as 12:30Z on an IST box —
+     * the data was right and the assertion was wrong.
+     */
+    const { rows: sessions } = await db.query(
+      `SELECT to_char("startsAt", 'Dy') AS dow,
+              to_char("startsAt", 'HH24:MI') AS at,
+              to_char("startsAt", 'YYYY-MM-DD HH24:MI') AS slot
+       FROM "ClassSession" WHERE "batchId" = $1 ORDER BY "startsAt"`,
+      [ids.batch],
+    );
+    check('classes were generated for the new cycle', sessions.length > 0, `${sessions.length} session(s)`);
+    check(
+      'and they fall on the requested days at the requested time',
+      sessions.length > 0 &&
+        sessions.every((s) => ['Mon', 'Wed'].includes(s.dow.trim()) && s.at === '18:00'),
+      sessions.slice(0, 3).map((s) => `${s.dow.trim()} ${s.at}`).join(' | '),
+    );
+    check(
+      'no day was scheduled twice',
+      new Set(sessions.map((s) => s.slot)).size === sessions.length,
+      `${sessions.length} session(s), ${new Set(sessions.map((s) => s.slot)).size} distinct`,
+    );
+    const { rows: attendees } = await db.query(
+      `SELECT count(*)::int n FROM "ClassAttendee" ca
+       JOIN "ClassSession" cs ON cs.id = ca."classId" WHERE cs."batchId" = $1`,
+      [ids.batch],
+    );
+    check('the student is on every one of them', attendees[0].n === sessions.length, `${attendees[0].n} vs ${sessions.length}`);
+
+    /*
+     * Running it again must not double-book the teacher. The queue has to be
+     * refilled first — the earlier version of this check re-ran with nothing
+     * queued, so the rollover returned immediately and the check passed
+     * without exercising anything.
+     */
+    await db.query(
+      `INSERT INTO "SubscriptionNextCycle" (id,"studentId","nextDays","nextTime","nextBatchId","updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,'18:00',$3,now())`,
+      [ids.student, ['Monday', 'Wednesday'], ids.batch],
+    );
+    const second = await req('POST', `/subscriptions/student/${ids.student}/apply-now`, adminToken, undefined, 201);
+    check('a second rollover runs', second.ok, `HTTP ${second.status}`);
+    const { rows: again } = await db.query(
+      `SELECT count(*)::int n FROM "ClassSession" WHERE "batchId" = $1`, [ids.batch],
+    );
+    check(
+      'and creates no duplicate classes',
+      again[0].n === sessions.length,
+      `${again[0].n} vs ${sessions.length}`,
+    );
+
+    // Two callers racing — the sweep and an admin — must not both apply it.
+    await db.query(
+      `INSERT INTO "SubscriptionNextCycle" (id,"studentId","nextDays","nextTime","nextBatchId","updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,'18:00',$3,now())`,
+      [ids.student, ['Monday', 'Wednesday'], ids.batch],
+    );
+    const raced = await Promise.all([
+      req('POST', `/subscriptions/student/${ids.student}/apply-now`, adminToken, undefined, 201),
+      req('POST', `/subscriptions/student/${ids.student}/apply-now`, adminToken, undefined, 201),
+    ]);
+    const didWork = raced.filter((r) => r.body && r.body.studentId).length;
+    check(
+      'only one of two simultaneous rollovers does the work',
+      didWork === 1,
+      `${didWork} did work — bodies: ${raced.map((r) => JSON.stringify(r.body)).join(' || ')}`,
+    );
+    const { rows: afterRace } = await db.query(
+      `SELECT count(*)::int n FROM "ClassSession" WHERE "batchId" = $1`, [ids.batch],
+    );
+    check('and the race created nothing extra', afterRace[0].n === sessions.length, `${afterRace[0].n} vs ${sessions.length}`);
+
     // ── Module 8: the student's own list ─────────────────────────────────────
     console.log('\nModule 8 — my requests');
     const mine = await req('GET', '/subscriptions/me/requests', studentToken);

@@ -1144,6 +1144,18 @@ model LmsPackage {
   features    String[]
   status      String   @default("Active")
   description String
+
+  /*
+   * How many classes a month this package buys. Nullable only because the
+   * column arrived after the rows did; every code path treats a missing value
+   * as "not set yet" rather than substituting one.
+   *
+   * This used to be inferred from the marketing copy by regex, with a silent
+   * default of 8 — a number that reaches a student's screen, decides the
+   * "hours difference" a coach approves, and travels with the billing. A
+   * feature line mentioning any number between 4 and 30 could set it.
+   */
+  classesPerMonth Int?
 }
 
 model LmsClass {

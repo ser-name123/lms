@@ -95,6 +95,9 @@ export default function PackagesPage() {
   const [formTitle, setFormTitle] = useState("");
   const [formPrice, setFormPrice] = useState<number>(29);
   const [formBilling, setFormBilling] = useState("Monthly");
+  // How many classes the package actually buys. Typed in, not guessed from the
+  // feature list — this number is billed on and shown to students.
+  const [formClasses, setFormClasses] = useState<number>(8);
   const [formLevel, setFormLevel] = useState("All");
   const [formCourses, setFormCourses] = useState<string[]>([]);
   const [formFeatures, setFormFeatures] = useState<string[]>([]);
@@ -219,6 +222,7 @@ export default function PackagesPage() {
       title: formTitle,
       price: Number(formPrice) || 0,
       billing: formBilling,
+      classesPerMonth: Number(formClasses) || null,
       level: formLevel,
       courses: formCourses,
       features: formFeatures.length > 0 ? formFeatures : ["General Access"],
@@ -252,6 +256,7 @@ export default function PackagesPage() {
     setFormTitle(pkg.title);
     setFormPrice(pkg.price);
     setFormBilling(pkg.billing);
+    setFormClasses(pkg.classesPerMonth ?? 8);
     setFormLevel(pkg.level);
     setFormCourses(pkg.courses);
     setFormFeatures(pkg.features);
@@ -273,6 +278,7 @@ export default function PackagesPage() {
       title: formTitle,
       price: Number(formPrice) || 0,
       billing: formBilling,
+      classesPerMonth: Number(formClasses) || null,
       level: formLevel,
       courses: formCourses,
       features: formFeatures.length > 0 ? formFeatures : ["General Access"],
@@ -761,6 +767,18 @@ export default function PackagesPage() {
                   />
                 </div>
                 <div>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Classes / month</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={formClasses}
+                    onChange={(e) => setFormClasses(Number(e.target.value))}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[10px] text-ink-3">Shown to students and used when a package change is priced.</p>
+                </div>
+                <div>
                   <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Billing Cycle</label>
                   <select
                     value={formBilling}
@@ -933,6 +951,18 @@ export default function PackagesPage() {
                     onChange={(e) => setFormPrice(Number(e.target.value))}
                     className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Classes / month</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={formClasses}
+                    onChange={(e) => setFormClasses(Number(e.target.value))}
+                    className="h-10 w-full rounded-xl border border-hairline bg-surface-2 px-3.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <p className="mt-1 text-[10px] text-ink-3">Shown to students and used when a package change is priced.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-ink-3 uppercase mb-1">Billing Cycle</label>

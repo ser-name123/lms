@@ -862,11 +862,40 @@ export class SubscriptionsService {
    * there is nothing queued, which is the case for almost every student.
    */
   async applyNextCycleFor(studentId: string) {
-    const queued = await this.prisma.subscriptionNextCycle.findUnique({
-      where: { studentId },
-      include: { nextPackage: { select: { id: true, name: true, feePlanId: true } } },
-    });
-    if (!queued) return null;
+    /*
+     * Claim the queued row by deleting it, and use the returned copy as the
+     * work order. Reading it first and deleting at the end let two callers —
+     * the billing sweep and an admin pressing apply-now — both see the same
+     * queue and both apply it: the classes were generated twice on the same
+     * day and the billing plan moved twice. Delete is atomic, so exactly one
+     * caller gets the row and the other sees P2025 and stops.
+     *
+     * The trade-off is deliberate: if applying fails after the claim the queue
+     * is gone and the change has to be re-approved. That is recoverable and
+     * visible; double-booking a teacher and double-moving a fee plan is not.
+     */
+    const claimed = await this.prisma.$queryRaw<
+      {
+        nextPackageId: string | null;
+        nextDays: string[];
+        nextTime: string | null;
+        nextBatchId: string | null;
+      }[]
+    >`
+      DELETE FROM "SubscriptionNextCycle"
+      WHERE "studentId" = ${studentId}
+      RETURNING "nextPackageId", "nextDays", "nextTime", "nextBatchId"
+    `;
+    // Nothing queued, or another caller claimed it in the same instant.
+    if (!claimed.length) return null;
+    const queued = claimed[0];
+
+    const nextPackage = queued.nextPackageId
+      ? await this.prisma.package.findUnique({
+          where: { id: queued.nextPackageId },
+          select: { id: true, name: true, feePlanId: true },
+        })
+      : null;
 
     const applied: string[] = [];
 
@@ -882,7 +911,7 @@ export class SubscriptionsService {
           where: { id: enrolment.id },
           data: { packageId: queued.nextPackageId },
         });
-        applied.push(`package → ${queued.nextPackage?.name ?? queued.nextPackageId}`);
+        applied.push(`package → ${nextPackage?.name ?? queued.nextPackageId}`);
       }
 
       /*
@@ -890,16 +919,16 @@ export class SubscriptionsService {
        * is recorded rather than hidden: the student would otherwise be taught
        * the new package and billed the old one indefinitely.
        */
-      if (queued.nextPackage?.feePlanId) {
+      if (nextPackage?.feePlanId) {
         const assignment = await this.prisma.studentFeeAssignment.findFirst({
           where: { studentId, active: true },
           orderBy: { createdAt: 'desc' },
           select: { id: true, planId: true },
         });
-        if (assignment && assignment.planId !== queued.nextPackage.feePlanId) {
+        if (assignment && assignment.planId !== nextPackage.feePlanId) {
           await this.prisma.studentFeeAssignment.update({
             where: { id: assignment.id },
-            data: { planId: queued.nextPackage.feePlanId },
+            data: { planId: nextPackage.feePlanId },
           });
           applied.push('billing plan moved with it');
         }
@@ -945,15 +974,36 @@ export class SubscriptionsService {
       scheduleBatchId = queued.nextBatchId;
     }
 
+    /*
+     * ── The classes themselves ────────────────────────────────────────────
+     *
+     * Moving the timetable is not the change a family notices — the sessions
+     * are. Nothing else in this codebase creates them on a schedule:
+     * generateClasses() is an on-demand admin action, so without this the
+     * student's new days and times would exist on the batch while their
+     * calendar still showed the old ones.
+     *
+     * Generated for the cycle that is starting. Days that already have a
+     * session for this batch are skipped, so a second sweep — or two students
+     * in the same batch both rolling over — cannot double-book anybody.
+     */
+    if (scheduleBatchId) {
+      const generated = await this.generateCycleClasses(studentId, scheduleBatchId).catch(
+        (e) => {
+          // The schedule change itself has already been applied and must
+          // stand; a failure to mint sessions is reported, not rolled back.
+          applied.push(`classes not generated (${e?.message ?? e})`);
+          return 0;
+        },
+      );
+      if (generated) applied.push(`${generated} class(es) scheduled`);
+    }
+
     // ── The requests that asked for all this ──────────────────────────────
     await this.prisma.subscriptionRequest.updateMany({
       where: { studentId, status: SubscriptionRequestStatus.APPROVED },
       data: { status: SubscriptionRequestStatus.APPLIED, appliedAt: new Date() },
     });
-
-    // Clear the queue before anything else can read it — a second sweep must
-    // not apply the same change twice.
-    await this.prisma.subscriptionNextCycle.delete({ where: { studentId } });
 
     const student = await this.prisma.studentProfile.findUnique({
       where: { id: studentId },
@@ -980,5 +1030,119 @@ export class SubscriptionsService {
     );
 
     return { studentId, applied, batchId: scheduleBatchId };
+  }
+
+  /*
+   * Sessions for the cycle that is starting, from the batch's weekly pattern.
+   *
+   * The window is this student's own cycle — nextRunAt is the boundary the
+   * rollover fires on, so it is the new cycle's start, and the plan says how
+   * long it runs. Falls back to a month when there is no plan to read, rather
+   * than generating nothing and leaving an empty calendar.
+   *
+   * Not attendance.generateClasses(): that one creates a session for every
+   * matching day with no check for what is already there, which is right for a
+   * one-off admin action and wrong here — a re-run of the sweep, or two
+   * students in the same batch rolling over together, would double-book the
+   * teacher. Skipping start times that already exist is the difference, and it
+   * is why this does not just call the other one.
+   */
+  private async generateCycleClasses(studentId: string, batchId: string): Promise<number> {
+    const assignment = await this.prisma.studentFeeAssignment.findFirst({
+      where: { studentId, active: true },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: { select: { cycle: true } } },
+    });
+
+    const from = assignment?.nextRunAt ?? new Date();
+    const months = assignment?.plan ? cycleMonths(assignment.plan.cycle) : 0;
+    const to = addMonths(from, months > 0 ? months : 1);
+
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      select: {
+        id: true,
+        name: true,
+        courseId: true,
+        teacherId: true,
+        daysOfWeek: true,
+        startTime: true,
+        endTime: true,
+        students: { select: { studentId: true } },
+      },
+    });
+    // Not an error: a batch with no weekly pattern or no teacher simply has
+    // nothing to generate, and saying so beats throwing on a normal state.
+    if (!batch?.daysOfWeek?.length || !batch.startTime || !batch.endTime || !batch.teacherId) {
+      return 0;
+    }
+
+    /*
+     * Compare on the stored wall clock, formatted by Postgres.
+     *
+     * startsAt is `timestamp without time zone`, so a JS Date round-trip picks
+     * up the server's offset somewhere between the driver and the client and
+     * the two sides stop matching — dedupe silently missed every existing
+     * session and a re-run doubled the whole cycle. Asking the database to
+     * render the value takes the timezone out of the comparison entirely.
+     */
+    const existing = await this.prisma.$queryRaw<{ slot: string }[]>`
+      SELECT to_char("startsAt", 'YYYY-MM-DD HH24:MI') AS slot
+      FROM "ClassSession"
+      WHERE "batchId" = ${batchId}
+        AND "startsAt" >= ${from}
+        AND "startsAt" < ${to}
+    `;
+    const taken = new Set(existing.map((e) => e.slot));
+    const slotOf = (d: Date) =>
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+        d.getUTCDate(),
+      ).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:${String(
+        d.getUTCMinutes(),
+      ).padStart(2, '0')}`;
+
+    /*
+     * UTC, not server-local. Everything else this feature touches treats a
+     * batch's "18:00" as UTC — teacher availability windows, the free-slot
+     * maths, the trial booking. attendance.generateClasses() uses setHours()
+     * instead, so the same string means server-local there; on an IST box a
+     * class approved for 18:00 was created at 12:30 UTC and shown back as
+     * 12:30. Matching the rest of the feature is what makes the approved time
+     * and the generated class the same time.
+     */
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const [sh, sm] = batch.startTime.split(':').map(Number);
+    const [eh, em] = batch.endTime.split(':').map(Number);
+
+    let made = 0;
+    for (const d = new Date(from); d < to; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (!batch.daysOfWeek.includes(DAYS[d.getUTCDay()])) continue;
+
+      const startsAt = new Date(d);
+      startsAt.setUTCHours(sh, sm, 0, 0);
+      if (taken.has(slotOf(startsAt))) continue;
+      const endsAt = new Date(d);
+      endsAt.setUTCHours(eh, em, 0, 0);
+
+      const session = await this.prisma.classSession.create({
+        data: {
+          courseId: batch.courseId,
+          teacherId: batch.teacherId,
+          batchId: batch.id,
+          title: `${batch.name} — Class`,
+          startsAt,
+          endsAt,
+          status: 'SCHEDULED',
+        },
+      });
+      if (batch.students.length) {
+        await this.prisma.classAttendee.createMany({
+          data: batch.students.map((s) => ({ classId: session.id, studentId: s.studentId })),
+          skipDuplicates: true,
+        });
+      }
+      made += 1;
+    }
+    return made;
   }
 }

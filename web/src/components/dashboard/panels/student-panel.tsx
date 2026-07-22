@@ -19,7 +19,9 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import {
+  fetchMySubscription,
   fetchStudentRoleDashboard,
+  type CurrentSubscription,
   type DashboardRange,
   type ResolvedWidget,
   type StudentDashboard,
@@ -289,6 +291,16 @@ export function StudentPanel() {
             </WidgetCard>
           );
 
+        // Read-only on purpose: the two request buttons live on the page this
+        // links to, not here. A dashboard tile that could change a package
+        // would be the direct edit this whole flow exists to prevent.
+        case "st.subscription":
+          return (
+            <WidgetCard title="My subscription" subtitle="Read only — request changes from the page">
+              <SubscriptionWidget />
+            </WidgetCard>
+          );
+
         case "st.actions":
           return (
             <WidgetCard title="Quick actions">
@@ -333,5 +345,110 @@ export function StudentPanel() {
       render={render}
       toolbar={<RangePicker value={range} onChange={setRange} disabled={loading} />}
     />
+  );
+}
+
+/*
+ * The read-only subscription tile. Loads on its own rather than being threaded
+ * through the dashboard payload: it is one small request, only for students who
+ * have the widget enabled, and it keeps the dashboard service free of billing
+ * concerns it otherwise knows nothing about.
+ */
+function SubscriptionWidget() {
+  const [sub, setSub] = useState<CurrentSubscription | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let alive = true;
+    fetchMySubscription()
+      .then((s) => {
+        if (!alive) return;
+        setSub(s);
+        setState("ready");
+      })
+      .catch(() => alive && setState("error"));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (state === "loading") {
+    return <p className="py-6 text-center text-xs text-ink-3">Loading…</p>;
+  }
+  if (state === "error" || !sub) {
+    return <p className="py-6 text-center text-xs text-ink-3">Could not load your subscription.</p>;
+  }
+
+  const fmt = (v: string | null) =>
+    v ? new Date(v).toLocaleDateString(undefined, { day: "2-digit", month: "short" }) : "—";
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Cell label="Package">
+          {sub.package ? (
+            <>
+              <p className="text-sm font-black text-ink">{sub.package.name}</p>
+              <p className="text-[10px] text-ink-3">{sub.package.classesPerMonth} classes / month</p>
+            </>
+          ) : (
+            <p className="text-sm text-ink-3">Not set</p>
+          )}
+        </Cell>
+        <Cell label="Time">
+          {sub.schedule.length ? (
+            <>
+              <p className="text-sm font-black text-ink">
+                {sub.schedule[0].days.map((d) => d.slice(0, 3)).join(" ") || "—"}
+              </p>
+              <p className="text-[10px] text-ink-3">{sub.schedule[0].startTime ?? "—"}</p>
+            </>
+          ) : (
+            <p className="text-sm text-ink-3">No schedule</p>
+          )}
+        </Cell>
+        <Cell label="Cycle">
+          <p className="text-sm font-black text-ink">{fmt(sub.cycle.start)}</p>
+          <p className="text-[10px] text-ink-3">to {fmt(sub.cycle.end)}</p>
+        </Cell>
+        <Cell label="Status">
+          <p
+            className={`text-sm font-black ${
+              sub.status === "ACTIVE"
+                ? "text-emerald-600"
+                : sub.status === "PAUSED"
+                  ? "text-amber-600"
+                  : "text-ink-3"
+            }`}
+          >
+            {sub.status === "NONE" ? "None" : sub.status.charAt(0) + sub.status.slice(1).toLowerCase()}
+          </p>
+        </Cell>
+      </div>
+
+      {sub.nextCycle && (
+        <p className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-[11px] font-semibold text-accent">
+          Changing from {fmt(sub.cycle.end)}
+          {sub.nextCycle.package ? ` · ${sub.nextCycle.package.name}` : ""}
+          {sub.nextCycle.time ? ` · ${sub.nextCycle.days.join(", ")} ${sub.nextCycle.time}` : ""}
+        </p>
+      )}
+
+      <Link
+        href="/student/subscription"
+        className="inline-flex text-[11px] font-bold text-accent hover:underline"
+      >
+        View and request changes →
+      </Link>
+    </div>
+  );
+}
+
+function Cell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-hairline bg-surface-2/40 p-3">
+      <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wider text-ink-3">{label}</p>
+      {children}
+    </div>
   );
 }
