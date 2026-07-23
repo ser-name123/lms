@@ -5,18 +5,29 @@ import {
   CheckCircle2,
   Loader2,
   Receipt,
+  X,
+  AlertCircle,
 } from "lucide-react";
+import Swal from "sweetalert2";
 
+import { cn } from "@/lib/utils";
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
-import { fetchStudentInvoices } from "@/lib/api";
+import { fetchStudentInvoices, createPaymentIntent } from "@/lib/api";
 import { money, type Currency } from "@/lib/currency";
 
 export default function StudentInvoices() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Stripe States
+  const [activeInvoice, setActiveInvoice] = useState<any | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [stripeError, setStripeError] = useState("");
+  const [stripeInstance, setStripeInstance] = useState<any>(null);
+  const [elementsInstance, setElementsInstance] = useState<any>(null);
 
   const loadInvoices = () => {
     setLoading(true);
@@ -32,8 +43,98 @@ export default function StudentInvoices() {
       });
   };
 
+  const loadStripeScript = (): Promise<void> => {
+    return new Promise((resolve) => {
+      if ((window as any).Stripe) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://js.stripe.com/v3/";
+      script.async = true;
+      script.onload = () => resolve();
+      document.body.appendChild(script);
+    });
+  };
+
+  const handlePayClick = async (invoice: any) => {
+    setActiveInvoice(invoice);
+    setStripeLoading(true);
+    setStripeError("");
+    try {
+      const res = await createPaymentIntent(invoice.id);
+      await loadStripeScript();
+      
+      if (!(window as any).Stripe) {
+        throw new Error("Failed to load Stripe payment gateway.");
+      }
+
+      const stripe = (window as any).Stripe(res.publishableKey);
+      setStripeInstance(stripe);
+
+      const elements = stripe.elements({
+        clientSecret: res.clientSecret,
+        appearance: {
+          theme: document.documentElement.classList.contains("dark") ? "night" : "flat",
+          variables: {
+            colorPrimary: "#386FA4",
+          }
+        }
+      });
+      setElementsInstance(elements);
+
+      setTimeout(() => {
+        const paymentElement = elements.create("payment");
+        paymentElement.mount("#payment-element-mount");
+        setStripeLoading(false);
+      }, 300);
+
+    } catch (err: any) {
+      console.error("Payment initialization failed", err);
+      setStripeError(err?.message || "Could not initialize payment. Please try again.");
+      setStripeLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripeInstance || !elementsInstance) return;
+
+    setPaying(true);
+    setStripeError("");
+
+    try {
+      const { error } = await stripeInstance.confirmPayment({
+        elements: elementsInstance,
+        confirmParams: {
+          return_url: `${window.location.origin}/student/invoices?payment_success=true`,
+        },
+      });
+
+      if (error) {
+        setStripeError(error.message || "Payment failed.");
+      }
+    } catch (err: any) {
+      setStripeError(err?.message || "An unexpected error occurred.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   useEffect(() => {
     loadInvoices();
+
+    // Check for redirection param
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment_success") === "true") {
+      Swal.fire({
+        title: "Payment Succeeded!",
+        text: "Your invoice has been paid successfully.",
+        icon: "success",
+        confirmButtonColor: "#386FA4",
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
   if (loading) {
@@ -80,13 +181,7 @@ export default function StudentInvoices() {
                     <th className="px-6 py-4">Invoice #</th>
                     <th className="px-6 py-4">Issue Date</th>
                     <th className="px-6 py-4">Due Date</th>
-                    {/* Was "Net Dues ($)": the dollar sign is wrong for a family
-                        billed in AED or GBP, and money() already names the
-                        currency per row. */}
                     <th className="px-6 py-4">Amount</th>
-                    {/* Was "Payment Method", hardcoded to "Stripe Checkout" when
-                        paid and "Online card payment" when not. This payload
-                        carries no method, so the column could only guess. */}
                     <th className="px-6 py-4">Balance</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4 text-right">Actions</th>
@@ -122,17 +217,18 @@ export default function StudentInvoices() {
                           </Badge>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          {/* The "Pay Invoice" button opened a card form that
-                              looked like Stripe, threw the card details away and
-                              called an endpoint that simply marked the invoice
-                              paid. It returns when Stripe is actually wired. */}
                           {isPaid ? (
                             <span className="text-xs text-good font-bold flex items-center justify-end gap-1 select-none">
                               <CheckCircle2 className="size-4" />
                               Paid on {inv.paidAt ? new Date(inv.paidAt).toLocaleDateString() : ""}
                             </span>
                           ) : (
-                            <span className="text-xs text-ink-3">—</span>
+                            <button
+                              onClick={() => handlePayClick(inv)}
+                              className="h-8 px-4 rounded-lg bg-accent text-[11px] font-bold text-white hover:bg-accent/90 active:scale-95 transition-all cursor-pointer"
+                            >
+                              Pay Invoice
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -151,6 +247,72 @@ export default function StudentInvoices() {
         </Card>
       </main>
 
+      {/* Pay Invoice Stripe Elements Modal */}
+      {activeInvoice && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <div className="bg-surface border border-hairline rounded-3xl w-full max-w-md shadow-pop overflow-hidden p-6 space-y-6 animate-fade-up">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-hairline pb-4">
+              <div>
+                <h2 className="font-extrabold text-base text-ink">Pay Invoice</h2>
+                <p className="text-xs text-ink-3 mt-0.5">Settle {activeInvoice.number} securely via Stripe Card</p>
+              </div>
+              <button 
+                onClick={() => setActiveInvoice(null)} 
+                className="size-8 hover:bg-surface-2 rounded-xl flex items-center justify-center text-ink-3 cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Error alerts */}
+            {stripeError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{stripeError}</span>
+              </div>
+            )}
+
+            {/* Main Form */}
+            <form onSubmit={handleConfirmPayment} className="space-y-4">
+              
+              {/* Payment Element Mount Container */}
+              <div className="min-h-[180px] relative flex flex-col justify-center">
+                {stripeLoading && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 z-10 gap-2">
+                    <Loader2 className="size-7 animate-spin text-accent" />
+                    <p className="text-xs text-ink-3 font-semibold">Setting up secure form...</p>
+                  </div>
+                )}
+                <div id="payment-element-mount" className="w-full" />
+              </div>
+
+              {/* Action Buttons */}
+              {!stripeLoading && (
+                <div className="flex justify-end gap-3 pt-4 border-t border-hairline">
+                  <button 
+                    type="button" 
+                    onClick={() => setActiveInvoice(null)} 
+                    disabled={paying}
+                    className="h-10 px-5 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={paying || !stripeInstance}
+                    className="h-10 px-6 rounded-xl bg-accent text-xs font-bold text-white flex items-center gap-1.5 justify-center hover:bg-accent-active cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                  >
+                    {paying ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Confirm &amp; Pay {money(Number(activeInvoice.amount) - Number(activeInvoice.paidAmount ?? 0), activeInvoice.currency)}
+                  </button>
+                </div>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

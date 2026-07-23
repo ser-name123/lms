@@ -1346,6 +1346,15 @@ export const testStripeConnection = () =>
     { method: "POST" },
   );
 
+export const createPaymentIntent = (invoiceId: string) =>
+  api<{
+    clientSecret: string;
+    publishableKey: string;
+    amount: number;
+    currency: string;
+    invoiceNumber: string;
+  }>(`/payments/invoices/${invoiceId}/intent`, { method: "POST" });
+
 // ─── Payout Calls & Types ──────────────────────────────────────────────────────
 
 export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";
