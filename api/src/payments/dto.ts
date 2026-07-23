@@ -20,3 +20,8 @@ export class SaveStripeSettingsDto {
   @IsString()
   webhookSecret?: string;
 }
+
+export class VerifyPaymentIntentDto {
+  @IsString()
+  paymentIntentId!: string;
+}

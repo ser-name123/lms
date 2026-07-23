@@ -16,7 +16,7 @@ import type { Request } from 'express';
 
 import { PaymentsService } from './payments.service';
 import { StripeService } from './stripe.service';
-import { SaveStripeSettingsDto } from './dto';
+import { SaveStripeSettingsDto, VerifyPaymentIntentDto } from './dto';
 import { CurrentUser, Public, Roles, type AuthUser } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
 
@@ -121,5 +121,13 @@ export class PaymentsController {
     }
 
     return this.payments.handleEvent(event);
+  }
+
+  @Post('verify-intent')
+  @Roles(Role.STUDENT, Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify Stripe payment intent and mark invoice paid if succeeded' })
+  verifyIntent(@Body() dto: VerifyPaymentIntentDto) {
+    return this.payments.verifyIntent(dto.paymentIntentId);
   }
 }

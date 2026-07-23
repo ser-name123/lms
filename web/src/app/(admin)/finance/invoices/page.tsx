@@ -46,6 +46,7 @@ import {
   fetchFeePlans,
   fetchStudents,
   fetchDiscounts,
+  fetchLmsPackages,
   createPaymentIntent,
   type FinanceInvoice,
   type FinanceInvoiceStatus,
@@ -132,6 +133,7 @@ export default function FinanceInvoicesPage() {
   const [students, setStudents] = useState<{ id: string; name: string; email: string; code: string }[]>([]);
   const [feePlans, setFeePlans] = useState<FeePlan[]>([]);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
+  const [packages, setPackages] = useState<any[]>([]);
 
   // ─── Generate invoice modal ────────────────────────────────────────────────
   const [showGenModal, setShowGenModal] = useState(false);
@@ -139,9 +141,7 @@ export default function FinanceInvoicesPage() {
   const [genStudentId, setGenStudentId] = useState("");
   const [genCustomName, setGenCustomName] = useState("");
   const [genCustomEmail, setGenCustomEmail] = useState("");
-  const [itemSource, setItemSource] = useState<"plan" | "manual">("plan");
-  const [genFeePlanId, setGenFeePlanId] = useState("");
-  const [genItems, setGenItems] = useState<LineItem[]>([{ type: "COURSE", label: "Course Fee", amount: "" }]);
+  const [genPackageId, setGenPackageId] = useState("");
   const [genDiscountId, setGenDiscountId] = useState("");
   const [genTaxPct, setGenTaxPct] = useState("");
   // One of the three the academy sells in (it was a free-text box defaulting
@@ -288,9 +288,15 @@ export default function FinanceInvoicesPage() {
     }
 
     fetchStudents({ page: 1, limit: 200 })
-      .then(res => setStudents((res.items || []).map(s => ({
-        id: s.id, name: `${s.user.firstName} ${s.user.lastName}`, email: s.user.email, code: s.studentCode
-      }))))
+      .then(res => {
+        const mapped = (res.items || []).map(s => ({
+          id: s.id,
+          name: s.user ? `${s.user.firstName} ${s.user.lastName}`.trim() : "Unknown User",
+          email: s.user?.email || "",
+          code: s.studentCode || "ST-00000"
+        }));
+        setStudents(mapped);
+      })
       .catch(err => console.warn("Failed to load students", err));
 
     fetchFeePlans({ page: 1, limit: 200, active: "true" })
@@ -300,6 +306,10 @@ export default function FinanceInvoicesPage() {
     fetchDiscounts(undefined, "true")
       .then(res => setDiscounts(res.items || []))
       .catch(err => console.warn("Failed to load discounts", err));
+
+    fetchLmsPackages()
+      .then(res => setPackages(res.filter(p => p.status === "Active")))
+      .catch(err => console.warn("Failed to load packages", err));
   }, []);
 
   // ─── Stats strip computed from current list ────────────────────────────────
@@ -312,15 +322,20 @@ export default function FinanceInvoicesPage() {
   };
   const listCurrency = invoices[0]?.currency || "INR";
 
-  // ─── Generate item editor helpers ──────────────────────────────────────────
-  const addItemRow = () => setGenItems(prev => [...prev, { type: "OTHER", label: "", amount: "" }]);
-  const removeItemRow = (idx: number) => setGenItems(prev => prev.filter((_, i) => i !== idx));
-  const updateItemRow = (idx: number, patch: Partial<LineItem>) =>
-    setGenItems(prev => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  const packagePriceIn = (pkg: any, currency: Currency) => {
+    if (currency === "AED" && pkg.priceAED != null) return Number(pkg.priceAED);
+    if (currency === "GBP" && pkg.priceGBP != null) return Number(pkg.priceGBP);
+    return Number(pkg.priceUSD || 0);
+  };
 
-  const genSubtotal = itemSource === "plan"
-    ? (feePlans.find(p => p.id === genFeePlanId)?.components.reduce((s, c) => s + Number(amountIn(c, genCurrency) ?? 0), 0) || 0)
-    : genItems.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const selectedPackage = packages.find(p => p.id === genPackageId);
+  const selectedFeePlan = selectedPackage?.feePlanId ? feePlans.find(fp => fp.id === selectedPackage.feePlanId) : null;
+
+  const genSubtotal = selectedPackage
+    ? (selectedFeePlan
+        ? (selectedFeePlan.components.reduce((s, c) => s + Number(amountIn(c, genCurrency) ?? 0), 0) || 0)
+        : packagePriceIn(selectedPackage, genCurrency))
+    : 0;
   const genTaxAmount = genSubtotal * (Number(genTaxPct) || 0) / 100;
   const genEstTotal = genSubtotal + genTaxAmount;
   const openGenModal = () => {
@@ -328,7 +343,10 @@ export default function FinanceInvoicesPage() {
     fetchStudents({ page: 1, limit: 200 })
       .then(res => {
         const mapped = (res.items || []).map(s => ({
-          id: s.id, name: `${s.user.firstName} ${s.user.lastName}`, email: s.user.email, code: s.studentCode
+          id: s.id,
+          name: s.user ? `${s.user.firstName} ${s.user.lastName}`.trim() : "Unknown User",
+          email: s.user?.email || "",
+          code: s.studentCode || "ST-00000"
         }));
         setStudents(mapped);
         if (mapped.length > 0) {
@@ -340,9 +358,6 @@ export default function FinanceInvoicesPage() {
     fetchFeePlans({ page: 1, limit: 200, active: "true" })
       .then(res => {
         setFeePlans(res.items || []);
-        if (res.items && res.items.length > 0) {
-          setGenFeePlanId(res.items[0].id);
-        }
       })
       .catch(err => console.warn("Failed to load fee plans", err));
 
@@ -350,11 +365,19 @@ export default function FinanceInvoicesPage() {
       .then(res => setDiscounts(res.items || []))
       .catch(err => console.warn("Failed to load discounts", err));
 
+    fetchLmsPackages()
+      .then(res => {
+        const activePkgs = res.filter(p => p.status === "Active");
+        setPackages(activePkgs);
+        if (activePkgs.length > 0) {
+          setGenPackageId(activePkgs[0].id);
+        }
+      })
+      .catch(err => console.warn("Failed to load packages", err));
+
     setRecipientOption("student");
     setGenCustomName("");
     setGenCustomEmail("");
-    setItemSource("plan");
-    setGenItems([{ type: "COURSE", label: "Course Fee", amount: "" }]);
     setGenDiscountId("");
     setGenTaxPct("");
     setGenCurrency(DEFAULT_CURRENCY);
@@ -377,19 +400,13 @@ export default function FinanceInvoicesPage() {
       return;
     }
 
-    let manualItems: { type: FeeComponentType; label: string; amount: number }[] | undefined;
-    if (itemSource === "manual") {
-      manualItems = genItems
-        .filter(c => c.label.trim() && Number(c.amount) > 0)
-        .map(c => ({ type: c.type, label: c.label.trim(), amount: Number(c.amount) }));
-      if (!manualItems.length) {
-        Swal.fire({ title: "No Line Items", text: "Add at least one line item with a label and amount.", icon: "error" });
-        return;
-      }
-    } else if (!genFeePlanId) {
-      Swal.fire({ title: "Fee Plan Required", text: "Please choose a fee plan to auto-fill items.", icon: "error" });
+    const selectedPackage = packages.find(p => p.id === genPackageId);
+    if (!selectedPackage) {
+      Swal.fire({ title: "Package Required", text: "Please choose a package.", icon: "error" });
       return;
     }
+
+    const selectedFeePlan = selectedPackage.feePlanId ? feePlans.find(fp => fp.id === selectedPackage.feePlanId) : null;
 
     const dto: Record<string, any> = {
       currency: genCurrency,
@@ -402,8 +419,16 @@ export default function FinanceInvoicesPage() {
     };
     if (recipientOption === "student") dto.studentId = genStudentId;
     else { dto.customName = genCustomName.trim(); dto.customEmail = genCustomEmail.trim(); }
-    if (itemSource === "plan") dto.feePlanId = genFeePlanId;
-    else dto.items = manualItems;
+
+    if (selectedFeePlan) {
+      dto.feePlanId = selectedFeePlan.id;
+    } else {
+      dto.items = [{
+        type: "COURSE" as FeeComponentType,
+        label: `${selectedPackage.title} - ${selectedPackage.billing}`,
+        amount: packagePriceIn(selectedPackage, genCurrency)
+      }];
+    }
 
     setActionLoading(true);
     generateInvoice(dto)
@@ -880,55 +905,47 @@ export default function FinanceInvoicesPage() {
 
               {/* Items */}
               <div className="border border-hairline rounded-2xl p-4 space-y-3 bg-surface-2/30">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Line Items</span>
-                  <div className="flex gap-3 text-xs font-semibold">
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input type="radio" name="src" checked={itemSource === "plan"} onChange={() => setItemSource("plan")} className="text-accent border-hairline size-3.5" />
-                      <span>From Fee Plan</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input type="radio" name="src" checked={itemSource === "manual"} onChange={() => setItemSource("manual")} className="text-accent border-hairline size-3.5" />
-                      <span>Manual</span>
-                    </label>
-                  </div>
-                </div>
+                <span className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Package</span>
+                <select
+                  value={genPackageId}
+                  onChange={(e) => setGenPackageId(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
+                >
+                  {packages.length === 0 && <option value="">No packages available</option>}
+                  {packages.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.title} ({p.billing} · {genCurrency} {packagePriceIn(p, genCurrency).toLocaleString()})
+                    </option>
+                  ))}
+                </select>
 
-                {itemSource === "plan" ? (
-                  <>
-                    <select
-                      value={genFeePlanId}
-                      onChange={(e) => setGenFeePlanId(e.target.value)}
-                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-2.5 text-sm text-ink focus:outline-none focus:border-accent cursor-pointer"
-                    >
-                      {feePlans.length === 0 && <option value="">No fee plans available</option>}
-                      {feePlans.map(p => <option key={p.id} value={p.id}>{p.name} ({genCurrency} {p.components.reduce((s, c) => s + Number(amountIn(c, genCurrency) ?? 0), 0).toLocaleString()})</option>)}
-                    </select>
-                    {genFeePlanId && (
-                      <div className="space-y-1 pt-1">
-                        {feePlans.find(p => p.id === genFeePlanId)?.components.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs text-ink-3">
-                            <span className="flex items-center gap-1.5"><span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline">{c.type}</span> {c.label}</span>
-                            <span className="font-bold text-ink">{money(amountIn(c, genCurrency), genCurrency)}</span>
-                          </div>
-                        ))}
+                {selectedPackage && (
+                  <div className="space-y-1.5 pt-2 border-t border-hairline border-dashed">
+                    <span className="text-[9px] font-extrabold text-ink-3 uppercase tracking-wider block mb-1">Estimated Line Items</span>
+                    {selectedFeePlan ? (
+                      selectedFeePlan.components.map((c, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs text-ink-3">
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline">
+                              {c.type}
+                            </span>
+                            {c.label}
+                          </span>
+                          <span className="font-bold text-ink">{money(amountIn(c, genCurrency), genCurrency)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex items-center justify-between text-xs text-ink-3">
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-surface-3 border border-hairline">
+                            COURSE
+                          </span>
+                          {selectedPackage.title} ({selectedPackage.billing})
+                        </span>
+                        <span className="font-bold text-ink">{money(packagePriceIn(selectedPackage, genCurrency), genCurrency)}</span>
                       </div>
                     )}
-                  </>
-                ) : (
-                  <>
-                    {genItems.map((c, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <select value={c.type} onChange={(e) => updateItemRow(idx, { type: e.target.value as FeeComponentType })} className="h-9 w-32 shrink-0 rounded-lg border border-hairline bg-surface px-2 text-xs text-ink focus:outline-none focus:border-accent cursor-pointer">
-                          {COMPONENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                        <input type="text" placeholder="Label" value={c.label} onChange={(e) => updateItemRow(idx, { label: e.target.value })} className="h-9 flex-1 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent" />
-                        <input type="number" min="0" step="0.01" placeholder="Amount" value={c.amount} onChange={(e) => updateItemRow(idx, { amount: e.target.value })} className="h-9 w-28 rounded-lg border border-hairline bg-surface px-2.5 text-xs text-ink focus:outline-none focus:border-accent font-semibold" />
-                        <button type="button" onClick={() => removeItemRow(idx)} disabled={genItems.length === 1} className="size-9 shrink-0 flex items-center justify-center rounded-lg text-ink-3 hover:text-critical hover:bg-surface-3 disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 className="size-4" /></button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={addItemRow} className="text-[10px] text-accent font-extrabold hover:underline uppercase flex items-center gap-0.5"><Plus className="size-3" /> Add Line Item</button>
-                  </>
+                  </div>
                 )}
               </div>
 

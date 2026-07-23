@@ -1355,6 +1355,12 @@ export const createPaymentIntent = (invoiceId: string) =>
     invoiceNumber: string;
   }>(`/payments/invoices/${invoiceId}/intent`, { method: "POST" });
 
+export const verifyPaymentIntent = (paymentIntentId: string) =>
+  api<{ status: string; invoiceId?: string }>("/payments/verify-intent", {
+    method: "POST",
+    body: JSON.stringify({ paymentIntentId }),
+  });
+
 // ─── Payout Calls & Types ──────────────────────────────────────────────────────
 
 export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";

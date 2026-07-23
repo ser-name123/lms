@@ -324,4 +324,14 @@ export class PaymentsService {
     );
     return invoiceId;
   }
+
+  async verifyIntent(paymentIntentId: string): Promise<{ status: string; invoiceId?: string }> {
+    const intent = await this.stripe.retrievePaymentIntent(paymentIntentId);
+    if (intent.status !== 'succeeded') {
+      return { status: intent.status };
+    }
+
+    const invoiceId = await this.onPaymentSucceeded(intent);
+    return { status: 'succeeded', invoiceId: invoiceId ?? undefined };
+  }
 }

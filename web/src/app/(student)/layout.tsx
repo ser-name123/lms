@@ -14,7 +14,7 @@ import Swal from "sweetalert2";
 import { useAuth } from "@/store/auth";
 import { AuthGate } from "@/components/auth-gate";
 import { StudentShell } from "@/components/layout/student-shell";
-import { fetchStudentInvoices, createPaymentIntent } from "@/lib/api";
+import { fetchStudentInvoices, createPaymentIntent, verifyPaymentIntent } from "@/lib/api";
 import { money, type Currency } from "@/lib/currency";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
@@ -145,15 +145,42 @@ function StudentLayoutGuard({ children }: { children: React.ReactNode }) {
 
     // Check for redirection param
     const params = new URLSearchParams(window.location.search);
-    if (params.get("payment_success") === "true") {
-      Swal.fire({
-        title: "Payment Succeeded!",
-        text: "Your invoice has been paid successfully.",
-        icon: "success",
-        confirmButtonColor: "#386FA4",
-      });
-      window.history.replaceState({}, document.title, window.location.pathname);
-      loadInvoices();
+    const paymentIntentId = params.get("payment_intent");
+    if (params.get("payment_success") === "true" || params.get("redirect_status") === "succeeded") {
+      if (paymentIntentId) {
+        setChecking(true);
+        verifyPaymentIntent(paymentIntentId)
+          .then(() => {
+            Swal.fire({
+              title: "Payment Succeeded!",
+              text: "Your invoice has been paid successfully. Access has been restored.",
+              icon: "success",
+              confirmButtonColor: "#386FA4",
+            });
+            window.history.replaceState({}, document.title, window.location.pathname);
+            loadInvoices();
+          })
+          .catch((err) => {
+            console.error("Verification failed", err);
+            Swal.fire({
+              title: "Payment Completed",
+              text: "Your payment completed. If access is still restricted, it will restore shortly once verified.",
+              icon: "success",
+              confirmButtonColor: "#386FA4",
+            });
+            window.history.replaceState({}, document.title, window.location.pathname);
+            loadInvoices();
+          });
+      } else {
+        Swal.fire({
+          title: "Payment Succeeded!",
+          text: "Your invoice has been paid successfully.",
+          icon: "success",
+          confirmButtonColor: "#386FA4",
+        });
+        window.history.replaceState({}, document.title, window.location.pathname);
+        loadInvoices();
+      }
     }
   }, [user]);
 
