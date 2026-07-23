@@ -23,7 +23,8 @@ import {
   Clock,
   CheckCircle2,
   Wallet,
-  Tag
+  Tag,
+  AlertCircle
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -45,6 +46,7 @@ import {
   fetchFeePlans,
   fetchStudents,
   fetchDiscounts,
+  createPaymentIntent,
   type FinanceInvoice,
   type FinanceInvoiceStatus,
   type FeePlan,
@@ -162,6 +164,92 @@ export default function FinanceInvoicesPage() {
   const [payReference, setPayReference] = useState("");
   const [payNotes, setPayNotes] = useState("");
 
+  // Stripe payment test states
+  const [activeInvoice, setActiveInvoice] = useState<any | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [stripeError, setStripeError] = useState("");
+  const [stripeInstance, setStripeInstance] = useState<any>(null);
+  const [elementsInstance, setElementsInstance] = useState<any>(null);
+
+  const loadStripeScript = (): Promise<void> => {
+    return new Promise((resolve) => {
+      if ((window as any).Stripe) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://js.stripe.com/v3/";
+      script.async = true;
+      script.onload = () => resolve();
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleAdminStripePay = async (invoice: any) => {
+    setActiveInvoice(invoice);
+    setStripeLoading(true);
+    setStripeError("");
+    try {
+      const res = await createPaymentIntent(invoice.id);
+      await loadStripeScript();
+      
+      if (!(window as any).Stripe) {
+        throw new Error("Failed to load Stripe payment gateway.");
+      }
+
+      const stripe = (window as any).Stripe(res.publishableKey);
+      setStripeInstance(stripe);
+
+      const elements = stripe.elements({
+        clientSecret: res.clientSecret,
+        appearance: {
+          theme: document.documentElement.classList.contains("dark") ? "night" : "flat",
+          variables: {
+            colorPrimary: "#386FA4",
+          }
+        }
+      });
+      setElementsInstance(elements);
+
+      setTimeout(() => {
+        const paymentElement = elements.create("payment");
+        paymentElement.mount("#payment-element-mount-admin");
+        setStripeLoading(false);
+      }, 300);
+
+    } catch (err: any) {
+      console.error("Payment initialization failed", err);
+      setStripeError(err?.message || "Could not initialize payment. Please try again.");
+      setStripeLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripeInstance || !elementsInstance) return;
+
+    setPaying(true);
+    setStripeError("");
+
+    try {
+      const { error } = await stripeInstance.confirmPayment({
+        elements: elementsInstance,
+        confirmParams: {
+          return_url: `${window.location.origin}/finance/invoices?payment_success=true`,
+        },
+      });
+
+      if (error) {
+        setStripeError(error.message || "Payment failed.");
+      }
+    } catch (err: any) {
+      setStripeError(err?.message || "An unexpected error occurred.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   // ─── Loaders ───────────────────────────────────────────────────────────────
   const loadInvoices = () => {
     setLoading(true);
@@ -186,6 +274,19 @@ export default function FinanceInvoicesPage() {
   }, [currentPage, pageSize, searchQuery, statusFilter, sortBy]);
 
   useEffect(() => {
+    // Check for redirection param
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment_success") === "true") {
+      Swal.fire({
+        title: "Test Payment Succeeded!",
+        text: "The invoice has been paid successfully using Stripe.",
+        icon: "success",
+        confirmButtonColor: "#386FA4",
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+      loadInvoices();
+    }
+
     fetchStudents({ page: 1, limit: 200 })
       .then(res => setStudents((res.items || []).map(s => ({
         id: s.id, name: `${s.user.firstName} ${s.user.lastName}`, email: s.user.email, code: s.studentCode
@@ -647,9 +748,14 @@ export default function FinanceInvoicesPage() {
                               <Info className="size-4.5" />
                             </Button>
                             {canPay && (
-                              <Button variant="ghost" size="icon" onClick={() => openPayModal(inv)} className="rounded-lg text-ink-3 hover:text-emerald-500 hover:bg-surface-3 size-8" title="Record payment">
-                                <DollarSign className="size-4" />
-                              </Button>
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => handleAdminStripePay(inv)} className="rounded-lg text-ink-3 hover:text-accent hover:bg-surface-3 size-8" title="Pay with Stripe (Test)">
+                                  <CreditCard className="size-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => openPayModal(inv)} className="rounded-lg text-ink-3 hover:text-emerald-500 hover:bg-surface-3 size-8" title="Record payment manually">
+                                  <DollarSign className="size-4" />
+                                </Button>
+                              </>
                             )}
                             {canSend && (
                               <Button variant="ghost" size="icon" onClick={() => handleSend(inv)} className="rounded-lg text-ink-3 hover:text-accent hover:bg-surface-3 size-8" title="Send invoice">
@@ -1032,6 +1138,73 @@ export default function FinanceInvoicesPage() {
                   {actionLoading ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : null} Record Payment
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stripe elements test modal */}
+      {activeInvoice && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in text-left">
+          <div className="bg-surface border border-hairline rounded-3xl w-full max-w-md shadow-pop overflow-hidden p-6 space-y-6 animate-fade-up">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-hairline pb-4">
+              <div>
+                <h2 className="font-extrabold text-base text-ink">Test Stripe Payment</h2>
+                <p className="text-xs text-ink-3 mt-0.5">Settle {activeInvoice.number} securely via Stripe Card (Test)</p>
+              </div>
+              <button 
+                onClick={() => setActiveInvoice(null)} 
+                className="size-8 hover:bg-surface-2 rounded-xl flex items-center justify-center text-ink-3 cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Error alerts */}
+            {stripeError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{stripeError}</span>
+              </div>
+            )}
+
+            {/* Main Form */}
+            <form onSubmit={handleConfirmPayment} className="space-y-4">
+              
+              {/* Payment Element Mount Container */}
+              <div className="min-h-[180px] relative flex flex-col justify-center">
+                {stripeLoading && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 z-10 gap-2">
+                    <Loader2 className="size-7 animate-spin text-accent" />
+                    <p className="text-xs text-ink-3 font-semibold">Setting up secure form...</p>
+                  </div>
+                )}
+                <div id="payment-element-mount-admin" className="w-full" />
+              </div>
+
+              {/* Action Buttons */}
+              {!stripeLoading && (
+                <div className="flex justify-end gap-3 pt-4 border-t border-hairline">
+                  <button 
+                    type="button" 
+                    onClick={() => setActiveInvoice(null)} 
+                    disabled={paying}
+                    className="h-10 px-5 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={paying || !stripeInstance}
+                    className="h-10 px-6 rounded-xl bg-accent text-xs font-bold text-white flex items-center gap-1.5 justify-center hover:bg-accent-active cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                  >
+                    {paying ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Confirm &amp; Pay {money(Number(activeInvoice.balance || 0), activeInvoice.currency)}
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         </div>
