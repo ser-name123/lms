@@ -323,14 +323,37 @@ export default function FinanceInvoicesPage() {
     : genItems.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const genTaxAmount = genSubtotal * (Number(genTaxPct) || 0) / 100;
   const genEstTotal = genSubtotal + genTaxAmount;
-
   const openGenModal = () => {
+    // Reload dropdown lists to ensure they are up to date
+    fetchStudents({ page: 1, limit: 200 })
+      .then(res => {
+        const mapped = (res.items || []).map(s => ({
+          id: s.id, name: `${s.user.firstName} ${s.user.lastName}`, email: s.user.email, code: s.studentCode
+        }));
+        setStudents(mapped);
+        if (mapped.length > 0) {
+          setGenStudentId(mapped[0].id);
+        }
+      })
+      .catch(err => console.warn("Failed to load students", err));
+
+    fetchFeePlans({ page: 1, limit: 200, active: "true" })
+      .then(res => {
+        setFeePlans(res.items || []);
+        if (res.items && res.items.length > 0) {
+          setGenFeePlanId(res.items[0].id);
+        }
+      })
+      .catch(err => console.warn("Failed to load fee plans", err));
+
+    fetchDiscounts(undefined, "true")
+      .then(res => setDiscounts(res.items || []))
+      .catch(err => console.warn("Failed to load discounts", err));
+
     setRecipientOption("student");
-    setGenStudentId(students[0]?.id || "");
     setGenCustomName("");
     setGenCustomEmail("");
     setItemSource("plan");
-    setGenFeePlanId(feePlans[0]?.id || "");
     setGenItems([{ type: "COURSE", label: "Course Fee", amount: "" }]);
     setGenDiscountId("");
     setGenTaxPct("");
