@@ -44,7 +44,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   /*
    * The Stripe webhook is signed over the EXACT bytes Stripe sent. Parsing the
