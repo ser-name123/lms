@@ -191,9 +191,9 @@ function StudentLayoutGuard({ children }: { children: React.ReactNode }) {
 
             {/* Text Details */}
             <div>
-              <h2 className="text-xl font-black text-ink">Account Suspended</h2>
+              <h2 className="text-xl font-black text-ink">Payment Due</h2>
               <p className="text-xs text-ink-3 mt-2 leading-relaxed">
-                Your portal access is restricted due to an unpaid fee invoice. Please settle this dues to regain access.
+                Your portal access is restricted due to an unpaid fee invoice. Please settle this due to regain access.
               </p>
             </div>
 
