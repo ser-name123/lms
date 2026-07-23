@@ -9,6 +9,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { UserStatus } from '../generated/prisma/enums';
@@ -87,6 +88,11 @@ export class CreateTeacherDto {
   @IsOptional()
   @IsString()
   courseId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  subjects?: string[];
 }
 
 export class UpdateTeacherDto {
@@ -134,4 +140,9 @@ export class UpdateTeacherDto {
   @MinLength(8)
   @MaxLength(72)
   password?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  subjects?: string[];
 }

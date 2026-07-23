@@ -26,6 +26,7 @@ const PROFILE_SELECT = {
   gender: true,
   guardianName: true,
   parentName: true,
+  parentEmail: true,
   coachId: true,
   profession: true,
   fees: true,
@@ -152,18 +153,34 @@ export class StudentsService {
       this.prisma.studentProfile.count({ where }),
     ]);
 
-    // Enrich the page with attendance% + coach name (two batched queries, no N+1).
+    // Enrich the page with attendance% + coach name + trial preferred days/time (two batched queries, no N+1).
     const ids = items.map((s) => s.id);
     const coachIds = [...new Set(items.map((s) => s.coachId).filter(Boolean) as string[])];
-    const [attRows, coaches] = await Promise.all([
+    const parentEmails = items.map((s) => s.parentEmail).filter(Boolean) as string[];
+
+    const [attRows, coaches, leads] = await Promise.all([
       ids.length
         ? this.prisma.classAttendee.groupBy({ by: ['studentId', 'status'], where: { studentId: { in: ids } }, _count: true })
         : Promise.resolve([] as { studentId: string; status: string | null; _count: number }[]),
       coachIds.length
         ? this.prisma.user.findMany({ where: { id: { in: coachIds } }, select: { id: true, firstName: true, lastName: true } })
         : Promise.resolve([] as { id: string; firstName: string; lastName: string }[]),
+      parentEmails.length
+        ? this.prisma.lead.findMany({
+            where: { email: { in: parentEmails } },
+            include: {
+              trials: {
+                where: { reportSubmittedAt: { not: null } },
+                orderBy: { reportSubmittedAt: 'desc' },
+                take: 1,
+              },
+            },
+          })
+        : Promise.resolve([]),
     ]);
+
     const coachName = new Map(coaches.map((c) => [c.id, `${c.firstName} ${c.lastName}`]));
+    const leadMap = new Map(leads.map((l) => [l.email, l]));
     const attAcc = new Map<string, { present: number; denom: number }>();
     for (const r of attRows) {
       const s = r.status;
@@ -176,11 +193,24 @@ export class StudentsService {
 
     const enriched = items.map((s) => {
       const a = attAcc.get(s.id);
+      const lead = s.parentEmail ? leadMap.get(s.parentEmail) : null;
+      const trial = lead?.trials?.[0];
+
+      const preferredDays = trial?.preferredDays?.length 
+        ? trial.preferredDays 
+        : (lead?.preferredDays?.length ? lead.preferredDays : null);
+
+      const preferredTime = trial?.preferredTime 
+        ? trial.preferredTime 
+        : (lead?.preferredTimeSlots?.[0] || null);
+
       return {
         ...s,
         coachName: s.coachId ? coachName.get(s.coachId) ?? null : null,
         batchCode: s.batches[0]?.batch.code ?? null,
         attendanceRate: a && a.denom ? Math.round((a.present / a.denom) * 100) : null,
+        preferredDays,
+        preferredTime,
       };
     });
 

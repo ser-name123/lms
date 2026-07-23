@@ -18,7 +18,7 @@ import {
 import { LeadPriority, LeadStatus } from '../generated/prisma/enums';
 
 export const LEARN_OPTIONS = ['Quran', 'Arabic Language', 'Islamic Studies'] as const;
-export const SESSION_FOR_OPTIONS = ['MYSELF', 'FAMILY_MEMBER'] as const;
+export const SESSION_FOR_OPTIONS = ['MYSELF', 'FAMILY_MEMBER', 'SIBLING'] as const;
 export const TEACHER_PREFERENCE_OPTIONS = ['Male', 'Female', 'Either'] as const;
 export const HOW_FOUND_OPTIONS = ['FRIEND', 'SOCIAL_MEDIA', 'EMAIL', 'GOOGLE', 'OTHER'] as const;
 
@@ -270,6 +270,7 @@ export class TrialReportDto {
   @ApiPropertyOptional() @IsOptional() @IsString() teacherFeedback?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() teacherRecommendsEnroll?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() reportNotes?: string;
+  @ApiPropertyOptional() @IsOptional() @IsArray() siblings?: any[];
 }
 
 /*

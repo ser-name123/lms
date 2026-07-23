@@ -300,6 +300,8 @@ export type StudentProfile = {
   coachName?: string | null;
   batchCode?: string | null;
   attendanceRate?: number | null;
+  preferredDays?: string[] | null;
+  preferredTime?: string | null;
 };
 
 export const fetchStudents = (params: {
@@ -2296,7 +2298,14 @@ export interface LeadTrial {
     learningGoal?: string | null;
     specialRequirements?: string | null;
     medicalDisability?: string | null;
-    siblings?: { firstName?: string; lastName?: string }[] | null;
+    siblings?: {
+      firstName?: string;
+      lastName?: string;
+      dob?: string | null;
+      age?: number | null;
+      assessedLevel?: string | null;
+      recommendedCourseId?: string | null;
+    }[] | null;
     countryCode?: string | null;
     preferredDate?: string | null;
     preferredSlot?: string | null;
@@ -2328,6 +2337,7 @@ export interface TrialReportInput {
   teacherFeedback?: string;
   teacherRecommendsEnroll?: boolean;
   reportNotes?: string;
+  siblings?: any[];
 }
 
 export interface TrialOptions {

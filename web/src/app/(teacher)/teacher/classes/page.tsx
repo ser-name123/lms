@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import {
   CalendarDays,
   Clock,
@@ -8,18 +8,27 @@ import {
   Search,
   Loader2,
   ExternalLink,
-  Filter,
+  SlidersHorizontal,
   CheckCircle,
   PlayCircle,
-  HelpCircle,
-  SlidersHorizontal,
+  Mail,
+  Phone,
+  ClipboardList,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
+import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchTeacherClasses, fetchMyTrials } from "@/lib/api";
+import { TrialReportPanel } from "@/components/leads/trial-report";
+import { isTrialClosed } from "@/components/leads/lead-meta";
+import { fetchTeacherClasses, fetchMyTrials, setTrialStatus } from "@/lib/api";
+
+const swalBg = () =>
+  typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
 
 export default function TeacherClasses() {
   const [classes, setClasses] = useState<any[]>([]);
@@ -27,8 +36,11 @@ export default function TeacherClasses() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "UPCOMING" | "COMPLETED">("ALL");
   const [courseFilter, setCourseFilter] = useState<string>("ALL");
+  const [expandedTrialId, setExpandedTrialId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadData = () => {
+    setLoading(true);
     Promise.all([
       fetchTeacherClasses().catch(() => []),
       fetchMyTrials("all").catch(() => []),
@@ -59,21 +71,59 @@ export default function TeacherClasses() {
       .finally(() => {
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
+
+  const handleTrialStatus = async (trialId: string, status: "COMPLETED" | "NO_SHOW") => {
+    setBusyId(trialId);
+    try {
+      await setTrialStatus(trialId, status);
+      Swal.fire({
+        toast: true,
+        position: "top-end",
+        icon: "success",
+        title: status === "COMPLETED" ? "Marked completed" : "Marked no-show",
+        showConfirmButton: false,
+        timer: 1800,
+      });
+      loadData();
+    } catch (e) {
+      Swal.fire({
+        title: "Failed",
+        text: e instanceof Error ? e.message : "Failed.",
+        icon: "error",
+        background: swalBg(),
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   // Compute unique course codes for filtering options
   const uniqueCourses = Array.from(new Set(classes.map((c) => c.courseCode))).filter(Boolean);
 
   const filtered = classes.filter((c) => {
-    // Search match
     const q = searchQuery.toLowerCase();
-    const matchesSearch =
+    const matchesSearch = c.isTrial ? (
+      c.lead ? (
+        `${c.lead.studentFirstName} ${c.lead.studentLastName}`.toLowerCase().includes(q) ||
+        c.lead.email?.toLowerCase().includes(q) ||
+        c.lead.interestedSubject?.toLowerCase().includes(q)
+      ) : false
+    ) : (
       c.topic?.toLowerCase().includes(q) ||
       c.courseCode?.toLowerCase().includes(q) ||
-      (c.agenda && c.agenda.toLowerCase().includes(q));
+      (c.agenda && c.agenda.toLowerCase().includes(q))
+    );
 
     // Status filter match
-    const isUpcoming = c.status === "Upcoming" || c.status === "SCHEDULED";
+    const isUpcoming = c.isTrial 
+      ? (c.status === "SCHEDULED" || c.status === "RESCHEDULED")
+      : (c.status === "Upcoming" || c.status === "SCHEDULED");
+
     const matchesStatus =
       statusFilter === "ALL" ||
       (statusFilter === "UPCOMING" && isUpcoming) ||
@@ -101,7 +151,11 @@ export default function TeacherClasses() {
 
   // Calculate quick stats metrics
   const totalCount = classes.length;
-  const upcomingCount = classes.filter((c) => c.status === "Upcoming" || c.status === "SCHEDULED").length;
+  const upcomingCount = classes.filter((c) => 
+    c.isTrial 
+      ? (c.status === "SCHEDULED" || c.status === "RESCHEDULED")
+      : (c.status === "Upcoming" || c.status === "SCHEDULED")
+  ).length;
   const completedCount = totalCount - upcomingCount;
 
   return (
@@ -195,7 +249,7 @@ export default function TeacherClasses() {
                   <option value="ALL">All Subjects</option>
                   {uniqueCourses.map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {c === "TRIAL" ? "Trial Classes" : c}
                     </option>
                   ))}
                 </select>
@@ -225,66 +279,149 @@ export default function TeacherClasses() {
               <table className="w-full border-collapse text-left text-xs font-semibold text-ink-2">
                 <thead>
                   <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
-                    <th className="p-4 pl-6">Course</th>
-                    <th className="p-4">Topic / Agenda</th>
+                    <th className="p-4 pl-6">Course / Type</th>
+                    <th className="p-4">Topic / Student Details</th>
                     <th className="p-4">Starts At</th>
                     <th className="p-4">Ends At</th>
                     <th className="p-4">Status</th>
-                    <th className="p-4 pr-6 text-right">Webinar Action</th>
+                    <th className="p-4 pr-6 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
                   {filtered.map((cls) => {
-                    const isUpcoming = cls.status === "Upcoming" || cls.status === "SCHEDULED";
+                    const isUpcoming = cls.isTrial
+                      ? (cls.status === "SCHEDULED" || cls.status === "RESCHEDULED")
+                      : (cls.status === "Upcoming" || cls.status === "SCHEDULED");
                     const starts = new Date(cls.timeStart);
                     const ends = new Date(cls.timeEnd);
+                    const done = cls.isTrial ? isTrialClosed(cls) : !isUpcoming;
                     return (
-                      <tr key={cls.id} className="hover:bg-surface-2/10 transition">
-                        <td className="p-4 pl-6">
-                          <span className="font-extrabold text-ink bg-accent-soft/20 text-accent px-2.5 py-1 rounded-lg">
-                            {cls.courseCode}
-                          </span>
-                        </td>
-                        <td className="p-4 min-w-[200px]">
-                          <div className="space-y-0.5">
-                            <span className="block font-bold text-ink text-xs">{cls.topic}</span>
-                            {cls.agenda && <span className="block text-[10px] text-ink-3">{cls.agenda}</span>}
-                          </div>
-                        </td>
-                        <td className="p-4 whitespace-nowrap">
-                          <div className="space-y-0.5">
-                            <span className="block text-ink">{starts.toLocaleDateString()}</span>
-                            <span className="block text-[10px] text-ink-3">
-                              {starts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      <Fragment key={cls.id}>
+                        <tr className="hover:bg-surface-2/10 transition">
+                          {/* 1. Course Code */}
+                          <td className="p-4 pl-6 whitespace-nowrap">
+                            <span className={`font-extrabold text-[9px] px-2.5 py-1 rounded-lg ${
+                              cls.isTrial 
+                                ? "bg-amber-500/10 text-amber-600 border border-amber-500/20" 
+                                : "bg-accent-soft/20 text-accent"
+                            }`}>
+                              {cls.courseCode}
                             </span>
-                          </div>
-                        </td>
-                        <td className="p-4 whitespace-nowrap">
-                          <div className="space-y-0.5">
-                            <span className="block text-ink">{ends.toLocaleDateString()}</span>
-                            <span className="block text-[10px] text-ink-3">
-                              {ends.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <Badge tone={isUpcoming ? "accent" : "good"} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
-                            {cls.status}
-                          </Badge>
-                        </td>
-                        <td className="p-4 pr-6 text-right whitespace-nowrap">
-                          {cls.meetingUrl ? (
-                            <a href={cls.meetingUrl} target="_blank" rel="noopener noreferrer">
-                              <Button className="h-8.5 px-3 bg-accent hover:bg-accent-hover text-white text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-sm cursor-pointer">
-                                Join Class
-                                <ExternalLink className="size-3" />
-                              </Button>
-                            </a>
-                          ) : (
-                            <span className="text-xs text-ink-3 font-bold select-none">—</span>
-                          )}
-                        </td>
-                      </tr>
+                          </td>
+
+                          {/* 2. Topic / Student Details */}
+                          <td className="p-4 min-w-[200px]">
+                            <div className="space-y-0.5">
+                              <span className="block font-bold text-ink text-xs">{cls.topic}</span>
+                              {cls.isTrial ? (
+                                <div className="flex flex-wrap gap-x-2 text-[10px] text-ink-3 font-medium">
+                                  {cls.lead?.email && <span className="flex items-center gap-0.5"><Mail className="size-3" /> {cls.lead.email}</span>}
+                                  {cls.lead?.mobile && <span className="flex items-center gap-0.5"><Phone className="size-3" /> {cls.lead.mobile}</span>}
+                                </div>
+                              ) : (
+                                cls.agenda && <span className="block text-[10px] text-ink-3">{cls.agenda}</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 3. Starts At */}
+                          <td className="p-4 whitespace-nowrap">
+                            <div className="space-y-0.5">
+                              <span className="block text-ink">{starts.toLocaleDateString()}</span>
+                              <span className="block text-[10px] text-ink-3">
+                                {starts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* 4. Ends At */}
+                          <td className="p-4 whitespace-nowrap">
+                            <div className="space-y-0.5">
+                              <span className="block text-ink">{ends.toLocaleDateString()}</span>
+                              <span className="block text-[10px] text-ink-3">
+                                {ends.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* 5. Status Badge */}
+                          <td className="p-4">
+                            <Badge tone={cls.isTrial ? (done ? "neutral" : "accent") : (isUpcoming ? "accent" : "good")} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
+                              {cls.isTrial ? cls.status.replace(/_/g, " ") : cls.status}
+                            </Badge>
+                          </td>
+
+                          {/* 6. Action buttons */}
+                          <td className="p-4 pr-6 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-2">
+                              {cls.meetingUrl && !done && (
+                                <a href={cls.meetingUrl} target="_blank" rel="noopener noreferrer">
+                                  <Button className="h-8.5 px-3 bg-accent hover:bg-accent-hover text-white text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-sm cursor-pointer">
+                                    {cls.isTrial ? "Join Trial" : "Join Class"}
+                                    <ExternalLink className="size-3" />
+                                  </Button>
+                                </a>
+                              )}
+
+                              {/* Attendance / Report specific actions for Trials */}
+                              {cls.isTrial && cls.status !== "CANCELLED" && (
+                                <>
+                                  <button
+                                    onClick={() => handleTrialStatus(cls.id, "COMPLETED")}
+                                    disabled={busyId === cls.id}
+                                    className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[10px] font-bold disabled:opacity-50 cursor-pointer ${
+                                      cls.status === "COMPLETED"
+                                        ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-600"
+                                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
+                                    }`}
+                                  >
+                                    <CheckCircle2 className="size-3.5" /> Completed
+                                  </button>
+                                  <button
+                                    onClick={() => handleTrialStatus(cls.id, "NO_SHOW")}
+                                    disabled={busyId === cls.id || Boolean(cls.reportSubmittedAt)}
+                                    title={cls.reportSubmittedAt ? "A report has been filed for this trial" : undefined}
+                                    className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[10px] font-bold disabled:opacity-50 cursor-pointer ${
+                                      cls.status === "NO_SHOW"
+                                        ? "border-rose-500/50 bg-rose-500/20 text-rose-600"
+                                        : "border-rose-500/30 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20"
+                                    }`}
+                                  >
+                                    <XCircle className="size-3.5" /> No-show
+                                  </button>
+
+                                  <button
+                                    onClick={() => setExpandedTrialId(expandedTrialId === cls.id ? null : cls.id)}
+                                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-bold cursor-pointer transition ${
+                                      expandedTrialId === cls.id
+                                        ? "border-accent bg-accent/10 text-accent"
+                                        : "border-hairline text-ink-3 hover:border-accent hover:text-accent"
+                                    }`}
+                                  >
+                                    <ClipboardList className="size-3.5" /> 
+                                    {expandedTrialId === cls.id ? "Close Report" : "Report"}
+                                  </button>
+                                </>
+                              )}
+                              {!cls.meetingUrl && !cls.isTrial && (
+                                <span className="text-xs text-ink-3 font-bold select-none">—</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Collapsible details row for Trial Report Panel */}
+                        {cls.isTrial && expandedTrialId === cls.id && (
+                          <tr key={`${cls.id}-details`} className="bg-surface-2/45 border-t border-b border-hairline">
+                            <td colSpan={6} className="p-6">
+                              <div className="bg-surface rounded-3xl border border-hairline p-6 shadow-sm">
+                                <h4 className="text-xs font-black text-ink-2 uppercase tracking-wider mb-4">Trial Report: {cls.topic}</h4>
+                                <TrialReportPanel trial={cls} onChange={loadData} />
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

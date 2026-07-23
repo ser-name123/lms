@@ -1,23 +1,16 @@
 "use client";
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState } from "react";
 import {
   Video,
   Clock,
   ExternalLink,
   Loader2,
-  Calendar,
   Search,
   Filter,
   CheckCircle,
   PlayCircle,
   BookOpen,
-  CalendarClock,
-  ClipboardList,
-  CheckCircle2,
-  XCircle,
-  Mail,
-  Phone,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -25,20 +18,10 @@ import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { TrialReportPanel } from "@/components/leads/trial-report";
-import { isTrialClosed } from "@/components/leads/lead-meta";
-import { fetchTeacherClasses, fetchMyTrials, setTrialStatus, type LeadTrial } from "@/lib/api";
+import { fetchTeacherClasses } from "@/lib/api";
 
 const swalBg = () =>
   typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
-
-const STATUS_TONE: Record<string, string> = {
-  SCHEDULED: "text-accent bg-accent/10 border-accent/20",
-  RESCHEDULED: "text-amber-600 bg-amber-500/10 border-amber-500/20",
-  COMPLETED: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20",
-  NO_SHOW: "text-rose-600 bg-rose-500/10 border-rose-500/20",
-  CANCELLED: "text-ink-3 bg-surface-2 border-hairline",
-};
 
 export default function TeacherLiveClasses() {
   const [classes, setClasses] = useState<any[]>([]);
@@ -46,37 +29,19 @@ export default function TeacherLiveClasses() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "UPCOMING" | "COMPLETED">("ALL");
   const [courseFilter, setCourseFilter] = useState("ALL");
-  const [expandedTrialId, setExpandedTrialId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadData = () => {
     setLoading(true);
-    Promise.all([
-      fetchTeacherClasses().catch(() => []),
-      fetchMyTrials("all").catch(() => []),
-    ])
-      .then(([classesRes, trialsRes]) => {
-        const mappedTrials = trialsRes.map((t) => ({
-          ...t,
-          isTrial: true,
-          courseCode: "TRIAL",
-          topic: `${t.lead ? `${t.lead.studentFirstName} ${t.lead.studentLastName}` : "Student"} (Trial)`,
-          timeStart: t.scheduledAt,
-          timeEnd: new Date(new Date(t.scheduledAt).getTime() + (t.durationMins || 30) * 60 * 1000).toISOString(),
-          status: t.status,
-          meetingUrl: t.meetingLink,
-          agenda: t.lead?.interestedSubject ? `Interested in: ${t.lead.interestedSubject}` : undefined,
-        }));
-
-        const merged = [
-          ...classesRes.map((c) => ({ ...c, isTrial: false })),
-          ...mappedTrials,
-        ].sort((a, b) => new Date(a.timeStart).getTime() - new Date(b.timeStart).getTime());
+    fetchTeacherClasses()
+      .then((classesRes) => {
+        const merged = classesRes
+          .map((c) => ({ ...c, isTrial: false }))
+          .sort((a, b) => new Date(a.timeStart).getTime() - new Date(b.timeStart).getTime());
 
         setClasses(merged);
       })
       .catch((err) => {
-        console.error("Failed to load classes or trials", err);
+        console.error("Failed to load classes", err);
       })
       .finally(() => {
         setLoading(false);
@@ -100,52 +65,18 @@ export default function TeacherLiveClasses() {
     }
   };
 
-  const handleTrialStatus = async (trialId: string, status: "COMPLETED" | "NO_SHOW") => {
-    setBusyId(trialId);
-    try {
-      await setTrialStatus(trialId, status);
-      Swal.fire({
-        toast: true,
-        position: "top-end",
-        icon: "success",
-        title: status === "COMPLETED" ? "Marked completed" : "Marked no-show",
-        showConfirmButton: false,
-        timer: 1800,
-      });
-      loadData();
-    } catch (e) {
-      Swal.fire({
-        title: "Failed",
-        text: e instanceof Error ? e.message : "Failed.",
-        icon: "error",
-        background: swalBg(),
-      });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
   // Compute unique course codes
   const uniqueCourses = Array.from(new Set(classes.map((c) => c.courseCode))).filter(Boolean);
 
   const filtered = classes.filter((c) => {
     const q = searchQuery.toLowerCase();
     
-    const matchesSearch = c.isTrial ? (
-      c.lead ? (
-        `${c.lead.studentFirstName} ${c.lead.studentLastName}`.toLowerCase().includes(q) ||
-        c.lead.email?.toLowerCase().includes(q) ||
-        c.lead.interestedSubject?.toLowerCase().includes(q)
-      ) : false
-    ) : (
+    const matchesSearch =
       c.topic?.toLowerCase().includes(q) ||
       c.courseCode?.toLowerCase().includes(q) ||
-      (c.agenda && c.agenda.toLowerCase().includes(q))
-    );
+      (c.agenda && c.agenda.toLowerCase().includes(q));
 
-    const isUpcoming = c.isTrial 
-      ? (c.status === "SCHEDULED" || c.status === "RESCHEDULED")
-      : (c.status === "Upcoming" || c.status === "SCHEDULED");
+    const isUpcoming = c.status === "Upcoming" || c.status === "SCHEDULED";
 
     const matchesStatus =
       statusFilter === "ALL" ||
@@ -159,11 +90,7 @@ export default function TeacherLiveClasses() {
 
   // Quick stats
   const totalCount = classes.length;
-  const upcomingCount = classes.filter((c) => 
-    c.isTrial 
-      ? (c.status === "SCHEDULED" || c.status === "RESCHEDULED")
-      : (c.status === "Upcoming" || c.status === "SCHEDULED")
-  ).length;
+  const upcomingCount = classes.filter((c) => c.status === "Upcoming" || c.status === "SCHEDULED").length;
   const completedCount = totalCount - upcomingCount;
 
   if (loading) {
@@ -200,7 +127,7 @@ export default function TeacherLiveClasses() {
 
           <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
             <div className="size-12 rounded-2xl bg-warning-soft/20 text-warning flex items-center justify-center shrink-0">
-              <PlayCircle className="size-6 animate-pulse" />
+              <PlayCircle className="size-6" />
             </div>
             <div>
               <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Upcoming Broadcasts</span>
@@ -271,7 +198,7 @@ export default function TeacherLiveClasses() {
                   <option value="ALL">All Courses</option>
                   {uniqueCourses.map((c: any) => (
                     <option key={c} value={c}>
-                      {c === "TRIAL" ? "Trial Classes" : c}
+                      {c}
                     </option>
                   ))}
                 </select>
@@ -302,7 +229,7 @@ export default function TeacherLiveClasses() {
                 <thead>
                   <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
                     <th className="p-4 pl-6">Course / Type</th>
-                    <th className="p-4">Topic / Student Details</th>
+                    <th className="p-4">Topic / Description</th>
                     <th className="p-4">Starts At</th>
                     <th className="p-4">Ends At</th>
                     <th className="p-4">Status</th>
@@ -311,142 +238,70 @@ export default function TeacherLiveClasses() {
                 </thead>
                 <tbody className="divide-y divide-hairline">
                   {filtered.map((cls) => {
-                    const isUpcoming = cls.isTrial
-                      ? (cls.status === "SCHEDULED" || cls.status === "RESCHEDULED")
-                      : (cls.status === "Upcoming" || cls.status === "SCHEDULED");
-                    
+                    const isUpcoming = cls.status === "Upcoming" || cls.status === "SCHEDULED";
                     const start = new Date(cls.timeStart);
                     const end = new Date(cls.timeEnd);
-                    const done = cls.isTrial ? isTrialClosed(cls) : !isUpcoming;
+                    const done = !isUpcoming;
                     
                     return (
-                      <Fragment key={cls.id}>
-                        <tr className="hover:bg-surface-2/10 transition">
-                          {/* 1. Course Code / Trial Badge */}
-                          <td className="p-4 pl-6 whitespace-nowrap">
-                            <span className={`font-extrabold text-[9px] px-2.5 py-1 rounded-lg ${
-                              cls.isTrial 
-                                ? "bg-amber-500/10 text-amber-600 border border-amber-500/20" 
-                                : "bg-accent-soft/20 text-accent"
-                            }`}>
-                              {cls.courseCode}
+                      <tr key={cls.id} className="hover:bg-surface-2/10 transition">
+                        {/* 1. Course Code */}
+                        <td className="p-4 pl-6 whitespace-nowrap">
+                          <span className="font-extrabold text-[9px] px-2.5 py-1 rounded-lg bg-accent-soft/20 text-accent">
+                            {cls.courseCode}
+                          </span>
+                        </td>
+
+                        {/* 2. Topic / Description */}
+                        <td className="p-4 min-w-[240px]">
+                          <div className="space-y-0.5">
+                            <span className="block font-bold text-ink text-xs">{cls.topic}</span>
+                            {cls.agenda && <span className="block text-[10px] text-ink-3 leading-relaxed">{cls.agenda}</span>}
+                          </div>
+                        </td>
+
+                        {/* 3. Starts At */}
+                        <td className="p-4 whitespace-nowrap">
+                          <div className="space-y-0.5">
+                            <span className="block text-ink">{start.toLocaleDateString()}</span>
+                            <span className="block text-[10px] text-ink-3">
+                              {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </span>
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* 2. Topic / Student info */}
-                          <td className="p-4 min-w-[240px]">
-                            <div className="space-y-0.5">
-                              <span className="block font-bold text-ink text-xs">{cls.topic}</span>
-                              {cls.isTrial ? (
-                                <div className="flex flex-wrap gap-x-2 text-[10px] text-ink-3 font-medium">
-                                  {cls.lead?.email && <span className="flex items-center gap-0.5"><Mail className="size-3" /> {cls.lead.email}</span>}
-                                  {cls.lead?.mobile && <span className="flex items-center gap-0.5"><Phone className="size-3" /> {cls.lead.mobile}</span>}
-                                </div>
-                              ) : (
-                                cls.agenda && <span className="block text-[10px] text-ink-3 leading-relaxed">{cls.agenda}</span>
-                              )}
-                            </div>
-                          </td>
+                        {/* 4. Ends At */}
+                        <td className="p-4 whitespace-nowrap">
+                          <div className="space-y-0.5">
+                            <span className="block text-ink">{end.toLocaleDateString()}</span>
+                            <span className="block text-[10px] text-ink-3">
+                              {end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        </td>
 
-                          {/* 3. Starts At */}
-                          <td className="p-4 whitespace-nowrap">
-                            <div className="space-y-0.5">
-                              <span className="block text-ink">{start.toLocaleDateString()}</span>
-                              <span className="block text-[10px] text-ink-3">
-                                {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                              </span>
-                            </div>
-                          </td>
+                        {/* 5. Status Badge */}
+                        <td className="p-4">
+                          <Badge tone={isUpcoming ? "accent" : "good"} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
+                            {cls.status}
+                          </Badge>
+                        </td>
 
-                          {/* 4. Ends At */}
-                          <td className="p-4 whitespace-nowrap">
-                            <div className="space-y-0.5">
-                              <span className="block text-ink">{end.toLocaleDateString()}</span>
-                              <span className="block text-[10px] text-ink-3">
-                                {end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* 5. Status Badge */}
-                          <td className="p-4">
-                            <Badge tone={cls.isTrial ? (done ? "neutral" : "accent") : (isUpcoming ? "accent" : "good")} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
-                              {cls.isTrial ? cls.status.replace(/_/g, " ") : cls.status}
-                            </Badge>
-                          </td>
-
-                          {/* 6. Action buttons (merged) */}
-                          <td className="p-4 pr-6 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-2">
-                              {/* Meeting room join button */}
-                              {cls.meetingUrl && !done && (
-                                <Button
-                                  onClick={() => handleStartClass(cls.meetingUrl)}
-                                  className="h-8.5 px-3 bg-accent hover:bg-accent-hover text-white text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-sm cursor-pointer"
-                                >
-                                  {cls.isTrial ? "Join Trial" : "Join Class"}
-                                  <ExternalLink className="size-3" />
-                                </Button>
-                              )}
-
-                              {/* Attendance / Report specific actions for Trials */}
-                              {cls.isTrial && cls.status !== "CANCELLED" && (
-                                <>
-                                  {/* Mark Completed/No-show */}
-                                  <button
-                                    onClick={() => handleTrialStatus(cls.id, "COMPLETED")}
-                                    disabled={busyId === cls.id}
-                                    className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[10px] font-bold disabled:opacity-50 cursor-pointer ${
-                                      cls.status === "COMPLETED"
-                                        ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-600"
-                                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
-                                    }`}
-                                  >
-                                    <CheckCircle2 className="size-3.5" /> Completed
-                                  </button>
-                                  <button
-                                    onClick={() => handleTrialStatus(cls.id, "NO_SHOW")}
-                                    disabled={busyId === cls.id || Boolean(cls.reportSubmittedAt)}
-                                    title={cls.reportSubmittedAt ? "A report has been filed for this trial" : undefined}
-                                    className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[10px] font-bold disabled:opacity-50 cursor-pointer ${
-                                      cls.status === "NO_SHOW"
-                                        ? "border-rose-500/50 bg-rose-500/20 text-rose-600"
-                                        : "border-rose-500/30 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20"
-                                    }`}
-                                  >
-                                    <XCircle className="size-3.5" /> No-show
-                                  </button>
-
-                                  {/* File Trial Report toggler */}
-                                  <button
-                                    onClick={() => setExpandedTrialId(expandedTrialId === cls.id ? null : cls.id)}
-                                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-bold cursor-pointer transition ${
-                                      expandedTrialId === cls.id
-                                        ? "border-accent bg-accent/10 text-accent"
-                                        : "border-hairline text-ink-3 hover:border-accent hover:text-accent"
-                                    }`}
-                                  >
-                                    <ClipboardList className="size-3.5" /> 
-                                    {expandedTrialId === cls.id ? "Close Report" : "Report"}
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* Collapsible details row for Trial Report Panel */}
-                        {cls.isTrial && expandedTrialId === cls.id && (
-                          <tr key={`${cls.id}-details`} className="bg-surface-2/45 border-t border-b border-hairline">
-                            <td colSpan={6} className="p-6">
-                              <div className="bg-surface rounded-3xl border border-hairline p-6 shadow-sm">
-                                <h4 className="text-xs font-black text-ink-2 uppercase tracking-wider mb-4">Trial Report: {cls.topic}</h4>
-                                <TrialReportPanel trial={cls} onChange={loadData} />
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                        {/* 6. Action buttons */}
+                        <td className="p-4 pr-6 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
+                            {cls.meetingUrl && !done && (
+                              <Button
+                                onClick={() => handleStartClass(cls.meetingUrl)}
+                                className="h-8.5 px-3 bg-accent hover:bg-accent-hover text-white text-[10px] font-bold rounded-lg inline-flex items-center gap-1 shadow-sm cursor-pointer"
+                              >
+                                Join Class
+                                <ExternalLink className="size-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>

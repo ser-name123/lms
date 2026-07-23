@@ -35,6 +35,7 @@ import {
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import Swal from "sweetalert2";
 
+import { COUNTRIES } from "@/lib/countries";
 import { Topbar } from "@/components/layout/topbar";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,130 @@ const statusTone: Record<string, Tone> = {
   INACTIVE: "neutral",
   PENDING: "warning",
   SUSPENDED: "critical"
+};
+
+const COUNTRY_TIMEZONES: Record<string, string> = {
+  "Afghanistan": "Asia/Kabul",
+  "Albania": "Europe/Tirane",
+  "Algeria": "Africa/Algiers",
+  "Argentina": "America/Argentina/Buenos_Aires",
+  "Armenia": "Asia/Yerevan",
+  "Australia": "Australia/Sydney",
+  "Austria": "Europe/Vienna",
+  "Azerbaijan": "Asia/Baku",
+  "Bahrain": "Asia/Bahrain",
+  "Bangladesh": "Asia/Dhaka",
+  "Belarus": "Europe/Minsk",
+  "Belgium": "Europe/Brussels",
+  "Bosnia and Herzegovina": "Europe/Sarajevo",
+  "Brazil": "America/Sao_Paulo",
+  "Brunei": "Asia/Brunei",
+  "Bulgaria": "Europe/Sofia",
+  "Cambodia": "Asia/Phnom_Penh",
+  "Cameroon": "Africa/Douala",
+  "Canada": "America/Toronto",
+  "Chad": "Africa/Ndjamena",
+  "Chile": "America/Santiago",
+  "China": "Asia/Shanghai",
+  "Colombia": "America/Bogota",
+  "Comoros": "Indian/Comoro",
+  "Croatia": "Europe/Zagreb",
+  "Cyprus": "Asia/Nicosia",
+  "Czechia": "Europe/Prague",
+  "Denmark": "Europe/Copenhagen",
+  "Djibouti": "Africa/Djibouti",
+  "Egypt": "Africa/Cairo",
+  "Eritrea": "Africa/Asmara",
+  "Estonia": "Europe/Tallinn",
+  "Ethiopia": "Africa/Addis_Ababa",
+  "Finland": "Europe/Helsinki",
+  "France": "Europe/Paris",
+  "Gambia": "Africa/Banjul",
+  "Georgia": "Asia/Tbilisi",
+  "Germany": "Europe/Berlin",
+  "Ghana": "Africa/Accra",
+  "Greece": "Europe/Athens",
+  "Guinea": "Africa/Conakry",
+  "Hong Kong": "Asia/Hong_Kong",
+  "Hungary": "Europe/Budapest",
+  "Iceland": "Atlantic/Reykjavik",
+  "India": "Asia/Kolkata",
+  "Indonesia": "Asia/Jakarta",
+  "Iran": "Asia/Tehran",
+  "Iraq": "Asia/Baghdad",
+  "Ireland": "Europe/Dublin",
+  "Israel": "Asia/Jerusalem",
+  "Italy": "Europe/Rome",
+  "Ivory Coast": "Africa/Abidjan",
+  "Japan": "Asia/Tokyo",
+  "Jordan": "Asia/Amman",
+  "Kazakhstan": "Asia/Almaty",
+  "Kenya": "Africa/Nairobi",
+  "Kuwait": "Asia/Kuwait",
+  "Kyrgyzstan": "Asia/Bishkek",
+  "Latvia": "Europe/Riga",
+  "Lebanon": "Asia/Beirut",
+  "Libya": "Africa/Tripoli",
+  "Lithuania": "Europe/Vilnius",
+  "Luxembourg": "Europe/Luxembourg",
+  "Malaysia": "Asia/Kuala_Lumpur",
+  "Maldives": "Indian/Maldives",
+  "Mali": "Africa/Bamako",
+  "Malta": "Europe/Valetta",
+  "Mauritania": "Africa/Nouakchott",
+  "Mauritius": "Indian/Mauritius",
+  "Mexico": "America/Mexico_City",
+  "Morocco": "Africa/Casablanca",
+  "Mozambique": "Africa/Maputo",
+  "Myanmar": "Asia/Yangon",
+  "Nepal": "Asia/Kathmandu",
+  "Netherlands": "Europe/Amsterdam",
+  "New Zealand": "Pacific/Auckland",
+  "Niger": "Africa/Niamey",
+  "Nigeria": "Africa/Lagos",
+  "North Macedonia": "Europe/Skopje",
+  "Norway": "Europe/Oslo",
+  "Oman": "Asia/Muscat",
+  "Pakistan": "Asia/Karachi",
+  "Palestine": "Asia/Hebron",
+  "Philippines": "Asia/Manila",
+  "Poland": "Europe/Warsaw",
+  "Portugal": "Europe/Lisbon",
+  "Qatar": "Asia/Qatar",
+  "Romania": "Europe/Bucharest",
+  "Russia": "Europe/Moscow",
+  "Saudi Arabia": "Asia/Riyadh",
+  "Senegal": "Africa/Dakar",
+  "Serbia": "Europe/Belgrade",
+  "Singapore": "Asia/Singapore",
+  "Slovakia": "Europe/Bratislava",
+  "Slovenia": "Europe/Ljubljana",
+  "Somalia": "Africa/Mogadishu",
+  "South Africa": "Africa/Johannesburg",
+  "South Korea": "Asia/Seoul",
+  "Spain": "Europe/Madrid",
+  "Sri Lanka": "Asia/Colombo",
+  "Sudan": "Africa/Khartoum",
+  "Sweden": "Europe/Stockholm",
+  "Switzerland": "Europe/Zurich",
+  "Syria": "Asia/Damascus",
+  "Taiwan": "Asia/Taipei",
+  "Tajikistan": "Asia/Dushanbe",
+  "Tanzania": "Africa/Dar_es_Salaam",
+  "Thailand": "Asia/Bangkok",
+  "Tunisia": "Africa/Tunis",
+  "Turkey": "Europe/Istanbul",
+  "Turkmenistan": "Asia/Ashgabat",
+  "Uganda": "Africa/Kampala",
+  "Ukraine": "Europe/Kyiv",
+  "United Arab Emirates": "Asia/Dubai",
+  "United Kingdom": "Europe/London",
+  "United States": "America/New_York",
+  "Uzbekistan": "Asia/Tashkent",
+  "Vietnam": "Asia/Ho_Chi_Minh",
+  "Yemen": "Asia/Aden",
+  "Zambia": "Africa/Lusaka",
+  "Zimbabwe": "Africa/Harare"
 };
 
 export type TeachersTab = "teachers" | "others" | "recruitment" | "leave";
@@ -244,6 +369,8 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
   const [availableCourses, setAvailableCourses] = useState<{ id: string; title: string }[]>([]);
   const [courseId, setCourseId] = useState("");
   const [manageCourseId, setManageCourseId] = useState("");
+  const [courseIds, setCourseIds] = useState<string[]>([]);
+  const [manageCourseIds, setManageCourseIds] = useState<string[]>([]);
 
   // Add Teacher Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -258,6 +385,28 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
   const [timezone, setTimezone] = useState("Asia/Kolkata");
   const [modalBusy, setModalBusy] = useState(false);
   const [modalStatus, setModalStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleCountryChange = (val: string) => {
+    setCountry(val);
+    if (COUNTRY_TIMEZONES[val]) {
+      setTimezone(COUNTRY_TIMEZONES[val]);
+    }
+  };
+
+  const handleManageCountryChange = (val: string) => {
+    setManageCountry(val);
+    if (COUNTRY_TIMEZONES[val]) {
+      setManageTimezone(COUNTRY_TIMEZONES[val]);
+    }
+  };
+
+  const handleCourseToggle = (id: string) => {
+    setCourseIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleManageCourseToggle = (id: string) => {
+    setManageCourseIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
 
   // Profile View & Edit Modal states
   const [selectedTeacher, setSelectedTeacher] = useState<TeacherProfile | null>(null);
@@ -501,7 +650,8 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
         bio: bio || undefined,
         country,
         timezone,
-        courseId: courseId || undefined
+        courseId: courseId || undefined,
+        subjects: courseIds,
       });
       setModalStatus({ type: "success", message: "Teacher account created successfully!" });
       
@@ -513,6 +663,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
       setHourlyRate("");
       setBio("");
       setCourseId("");
+      setCourseIds([]);
       
       // Reload lists
       loadTeachers();
@@ -543,6 +694,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
     setManageTimezone(teacher.user.timezone || "");
     setManageStatus(teacher.user.status);
     setManageCourseId(teacher.courseId || "");
+    setManageCourseIds(teacher.subjects || []);
     setManagePassword("");
     setManageStatusMsg(null);
     setActiveMenuId(null);
@@ -567,6 +719,7 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
         status: manageStatus,
         courseId: manageCourseId || null,
         password: managePassword || undefined,
+        subjects: manageCourseIds,
       });
       setManageStatusMsg({ type: "success", message: "Teacher configurations updated successfully!" });
       setSelectedTeacher(updated); // Sync details
@@ -3028,7 +3181,12 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Location Country</label>
-                  <input type="text" value={country} onChange={e => setCountry(e.target.value)} placeholder="e.g. Egypt" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                  <select value={country} onChange={e => handleCountryChange(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                    <option value="">Select Country</option>
+                    {COUNTRIES.map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone Key</label>
@@ -3038,13 +3196,23 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Course to Teach (Optional)</label>
-                  <select value={courseId} onChange={e => setCourseId(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                    <option value="">-- None --</option>
-                    {availableCourses.map(c => (
-                      <option key={c.id} value={c.id}>{c.title}</option>
-                    ))}
-                  </select>
+                  <label className="mb-1.5 block text-xs font-bold text-ink-2">Courses to Teach (Optional)</label>
+                  <div className="border border-hairline rounded-lg bg-surface p-2 max-h-36 overflow-y-auto space-y-1.5 scrollbar-thin">
+                    {availableCourses.map(c => {
+                      const isSelected = courseIds.includes(c.id);
+                      return (
+                        <label key={c.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-surface-2 cursor-pointer transition-colors">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={() => handleCourseToggle(c.id)} 
+                            className="rounded border-hairline text-accent size-4 focus:ring-0 cursor-pointer"
+                          />
+                          <span className="text-xs text-ink-2 font-medium">{c.title}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Profession / Role</label>
@@ -3269,7 +3437,12 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Country Location</label>
-                      <input type="text" value={manageCountry} onChange={e => setManageCountry(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                      <select value={manageCountry} onChange={e => handleManageCountryChange(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                        <option value="">Select Country</option>
+                        {COUNTRIES.map(c => (
+                          <option key={c.name} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone</label>
@@ -3279,13 +3452,23 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Course to Teach (Optional)</label>
-                      <select value={manageCourseId} onChange={e => setManageCourseId(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none">
-                        <option value="">-- None --</option>
-                        {availableCourses.map(c => (
-                          <option key={c.id} value={c.id}>{c.title}</option>
-                        ))}
-                      </select>
+                      <label className="mb-1.5 block text-xs font-bold text-ink-2">Courses to Teach (Optional)</label>
+                      <div className="border border-hairline rounded-lg bg-surface p-2 max-h-36 overflow-y-auto space-y-1.5 scrollbar-thin">
+                        {availableCourses.map(c => {
+                          const isSelected = manageCourseIds.includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-surface-2 cursor-pointer transition-colors">
+                              <input 
+                                type="checkbox" 
+                                checked={isSelected} 
+                                onChange={() => handleManageCourseToggle(c.id)} 
+                                className="rounded border-hairline text-accent size-4 focus:ring-0 cursor-pointer"
+                              />
+                              <span className="text-xs text-ink-2 font-medium">{c.title}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Profession / Role</label>

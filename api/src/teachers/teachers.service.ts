@@ -202,6 +202,7 @@ export class TeachersService {
             hourlyRate: dto.hourlyRate || null,
             bio: dto.bio || null,
             courseId: dto.courseId || null,
+            subjects: dto.subjects || [],
             userId: user.id,
           },
           select: TEACHER_SELECT,
@@ -249,6 +250,7 @@ export class TeachersService {
           hourlyRate: dto.hourlyRate,
           bio: dto.bio,
           courseId: dto.courseId === undefined ? undefined : (dto.courseId || null),
+          subjects: dto.subjects,
         },
         select: TEACHER_SELECT,
       });

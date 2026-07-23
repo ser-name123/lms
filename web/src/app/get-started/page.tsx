@@ -44,6 +44,7 @@ const LEARN_OPTIONS = ["Quran", "Arabic Language", "Islamic Studies"];
 const SESSION_FOR = [
   { value: "MYSELF", label: "Myself" },
   { value: "FAMILY_MEMBER", label: "A Family Member" },
+  { value: "SIBLING", label: "A Sibling" },
 ];
 const TEACHER_PREFERENCE = ["Male", "Female", "Either"];
 const HOW_FOUND = [
@@ -173,13 +174,18 @@ export default function GetStartedPage() {
     if (!date) return setError("Please choose a date for your trial class.");
     if (!slot) return setError("Please choose a time slot.");
 
-    if (sessionFor === "FAMILY_MEMBER" && siblings.length === 0) {
-      return setError("Please add at least one family member.");
+    if ((sessionFor === "FAMILY_MEMBER" || sessionFor === "SIBLING") && siblings.length === 0) {
+      return setError(sessionFor === "SIBLING" ? "Please add at least one sibling." : "Please add at least one family member.");
     }
 
     const named = siblings.filter((s) => s.firstName.trim());
-    if (siblings.length !== named.length)
-      return setError("Please enter a first name for each family member, or remove the blank row.");
+    if (siblings.length !== named.length) {
+      return setError(
+        sessionFor === "SIBLING"
+          ? "Please enter a first name for each sibling, or remove the blank row."
+          : "Please enter a first name for each family member, or remove the blank row."
+      );
+    }
 
     setBusy(true);
     try {
@@ -348,8 +354,10 @@ export default function GetStartedPage() {
               value={sessionFor}
               onChange={(val) => {
                 setSessionFor(val);
-                if (val === "FAMILY_MEMBER" && siblings.length === 0) {
+                if ((val === "FAMILY_MEMBER" || val === "SIBLING") && siblings.length === 0) {
                   setSiblings([{ firstName: "", lastName: "" }]);
+                } else if (val === "MYSELF") {
+                  setSiblings([]);
                 }
               }}
             />
@@ -367,60 +375,64 @@ export default function GetStartedPage() {
             />
           </Section>
 
-          <Section
-            icon={UserPlus}
-            title={
-              sessionFor === "FAMILY_MEMBER" ? (
-                <span>
-                  Family members <span className="text-red-500">*</span>
-                </span>
-              ) : (
-                "Family members (optional)"
-              )
-            }
-          >
-            <div className="sm:col-span-2">
-              <p className="mb-3 text-xs text-ink-3">
-                {sessionFor === "FAMILY_MEMBER"
-                  ? "Please add the details of the family member(s) who will attend the trial class."
-                  : "Booking for more than one child? Add them here — they will join the same trial slot, and each gets their own account if you enrol."}
-              </p>
+          {sessionFor !== "MYSELF" && (
+            <Section
+              icon={UserPlus}
+              title={
+                sessionFor === "FAMILY_MEMBER" ? (
+                  <span>
+                    Family members <span className="text-red-500">*</span>
+                  </span>
+                ) : (
+                  <span>
+                    Siblings <span className="text-red-500">*</span>
+                  </span>
+                )
+              }
+            >
+              <div className="sm:col-span-2">
+                <p className="mb-3 text-xs text-ink-3">
+                  {sessionFor === "FAMILY_MEMBER"
+                    ? "Please add the details of the family member(s) who will attend the trial class."
+                    : "Please add the details of the sibling(s) who will attend the trial class."}
+                </p>
 
-              {siblings.map((s, i) => (
-                <div key={i} className="mb-2 flex gap-2">
-                  <input
-                    value={s.firstName}
-                    onChange={(e) => setSibling(i, "firstName", e.target.value)}
-                    placeholder="First name"
-                    className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
-                  />
-                  <input
-                    value={s.lastName}
-                    onChange={(e) => setSibling(i, "lastName", e.target.value)}
-                    placeholder="Last name"
-                    className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeSibling(i)}
-                    aria-label={`Remove family member ${i + 1}`}
-                    className="grid size-11 shrink-0 place-items-center rounded-xl border border-hairline text-ink-3 hover:border-red-500/40 hover:text-red-500"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-              ))}
+                {siblings.map((s, i) => (
+                  <div key={i} className="mb-2 flex gap-2">
+                    <input
+                      value={s.firstName}
+                      onChange={(e) => setSibling(i, "firstName", e.target.value)}
+                      placeholder={sessionFor === "SIBLING" ? "Sibling's first name" : "First name"}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
+                    />
+                    <input
+                      value={s.lastName}
+                      onChange={(e) => setSibling(i, "lastName", e.target.value)}
+                      placeholder={sessionFor === "SIBLING" ? "Sibling's last name" : "Last name"}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSibling(i)}
+                      aria-label={sessionFor === "SIBLING" ? `Remove sibling ${i + 1}` : `Remove family member ${i + 1}`}
+                      className="grid size-11 shrink-0 place-items-center rounded-xl border border-hairline text-ink-3 hover:border-red-500/40 hover:text-red-500"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                ))}
 
-              <button
-                type="button"
-                onClick={addSibling}
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-dashed border-hairline px-3 text-xs font-bold text-ink-2 hover:border-accent/50 hover:text-accent"
-              >
-                <Plus className="size-3.5" />
-                Add a family member
-              </button>
-            </div>
-          </Section>
+                <button
+                  type="button"
+                  onClick={addSibling}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-dashed border-hairline px-3 text-xs font-bold text-ink-2 hover:border-accent/50 hover:text-accent"
+                >
+                  <Plus className="size-3.5" />
+                  {sessionFor === "SIBLING" ? "Add a sibling" : "Add a family member"}
+                </button>
+              </div>
+            </Section>
+          )}
 
           <Section icon={CalendarDays} title="Pick your trial date & time">
             <div className="sm:col-span-2">

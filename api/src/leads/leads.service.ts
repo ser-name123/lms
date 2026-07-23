@@ -1330,6 +1330,13 @@ export class LeadsService implements OnModuleInit {
       throw new BadRequestException('This report has already been submitted.');
     }
 
+    if (dto.siblings !== undefined) {
+      await this.prisma.lead.update({
+        where: { id: trial.leadId },
+        data: { siblings: dto.siblings },
+      });
+    }
+
     const updated = await this.prisma.leadTrial.update({
       where: { id: trialId },
       data: await this.reportData(dto),
@@ -1390,6 +1397,7 @@ export class LeadsService implements OnModuleInit {
     if (updated.guardianRelation) leadPatch.relationship = updated.guardianRelation;
     if (updated.preferredDays.length) leadPatch.preferredDays = updated.preferredDays;
     if (updated.preferredTime) leadPatch.preferredTimeSlots = [updated.preferredTime];
+    if (dto.siblings !== undefined) leadPatch.siblings = dto.siblings;
     await this.prisma.lead.update({ where: { id: trial.leadId }, data: leadPatch });
 
     const summary = [
@@ -1884,7 +1892,7 @@ export class LeadsService implements OnModuleInit {
     actor: Actor,
     packageId?: string,
   ) {
-    const siblings: { firstName: string; lastName?: string }[] = Array.isArray(lead.siblings)
+    const siblings: any[] = Array.isArray(lead.siblings)
       ? lead.siblings
       : [];
 
@@ -1972,7 +1980,11 @@ export class LeadsService implements OnModuleInit {
             // Only the primary child's personal details were ever collected;
             // a sibling's gender and DOB are the coach's to fill in later.
             gender: i === 0 ? lead.gender : null,
-            dateOfBirth: i === 0 ? (report?.studentDob ?? lead.dateOfBirth) : null,
+            dateOfBirth: i === 0
+              ? (report?.studentDob ?? lead.dateOfBirth)
+              : (siblings[i - 1]?.dob && !isNaN(new Date(siblings[i - 1].dob).getTime())
+                  ? new Date(siblings[i - 1].dob)
+                  : null),
             guardianName: report?.guardianName || lead.parentName || null,
 
             // The parent's own details, so an admin can create their login
@@ -1989,7 +2001,9 @@ export class LeadsService implements OnModuleInit {
              * booking but were never assessed — stamping the eldest's level on
              * all of them puts a teacher's judgement on a student they never met.
              */
-            learningLevel: i === 0 ? report?.assessedLevel || lead.recommendedLevel || lead.currentLevel || null : null,
+            learningLevel: i === 0
+              ? report?.assessedLevel || lead.recommendedLevel || lead.currentLevel || null
+              : (siblings[i - 1]?.assessedLevel || null),
             preferredLanguage: lead.preferredLanguage || null,
             coachId: lead.assignedCoachId || null,
             // A family that asked to start next month should not be dated as
@@ -2018,9 +2032,13 @@ export class LeadsService implements OnModuleInit {
          * shown to the coach, then dropped on the floor at the one moment it
          * was meant to take effect. An explicit courseCode still wins.
          */
-        if (!courseCode && report?.recommendedCourseId) {
+        const siblingRecCourseId = i === 0
+          ? report?.recommendedCourseId
+          : (siblings[i - 1]?.recommendedCourseId || null);
+
+        if (!courseCode && siblingRecCourseId) {
           const exists = await tx.course.findUnique({
-            where: { id: report.recommendedCourseId },
+            where: { id: siblingRecCourseId },
             select: { id: true },
           });
           if (exists) {

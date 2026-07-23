@@ -1172,6 +1172,8 @@ export default function StudentsPage() {
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Parent</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Date of Joining</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Preferred Days</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Preferred Time</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Teacher Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Batch</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course Name</th>
@@ -1245,6 +1247,26 @@ export default function StudentsPage() {
 
                         {/* Joining date */}
                         <td className="px-4 py-3 text-xs text-ink-2 font-medium">{formatDateLabel(row.joiningDate)}</td>
+
+                        {/* Preferred Days */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">
+                          {row.preferredDays?.length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {row.preferredDays.map((d) => (
+                                <span key={d} className="px-1.5 py-0.5 bg-surface-3 border border-hairline rounded text-[10px] font-bold text-ink-2 uppercase">
+                                  {d.slice(0, 3)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+
+                        {/* Preferred Time */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-semibold text-accent animate-pulse-subtle">
+                          {row.preferredTime || "—"}
+                        </td>
 
                         {/* Teacher Name */}
                         <td className="px-4 py-3 text-xs text-ink-2 font-medium">{teacherName}</td>

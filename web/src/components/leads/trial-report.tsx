@@ -58,6 +58,99 @@ type Draft = TrialReportInput;
 
 const dateInput = (iso?: string | null) => (iso ? iso.slice(0, 10) : "");
 
+const roundToNearest30 = (timeStr: string): string => {
+  if (!timeStr) return "12:00";
+  const isPM = timeStr.toUpperCase().includes("PM");
+  const isAM = timeStr.toUpperCase().includes("AM");
+
+  let clean = timeStr.replace(/[^0-9:]/g, "");
+  if (!clean.includes(":")) return "12:00";
+
+  const parts = clean.split(":");
+  let hour = parseInt(parts[0], 10);
+  let minute = parseInt(parts[1], 10);
+
+  if (isNaN(hour) || isNaN(minute)) return "12:00";
+
+  if (isPM && hour < 12) hour += 12;
+  if (isAM && hour === 12) hour = 0;
+
+  if (minute < 15) {
+    minute = 0;
+  } else if (minute < 45) {
+    minute = 30;
+  } else {
+    minute = 0;
+    hour = (hour + 1) % 24;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+};
+
+const TIME_SLOTS = Array.from({ length: 48 }, (_, i) => {
+  const hour = Math.floor(i / 2);
+  const minute = i % 2 === 0 ? "00" : "30";
+  const hh = String(hour).padStart(2, "0");
+  const value = `${hh}:${minute}`;
+
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  const label = `${String(displayHour).padStart(2, "0")}:${minute} ${ampm}`;
+
+  return { value, label };
+});
+
+const parsePreferredTime = (
+  preferredTime: string | null | undefined,
+  preferredDays: string[],
+): Record<string, string> => {
+  const result: Record<string, string> = {};
+  if (!preferredTime) return result;
+
+  const pairs = preferredTime.split(",").map((p) => p.trim());
+  let parsedAny = false;
+  pairs.forEach((pair) => {
+    const colonIndex = pair.indexOf(":");
+    if (colonIndex !== -1) {
+      const day = pair.slice(0, colonIndex).trim();
+      const time = pair.slice(colonIndex + 1).trim();
+      if (preferredDays.includes(day)) {
+        result[day] = roundToNearest30(time);
+        parsedAny = true;
+      }
+    }
+  });
+
+  if (!parsedAny && preferredTime.trim().length > 0) {
+    const rounded = roundToNearest30(preferredTime.trim());
+    preferredDays.forEach((day) => {
+      result[day] = rounded;
+    });
+  }
+
+  return result;
+};
+
+const serializePreferredTime = (
+  preferredDays: string[],
+  dayTimes: Record<string, string>,
+): string | undefined => {
+  if (!preferredDays || preferredDays.length === 0) return undefined;
+
+  if (preferredDays.length === 1) {
+    return dayTimes[preferredDays[0]] || undefined;
+  }
+
+  const parts = preferredDays
+    .map((day) => {
+      const time = dayTimes[day];
+      return time ? `${day}: ${time}` : null;
+    })
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts.join(", ") : undefined;
+};
+
 /** Only send what the teacher actually touched, so blanks never wipe stored answers. */
 function toPayload(d: Draft): TrialReportInput {
   const out: Record<string, unknown> = {};
@@ -106,24 +199,129 @@ export function TrialReportPanel({
     teacherFeedback: trial.teacherFeedback ?? undefined,
     teacherRecommendsEnroll: trial.teacherRecommendsEnroll ?? undefined,
     reportNotes: trial.reportNotes ?? undefined,
+    siblings: trial.lead?.siblings
+      ? (trial.lead.siblings as any[]).map((s) => ({
+          firstName: s.firstName || "",
+          lastName: s.lastName || "",
+          dob: s.dob ? dateInput(s.dob) : undefined,
+          age: s.age ?? undefined,
+          assessedLevel: s.assessedLevel ?? undefined,
+          recommendedCourseId: s.recommendedCourseId ?? undefined,
+        }))
+      : undefined,
   });
+
+  const [dayTimes, setDayTimes] = useState<Record<string, string>>(() =>
+    parsePreferredTime(trial.preferredTime, trial.preferredDays ?? []),
+  );
 
   const set = useCallback(<K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
   }, []);
 
   useEffect(() => {
+    const serialized = serializePreferredTime(draft.preferredDays ?? [], dayTimes);
+    setDraft((d) => {
+      if (d.preferredTime === serialized) return d;
+      return { ...d, preferredTime: serialized };
+    });
+  }, [draft.preferredDays, dayTimes]);
+
+  const handleDayToggle = (day: string) => {
+    const on = (draft.preferredDays ?? []).includes(day);
+    const nextDays = on
+      ? (draft.preferredDays ?? []).filter((x) => x !== day)
+      : [...(draft.preferredDays ?? []), day];
+
+    set("preferredDays", nextDays);
+
+    setDayTimes((current) => {
+      const next = { ...current };
+      if (on) {
+        delete next[day];
+      } else if (!next[day]) {
+        next[day] = "";
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
     if (submitted) return;
     fetchTrialOptions().then(setOptions).catch(() => undefined);
   }, [submitted]);
 
+  useEffect(() => {
+    if (!draft.studentDob) {
+      set("studentAge", undefined);
+      return;
+    }
+    const birth = new Date(draft.studentDob);
+    if (isNaN(birth.getTime())) return;
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    set("studentAge", Math.max(0, age));
+  }, [draft.studentDob, set]);
+
   const covered = CHECKLIST.filter((c) => draft[c.key]).length;
   const lead = trial.lead;
+
+  const handleSiblingDobChange = (index: number, dobValue: string) => {
+    setDraft((d) => {
+      const nextSiblings = [...(d.siblings || [])];
+      const sib = { ...nextSiblings[index], dob: dobValue || undefined };
+
+      if (dobValue) {
+        const birth = new Date(dobValue);
+        if (!isNaN(birth.getTime())) {
+          const today = new Date();
+          let age = today.getFullYear() - birth.getFullYear();
+          const monthDiff = today.getMonth() - birth.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+            age--;
+          }
+          sib.age = Math.max(0, age);
+        }
+      } else {
+        sib.age = undefined;
+      }
+
+      nextSiblings[index] = sib;
+      return { ...d, siblings: nextSiblings };
+    });
+  };
 
   const run = async (kind: "save" | "submit") => {
     setBusy(kind);
     try {
-      const payload = toPayload(draft);
+      if (kind === "submit") {
+        if (!draft.assessedLevel) {
+          throw new Error("Please select an assessed level for the primary student.");
+        }
+        if (draft.siblings) {
+          for (const sib of draft.siblings) {
+            if (!sib.assessedLevel) {
+              throw new Error(`Please select an assessed level for sibling: ${sib.firstName}.`);
+            }
+          }
+        }
+      }
+
+      const siblingPayload = draft.siblings
+        ? draft.siblings.map((sib) => ({
+            ...sib,
+          }))
+        : undefined;
+
+      const payload = {
+        ...toPayload(draft),
+        siblings: siblingPayload,
+      };
+
       if (kind === "save") {
         await saveTrialReport(trial.id, payload);
         Swal.fire({
@@ -247,31 +445,100 @@ export function TrialReportPanel({
         </div>
       </Section>
 
+      {draft.siblings && draft.siblings.map((sib: any, idx: number) => (
+        <Section 
+          key={idx} 
+          icon={<UserRound className="size-3.5" aria-hidden />} 
+          title={`Sibling Assessment: ${sib.firstName} ${sib.lastName || ""}`}
+        >
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <Field label="Date of birth">
+              <input
+                type="date"
+                value={sib.dob ?? ""}
+                onChange={(e) => handleSiblingDobChange(idx, e.target.value)}
+                className={inputCls}
+              />
+            </Field>
+
+            <Field
+              label="Age"
+              hint={sib.dob ? "Calculated from the date of birth" : undefined}
+            >
+              <input
+                type="number"
+                min={3}
+                max={99}
+                disabled={Boolean(sib.dob)}
+                value={sib.age ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDraft((d) => {
+                    const next = [...(d.siblings || [])];
+                    next[idx] = { ...next[idx], age: val ? Number(val) : undefined };
+                    return { ...d, siblings: next };
+                  });
+                }}
+                className={`${inputCls} disabled:opacity-50`}
+              />
+            </Field>
+
+            <div className="sm:col-span-2 space-y-1.5">
+              <p className="text-[11px] font-bold text-ink-3">
+                Level <span className="text-rose-500">*</span>
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(options?.levels ?? []).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => {
+                      setDraft((d) => {
+                        const next = [...(d.siblings || [])];
+                        next[idx] = { ...next[idx], assessedLevel: l };
+                        return { ...d, siblings: next };
+                      });
+                    }}
+                    className={`h-8 rounded-lg border px-3 text-[11px] font-bold ${
+                      sib.assessedLevel === l
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-hairline text-ink-3"
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Field label="Recommended package" className="sm:col-span-2">
+              <select
+                value={sib.recommendedPackageName ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDraft((d) => {
+                    const next = [...(d.siblings || [])];
+                    next[idx] = { ...next[idx], recommendedPackageName: val || undefined };
+                    return { ...d, siblings: next };
+                  });
+                }}
+                className={inputCls}
+              >
+                <option value="">No specific package</option>
+                {options?.packages.map((p) => (
+                  <option key={p.id} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </Section>
+      ))}
+
       {/* ── 4. What they want to enrol into ─────────────────────────────── */}
       <Section icon={<CalendarDays className="size-3.5" aria-hidden />} title="Preferences">
         <div className="grid gap-2.5 sm:grid-cols-2">
-          <Field label="Preferred package">
-            <select
-              value={draft.preferredPackage ?? ""}
-              onChange={(e) => set("preferredPackage", e.target.value || undefined)}
-              className={inputCls}
-            >
-              <option value="">Not decided</option>
-              {options?.packages.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name} — {p.classesPerMonth} classes/month
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Preferred time">
-            <input
-              type="time"
-              value={draft.preferredTime ?? ""}
-              onChange={(e) => set("preferredTime", e.target.value || undefined)}
-              className={inputCls}
-            />
-          </Field>
           <Field label="Preferred start date" className="sm:col-span-2">
             <input
               type="date"
@@ -282,7 +549,7 @@ export function TrialReportPanel({
           </Field>
         </div>
 
-        <p className="mb-1.5 mt-2.5 text-[11px] font-bold text-ink-3">Preferred days</p>
+        <p className="mb-1.5 mt-4 text-[11px] font-bold text-ink-3">Preferred days</p>
         <div className="flex flex-wrap gap-1.5">
           {(options?.weekdays ?? []).map((d) => {
             const on = (draft.preferredDays ?? []).includes(d);
@@ -290,14 +557,7 @@ export function TrialReportPanel({
               <button
                 key={d}
                 type="button"
-                onClick={() =>
-                  set(
-                    "preferredDays",
-                    on
-                      ? (draft.preferredDays ?? []).filter((x) => x !== d)
-                      : [...(draft.preferredDays ?? []), d],
-                  )
-                }
+                onClick={() => handleDayToggle(d)}
                 className={`h-7 rounded-lg border px-2.5 text-[11px] font-bold ${
                   on ? "border-accent bg-accent/10 text-accent" : "border-hairline text-ink-3"
                 }`}
@@ -307,6 +567,33 @@ export function TrialReportPanel({
             );
           })}
         </div>
+
+        {draft.preferredDays && draft.preferredDays.length > 0 && (
+          <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+            {draft.preferredDays.map((day) => (
+              <Field key={day} label={`Preferred time (${day})`}>
+                <select
+                  value={dayTimes[day] ?? ""}
+                  onChange={(e) => {
+                    const timeVal = e.target.value;
+                    setDayTimes((current) => ({
+                      ...current,
+                      [day]: timeVal,
+                    }));
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">Select time</option>
+                  {TIME_SLOTS.map((slot) => (
+                    <option key={slot.value} value={slot.value}>
+                      {slot.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ))}
+          </div>
+        )}
       </Section>
 
       {/* ── 5. Your assessment ──────────────────────────────────────────── */}
@@ -332,17 +619,16 @@ export function TrialReportPanel({
         </div>
 
         <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-          <Field label="Recommended course">
+          <Field label="Recommended package">
             <select
-              value={draft.recommendedCourseId ?? ""}
-              onChange={(e) => set("recommendedCourseId", e.target.value || undefined)}
+              value={draft.preferredPackage ?? ""}
+              onChange={(e) => set("preferredPackage", e.target.value || undefined)}
               className={inputCls}
             >
-              <option value="">No specific course</option>
-              {options?.courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                  {c.level ? ` · ${c.level}` : ""}
+              <option value="">No specific package</option>
+              {options?.packages.map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.name}
                 </option>
               ))}
             </select>
@@ -482,14 +768,13 @@ export function SubmittedReport({ trial }: { trial: LeadTrial }) {
   const covered = CHECKLIST.filter((c) => trial[c.key]).length;
   const rows = [
     ["Level assessed", trial.assessedLevel],
-    ["Recommended course", trial.recommendedCourse],
+    ["Recommended package", trial.preferredPackage],
     ["Recommends enrolment", trial.teacherRecommendsEnroll == null ? null : trial.teacherRecommendsEnroll ? "Yes" : "No"],
     ["Rating", trial.teacherRating ? `${trial.teacherRating}/5` : null],
     ["Age", trial.studentAge != null ? String(trial.studentAge) : null],
     ["Date of birth", trial.studentDob ? new Date(trial.studentDob).toLocaleDateString() : null],
     ["Guardian", [trial.guardianName, trial.guardianRelation].filter(Boolean).join(" · ")],
     ["Guardian contact", [trial.guardianPhone, trial.guardianEmail].filter(Boolean).join(" · ")],
-    ["Preferred package", trial.preferredPackage],
     ["Preferred days", trial.preferredDays?.join(", ")],
     ["Preferred time", trial.preferredTime],
     [
@@ -532,6 +817,43 @@ export function SubmittedReport({ trial }: { trial: LeadTrial }) {
         <p className="mt-1.5 rounded-lg border border-hairline bg-surface px-3 py-2 text-[11px] text-ink-3">
           {trial.reportNotes}
         </p>
+      )}
+
+      {trial.lead?.siblings && (trial.lead.siblings as any[]).length > 0 && (
+        <div className="mt-4 border-t border-hairline pt-3 space-y-3">
+          <h5 className="text-[10px] font-extrabold uppercase tracking-wider text-ink-3">Sibling Assessments</h5>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(trial.lead.siblings as any[]).map((sib, idx) => (
+              <div key={idx} className="rounded-lg border border-hairline bg-surface p-3 space-y-1">
+                <span className="block font-bold text-ink-2 text-xs">{sib.firstName} {sib.lastName || ""}</span>
+                <dl className="space-y-0.5 text-[11px]">
+                  <div className="flex gap-2">
+                    <dt className="min-w-24 shrink-0 font-semibold text-ink-3">Level assessed</dt>
+                    <dd className="font-bold text-ink-2">{sib.assessedLevel || "—"}</dd>
+                  </div>
+                  {sib.recommendedPackageName && (
+                    <div className="flex gap-2">
+                      <dt className="min-w-24 shrink-0 font-semibold text-ink-3">Recommended package</dt>
+                      <dd className="font-bold text-ink-2">{sib.recommendedPackageName}</dd>
+                    </div>
+                  )}
+                  {sib.dob && (
+                    <div className="flex gap-2">
+                      <dt className="min-w-24 shrink-0 font-semibold text-ink-3">Date of birth</dt>
+                      <dd className="font-bold text-ink-2">{new Date(sib.dob).toLocaleDateString()}</dd>
+                    </div>
+                  )}
+                  {sib.age != null && (
+                    <div className="flex gap-2">
+                      <dt className="min-w-24 shrink-0 font-semibold text-ink-3">Age</dt>
+                      <dd className="font-bold text-ink-2">{sib.age}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
