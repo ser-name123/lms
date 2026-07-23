@@ -1348,8 +1348,27 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
   const [packageId, setPackageId] = useState("");
   useEffect(() => {
     if (converted) return;
-    fetchTrialOptions().then((o) => setPackages(o.packages)).catch(() => undefined);
-  }, [converted]);
+    
+    Promise.all([
+      fetchTrialOptions(),
+      fetchLeadTrials(lead.id)
+    ]).then(([options, trialsList]) => {
+      setPackages(options.packages);
+      
+      const latestTrialWithPkg = trialsList
+        .filter(t => t.preferredPackage)
+        .sort((a, b) => new Date(b.reportSubmittedAt || b.createdAt).getTime() - new Date(a.reportSubmittedAt || a.createdAt).getTime())[0];
+        
+      if (latestTrialWithPkg?.preferredPackage) {
+        const matched = options.packages.find(
+          p => p.name.toLowerCase() === latestTrialWithPkg.preferredPackage?.toLowerCase()
+        );
+        if (matched) {
+          setPackageId(matched.id);
+        }
+      }
+    }).catch(() => undefined);
+  }, [lead.id, converted]);
 
   const decide = async (decision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
     if (decision === "ENROLL") {
