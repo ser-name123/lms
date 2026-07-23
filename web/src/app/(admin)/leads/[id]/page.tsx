@@ -1344,6 +1344,7 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
    * whatever the family chose — on the trial or afterwards on the info-form
    * link — so the coach only touches this when overriding them.
    */
+  const [familyPackageName, setFamilyPackageName] = useState<string | null>(null);
   const [packages, setPackages] = useState<TrialOptions["packages"]>([]);
   const [packageId, setPackageId] = useState("");
   useEffect(() => {
@@ -1359,24 +1360,35 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         .filter(t => t.preferredPackage)
         .sort((a, b) => new Date(b.reportSubmittedAt || b.createdAt).getTime() - new Date(a.reportSubmittedAt || a.createdAt).getTime())[0];
         
-      if (latestTrialWithPkg?.preferredPackage) {
+      const familyChosenPkg = latestTrialWithPkg?.preferredPackage || (lead as any).preferredPackage;
+      
+      if (familyChosenPkg) {
+        setFamilyPackageName(familyChosenPkg);
         const matched = options.packages.find(
-          p => p.name.toLowerCase() === latestTrialWithPkg.preferredPackage?.toLowerCase()
+          p => p.name.toLowerCase() === familyChosenPkg.toLowerCase()
         );
         if (matched) {
           setPackageId(matched.id);
         }
+      } else {
+        setFamilyPackageName(null);
       }
     }).catch(() => undefined);
   }, [lead.id, converted]);
 
   const decide = async (decision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
     if (decision === "ENROLL") {
+      let warningText = "This creates an active student account, raises the first invoice, and emails the family their login, package and invoice.";
+      if (!packageId) {
+        if (familyPackageName) {
+          warningText += ` No package selected — the family chosen package "${familyPackageName}" will be used.`;
+        } else {
+          warningText += " Warning: No package is selected, and the family did not choose any package. Enrolling will create the student but raise no invoice.";
+        }
+      }
       const ok = await Swal.fire({
         title: "Convert to student?",
-        text:
-          "This creates an active student account, raises the first invoice, and emails the family their login, package and invoice." +
-          (packageId ? "" : " No package selected — the one the family chose will be used, if there is one."),
+        text: warningText,
         icon: "question", showCancelButton: true, confirmButtonText: "Yes, enrol", background: swalBg(),
       });
       if (!ok.isConfirmed) return;
@@ -1443,7 +1455,11 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Package to bill</label>
         <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
           className="mb-1.5 h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
-          <option value="">Use the package the family chose</option>
+          {familyPackageName ? (
+            <option value="">Use the package the family chose ({familyPackageName})</option>
+          ) : (
+            <option value="">Select a package...</option>
+          )}
           {packages.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name} — {p.classesPerMonth} classes/month
