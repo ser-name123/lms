@@ -41,7 +41,6 @@ import {
   fetchLeadTrials,
   scheduleLeadTrial,
   updateLeadTrial,
-  markLeadTrialAttendance,
   submitLeadTrialFeedback,
   sendLeadTrialReminder,
   requestTrialInfo,
@@ -922,14 +921,6 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
               <button onClick={() => act(() => sendLeadTrialReminder(trial.id), "Reminder sent")} disabled={busy}
                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-50">
                 <Send className="size-3.5" /> Remind
-              </button>
-              <button onClick={() => act(() => markLeadTrialAttendance(trial.id, "PRESENT"), "Marked present")} disabled={busy}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-[11px] font-bold text-emerald-600 hover:bg-emerald-500/20 disabled:opacity-50">
-                <CheckCircle2 className="size-3.5" /> Present
-              </button>
-              <button onClick={() => act(() => markLeadTrialAttendance(trial.id, "ABSENT"), "Marked no-show")} disabled={busy}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 text-[11px] font-bold text-rose-600 hover:bg-rose-500/20 disabled:opacity-50">
-                <XCircle className="size-3.5" /> No-show
               </button>
               <button onClick={() => setEditing((s) => !s)} disabled={busy}
                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-hairline px-2.5 text-[11px] font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-50">

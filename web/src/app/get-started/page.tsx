@@ -173,6 +173,10 @@ export default function GetStartedPage() {
     if (!date) return setError("Please choose a date for your trial class.");
     if (!slot) return setError("Please choose a time slot.");
 
+    if (sessionFor === "FAMILY_MEMBER" && siblings.length === 0) {
+      return setError("Please add at least one family member.");
+    }
+
     const named = siblings.filter((s) => s.firstName.trim());
     if (siblings.length !== named.length)
       return setError("Please enter a first name for each family member, or remove the blank row.");
@@ -229,22 +233,6 @@ export default function GetStartedPage() {
             <Row icon={Clock} label="Time" value={`${when.toISOString().slice(11, 16)} UTC`} />
             <Row icon={User} label="Reference" value={booked.leadNumber} />
           </div>
-
-          {booked.meetingLink ? (
-            <a
-              href={booked.meetingLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent text-sm font-bold text-white"
-            >
-              <Video className="size-4" />
-              Open the Zoom link
-            </a>
-          ) : (
-            <p className="mt-5 rounded-xl bg-amber-500/10 px-3 py-2.5 text-xs font-semibold text-amber-600">
-              Your joining link is being prepared — we will email it to you well before the class.
-            </p>
-          )}
 
           <Link
             href="/signin"
@@ -358,7 +346,12 @@ export default function GetStartedPage() {
               label="This trial session is for"
               options={SESSION_FOR}
               value={sessionFor}
-              onChange={setSessionFor}
+              onChange={(val) => {
+                setSessionFor(val);
+                if (val === "FAMILY_MEMBER" && siblings.length === 0) {
+                  setSiblings([{ firstName: "", lastName: "" }]);
+                }
+              }}
             />
             <ChoiceRow
               label="Preferred Teacher"
@@ -374,11 +367,23 @@ export default function GetStartedPage() {
             />
           </Section>
 
-          <Section icon={UserPlus} title="Family members (optional)">
+          <Section
+            icon={UserPlus}
+            title={
+              sessionFor === "FAMILY_MEMBER" ? (
+                <span>
+                  Family members <span className="text-red-500">*</span>
+                </span>
+              ) : (
+                "Family members (optional)"
+              )
+            }
+          >
             <div className="sm:col-span-2">
               <p className="mb-3 text-xs text-ink-3">
-                Booking for more than one child? Add them here — they will join the same trial slot,
-                and each gets their own account if you enrol.
+                {sessionFor === "FAMILY_MEMBER"
+                  ? "Please add the details of the family member(s) who will attend the trial class."
+                  : "Booking for more than one child? Add them here — they will join the same trial slot, and each gets their own account if you enrol."}
               </p>
 
               {siblings.map((s, i) => (
@@ -533,7 +538,7 @@ function Section({
   children,
 }: {
   icon: React.ElementType;
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (

@@ -149,20 +149,10 @@ export class LeadsService implements OnModuleInit {
     });
 
     /*
-     * The slot came from merged availability, so it belongs to no one teacher
-     * — but somebody has to run the class. This used to be left null for the
-     * coach to fill in, and nothing chased it: the trial appeared on no
-     * teacher's screen while the family still got their reminder. Pick the
-     * obvious candidate now; the coach can change it, and if nobody is free
-     * this stays null and the trial is flagged as needing a teacher.
+     * The slot came from merged availability, so it belongs to no one teacher.
+     * We leave it null for the coach/admin to fill in manually.
      */
-    const teacherId = await this.availability.pickTeacherFor({
-      date: dto.preferredDate!,
-      slot,
-      durationMins: 30,
-      subject: dto.interestedSubject,
-      preferredGender: dto.preferredTeacherGender,
-    });
+    const teacherId = null;
 
     const trial = await this.prisma.leadTrial.create({
       data: {
@@ -275,13 +265,20 @@ export class LeadsService implements OnModuleInit {
   }
 
   private async sendBookingAcknowledgement(
-    lead: { studentFirstName: string; studentLastName: string; email: string; interestedSubject: string | null },
+    lead: {
+      studentFirstName: string;
+      studentLastName: string;
+      email: string;
+      interestedSubject: string | null;
+      leadNumber: string;
+      parentName?: string | null;
+    },
     startAt: Date,
     meetingLink: string | null,
     siblings: { firstName: string; lastName: string }[],
   ) {
     const when = startAt.toISOString().replace('T', ' ').slice(0, 16);
-    const name = `${lead.studentFirstName} ${lead.studentLastName}`.trim();
+    const name = lead.parentName || `${lead.studentFirstName} ${lead.studentLastName}`.trim();
     const row = (label: string, value: string) =>
       `<tr><td style="padding:6px 0;color:#6b7280;">${label}</td><td style="padding:6px 0;font-weight:700;">${value}</td></tr>`;
 
@@ -293,8 +290,10 @@ export class LeadsService implements OnModuleInit {
           </div>
           <div style="padding:28px;color:#1f2937;font-size:14px;line-height:1.7;">
             <p>Assalamu alaikum ${name || 'there'},</p>
-            <p>Thank you for booking a free trial class with us. We are looking forward to meeting you.</p>
+            <p>Thank you for registering. We have received your trial request for <b>${lead.studentFirstName} ${lead.studentLastName}</b>, and your trial class is successfully booked.</p>
+            <p>Our Academic Coach will contact you shortly to schedule an evaluation. Here are your booking details:</p>
             <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              ${row('Reference', lead.leadNumber)}
               ${row('Date &amp; time (UTC)', when)}
               ${lead.interestedSubject ? row('Subject', lead.interestedSubject) : ''}
               ${siblings.length ? row('Also attending', siblings.map((s) => `${s.firstName} ${s.lastName}`.trim()).join(', ')) : ''}
@@ -313,7 +312,7 @@ export class LeadsService implements OnModuleInit {
     await this.emails.sendMail(
       lead.email,
       'Your free trial class is booked',
-      `Your free trial class is booked for ${when} UTC.${meetingLink ? ` Join: ${meetingLink}` : ''}`,
+      `Thank you for registering. Your free trial class is booked for ${when} UTC. Ref: ${lead.leadNumber}.${meetingLink ? ` Join: ${meetingLink}` : ''}`,
       undefined,
       html,
     );
@@ -2669,7 +2668,7 @@ export class LeadsService implements OnModuleInit {
     }));
   }
 
-  // Step 4 — new-lead notifications: email the parent, alert coaches + admins.
+  // Step 4 — new-lead notifications: alert coaches + admins.
   private async notifyNewLead(lead: any) {
     // In-app alert to every admin & academic coach.
     await this.notifications.createForRoles([Role.ADMIN, Role.ACADEMIC_COACH], {
@@ -2678,30 +2677,5 @@ export class LeadsService implements OnModuleInit {
       body: `${lead.studentFirstName} ${lead.studentLastName} — ${lead.interestedSubject || 'General'} (${lead.leadNumber}).`,
       link: `/leads/${lead.id}`,
     });
-
-    // Thank-you email to the parent.
-    const name = lead.parentName || `${lead.studentFirstName} ${lead.studentLastName}`;
-    const html = `
-      <div style="font-family:'Segoe UI',Tahoma,sans-serif;background:#f4f6f8;padding:40px 20px;">
-        <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e1e4e8;">
-          <div style="background:#133C55;padding:26px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800;">Thank you for registering</h1>
-          </div>
-          <div style="padding:28px;color:#1f2937;font-size:14px;line-height:1.7;">
-            <p>Dear ${name},</p>
-            <p>We have received your trial request for <b>${lead.studentFirstName} ${lead.studentLastName}</b>. Our Academic Coach will contact you shortly to schedule an evaluation.</p>
-            <p style="color:#6b7280;">Reference: <b>${lead.leadNumber}</b></p>
-          </div>
-        </div>
-      </div>`;
-    await this.emails
-      .sendMail(
-        lead.email,
-        'Thank you for registering',
-        'Thank you for registering. Our Academic Coach will contact you shortly.',
-        undefined,
-        html,
-      )
-      .catch(() => undefined);
   }
 }
