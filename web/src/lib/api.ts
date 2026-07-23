@@ -71,6 +71,7 @@ async function errorMessage(res: Response) {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const send = (token: string | null) =>
     fetch(`${BASE}${path}`, {
+      cache: "no-store",
       ...init,
       headers: {
         "Content-Type": "application/json",
