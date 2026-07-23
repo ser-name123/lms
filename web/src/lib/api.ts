@@ -2159,9 +2159,10 @@ export const fetchLeads = (params: {
   country?: string;
   subject?: string;
   coachId?: string;
+  trialStatus?: string;
 }) => {
   const q: Record<string, string> = { page: String(params.page), limit: String(params.limit) };
-  (["search", "status", "priority", "country", "subject", "coachId"] as const).forEach((k) => {
+  (["search", "status", "priority", "country", "subject", "coachId", "trialStatus"] as const).forEach((k) => {
     const v = params[k];
     if (v && v !== "All") q[k] = String(v);
   });

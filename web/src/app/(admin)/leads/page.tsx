@@ -28,6 +28,7 @@ import {
   Cell,
 } from "recharts";
 
+import { cn } from "@/lib/utils";
 import { Topbar } from "@/components/layout/topbar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
@@ -54,6 +55,7 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("All");
   const [priority, setPriority] = useState("All");
+  const [trialStatus, setTrialStatus] = useState("All");
   const [search, setSearch] = useState("");
   /*
    * The table used to ask for one page of 100 and print "Total Requests 340"
@@ -72,7 +74,7 @@ export default function LeadsPage() {
 
   const load = () => {
     setLoading(true);
-    fetchLeads({ page, limit: PAGE_SIZE, status, priority, search: search || undefined })
+    fetchLeads({ page, limit: PAGE_SIZE, status, priority, trialStatus, search: search || undefined })
       .then((res) => {
         setItems(res.items);
         setMeta({
@@ -90,11 +92,11 @@ export default function LeadsPage() {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [status, priority, page]);
+  useEffect(() => { load(); }, [status, priority, trialStatus, page]);
 
   // A filter change makes the current page number meaningless.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setPage(1); }, [status, priority]);
+  useEffect(() => { setPage(1); }, [status, priority, trialStatus]);
 
 
   const toggle = (id: string) =>
@@ -186,15 +188,15 @@ export default function LeadsPage() {
 
   const tr = funnelData?.trials;
   const trialStats = [
-    { label: "Trials Scheduled", value: tr?.scheduled ?? 0, icon: CalendarClock, color: "text-accent bg-accent/10" },
-    { label: "Attended", value: tr?.attended ?? 0, icon: UserCheck, color: "text-emerald-500 bg-emerald-500/10" },
-    { label: "No-shows", value: tr?.noShow ?? 0, icon: UserX, color: "text-rose-500 bg-rose-500/10" },
+    { label: "Trials Scheduled", value: tr?.scheduled ?? 0, icon: CalendarClock, color: "text-accent bg-accent/10", statusValue: "SCHEDULED_ALL" },
+    { label: "Attended", value: tr?.attended ?? 0, icon: UserCheck, color: "text-emerald-500 bg-emerald-500/10", statusValue: "ATTENDED" },
+    { label: "No-shows", value: tr?.noShow ?? 0, icon: UserX, color: "text-rose-500 bg-rose-500/10", statusValue: "NO_SHOW" },
     // Out of trials that have actually concluded, which is why "Upcoming" is
     // shown too — otherwise the four tiles cannot be added up by the reader.
-    { label: "Upcoming", value: tr?.upcoming ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10" },
-    { label: "Attendance %", value: `${tr?.attendanceRate ?? 0}%`, icon: TrendingUp, color: "text-blue-500 bg-blue-500/10" },
-    { label: "Avg Teacher ★", value: tr?.avgTeacherRating ?? 0, icon: Star, color: "text-amber-500 bg-amber-500/10" },
-    { label: "Avg Parent ★", value: tr?.avgParentRating ?? 0, icon: Star, color: "text-violet-500 bg-violet-500/10" },
+    { label: "Upcoming", value: tr?.upcoming ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10", statusValue: "UPCOMING" },
+    { label: "Attendance %", value: `${tr?.attendanceRate ?? 0}%`, icon: TrendingUp, color: "text-blue-500 bg-blue-500/10", statusValue: undefined },
+    { label: "Avg Teacher ★", value: tr?.avgTeacherRating ?? 0, icon: Star, color: "text-amber-500 bg-amber-500/10", statusValue: undefined },
+    { label: "Avg Parent ★", value: tr?.avgParentRating ?? 0, icon: Star, color: "text-violet-500 bg-violet-500/10", statusValue: undefined },
   ];
 
   return (
@@ -259,19 +261,38 @@ export default function LeadsPage() {
         <div>
           <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wider text-ink-3">Trial &amp; Conversion Analytics</h3>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-            {trialStats.map((k) => (
-              <Card key={k.label} className="border border-hairline bg-surface shadow-sm">
-                <CardBody className="flex items-center gap-3 p-4">
-                  <span className={`grid size-10 place-items-center rounded-xl ${k.color}`}>
-                    <k.icon className="size-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-black text-ink leading-none">{k.value}</p>
-                    <p className="text-[11px] font-semibold text-ink-3 mt-1">{k.label}</p>
-                  </div>
-                </CardBody>
-              </Card>
-            ))}
+            {trialStats.map((k) => {
+              const isClickable = k.statusValue !== undefined;
+              const isActive = isClickable && trialStatus === k.statusValue;
+              return (
+                <Card 
+                  key={k.label} 
+                  onClick={() => {
+                    if (isClickable) {
+                      setTrialStatus(prev => prev === k.statusValue ? "All" : k.statusValue!);
+                    }
+                  }}
+                  className={cn(
+                    "border border-hairline bg-surface shadow-sm transition-all duration-200 select-none",
+                    isClickable ? "cursor-pointer hover:border-accent/40 hover:bg-surface-2/40 active:scale-98" : "",
+                    isActive ? "ring-2 ring-accent border-accent/80 bg-accent/5 shadow-md shadow-accent/5" : ""
+                  )}
+                >
+                  <CardBody className="flex items-center gap-3 p-4 relative">
+                    {isActive && (
+                      <span className="absolute top-2 right-2 size-2 rounded-full bg-accent animate-pulse" />
+                    )}
+                    <span className={`grid size-10 place-items-center rounded-xl ${k.color}`}>
+                      <k.icon className="size-5" />
+                    </span>
+                    <div>
+                      <p className="text-xl font-black text-ink leading-none">{k.value}</p>
+                      <p className="text-[11px] font-semibold text-ink-3 mt-1">{k.label}</p>
+                    </div>
+                  </CardBody>
+                </Card>
+              );
+            })}
           </div>
         </div>
 

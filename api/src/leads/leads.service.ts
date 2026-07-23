@@ -402,7 +402,7 @@ export class LeadsService implements OnModuleInit {
   }
 
   async list(dto: ListLeadsDto, user?: Actor) {
-    const { page = 1, limit = 20, search, status, priority, country, subject, coachId } = dto;
+    const { page = 1, limit = 20, search, status, priority, country, subject, coachId, trialStatus } = dto;
     const scope = this.scopeFor(user);
 
     /*
@@ -446,6 +446,18 @@ export class LeadsService implements OnModuleInit {
           }
         : {}),
     };
+
+    if (trialStatus && trialStatus !== 'All') {
+      if (trialStatus === 'SCHEDULED_ALL') {
+        where.trials = { some: {} };
+      } else if (trialStatus === 'ATTENDED') {
+        where.trials = { some: { status: 'COMPLETED' } };
+      } else if (trialStatus === 'NO_SHOW') {
+        where.trials = { some: { status: 'NO_SHOW' } };
+      } else if (trialStatus === 'UPCOMING') {
+        where.trials = { some: { status: { in: ['SCHEDULED', 'RESCHEDULED'] } } };
+      }
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.lead.findMany({

@@ -335,6 +335,7 @@ export class ListLeadsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() country?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() subject?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() coachId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() trialStatus?: string;
 
   // Optional numeric guard reused by nothing yet, kept for future range use.
   @ApiPropertyOptional()
