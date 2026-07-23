@@ -33,3 +33,26 @@ export class SmtpConfigDto {
   @IsBoolean()
   secure?: boolean;
 }
+
+/*
+ * Every field optional, and a blank one keeps the stored value. The screen
+ * never receives the client secret or refresh token back, so it cannot send
+ * them back — without this rule, editing only the sender would wipe them.
+ */
+export class GmailApiConfigDto {
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
+  @IsOptional()
+  @IsString()
+  clientSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  refreshToken?: string;
+
+  @IsOptional()
+  @IsString()
+  sender?: string;
+}

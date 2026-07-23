@@ -39,7 +39,7 @@ const path = require('path');
    * is the correct outcome: a restored copy should not silently be able to
    * charge cards.
    */
-  const SECRET_SETTINGS = new Set(['STRIPE_CONFIG', 'SMTP_CONFIG']);
+  const SECRET_SETTINGS = new Set(['STRIPE_CONFIG', 'SMTP_CONFIG', 'GMAIL_API_CONFIG']);
   const REDACTED = '__REDACTED_ON_EXPORT__';
 
   const tables = {};

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
+import { GmailApiService } from './gmail-api.service';
 
 @Injectable()
 export class EmailsService {
@@ -10,6 +11,7 @@ export class EmailsService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly gmailApi: GmailApiService,
   ) {}
 
   private async getTransporter() {
@@ -146,6 +148,36 @@ export class EmailsService {
      * nobody would otherwise find out.
      */
     this.logger.debug(`Sending email to ${to} with subject "${subject}"`);
+
+    /*
+     * Gmail API takes precedence when configured. It sends over HTTPS, so it is
+     * the only path that works on a host blocking SMTP ports (Render), and it
+     * sends AS the account, so gmail.com mail is aligned rather than relayed.
+     * SMTP stays as the fallback for a domain sender through a real relay.
+     */
+    if (await this.gmailApi.configured()) {
+      try {
+        const result = await this.gmailApi.send({
+          to,
+          subject,
+          text,
+          html,
+          attachments: file
+            ? [{ filename: file.originalname, content: file.buffer }]
+            : undefined,
+        });
+        this.logger.log(
+          `Email sent via Gmail API to ${to} ("${subject}") — id ${result.id}`,
+        );
+        // Shape the nodemailer callers expect: they read `.rejected`/`.response`.
+        return { accepted: [to], rejected: [], response: `gmail-api:${result.id}` };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'unknown error';
+        this.logger.error(`Email to ${to} ("${subject}") FAILED via Gmail API — ${msg}`);
+        throw e;
+      }
+    }
+
     const { transporter, from } = await this.getTransporter();
 
     const mailOptions: nodemailer.SendMailOptions = {
@@ -235,6 +267,44 @@ export class EmailsService {
   }
 
   async sendTestEmail(to?: string) {
+    /*
+     * When Gmail API is the active path, there is no relay and no alignment
+     * question — the message is sent AS the account over HTTPS. Report its
+     * sender and never the SMTP alignment warning, which would be meaningless
+     * here.
+     */
+    const gmail = await this.gmailApi.publicConfig();
+    if (gmail.configured) {
+      const from = gmail.sender ?? '';
+      const target = to?.trim() || from;
+      try {
+        const info = await this.sendMail(
+          target,
+          'Test email from the AL FURQAN console',
+          'If you are reading this, the Gmail API delivered a message from the console.',
+        );
+        return {
+          ok: !info.rejected?.length,
+          to: target,
+          from,
+          response: info.response ?? null,
+          transport: 'gmail-api',
+          warning: null as string | null,
+        };
+      } catch (e) {
+        const err = e as { message?: string };
+        return {
+          ok: false,
+          to: target,
+          from,
+          response: null,
+          transport: 'gmail-api',
+          error: err.message ?? 'Gmail API send failed',
+          warning: null as string | null,
+        };
+      }
+    }
+
     const { from, host } = await this.getTransporter();
     const target = to?.trim() || from;
     try {
@@ -249,6 +319,7 @@ export class EmailsService {
         to: target,
         from,
         response: info.response ?? null,
+        transport: 'smtp',
         warning: EmailsService.alignmentWarning(domain, host),
       };
     } catch (e) {
@@ -258,6 +329,7 @@ export class EmailsService {
         to: target,
         from,
         response: null,
+        transport: 'smtp',
         error: `${err.code ?? 'error'}: ${err.message ?? 'unknown'}`,
         warning: null,
       };

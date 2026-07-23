@@ -10,18 +10,22 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmailsService } from './emails.service';
+import { GmailApiService } from './gmail-api.service';
 import { ApiBearerAuth, ApiConsumes, ApiBody, ApiTags, ApiOperation } from '@nestjs/swagger';
 
 import { Roles } from '../auth/decorators';
 import { Role } from '../generated/prisma/enums';
-import { SmtpConfigDto } from './dto';
+import { SmtpConfigDto, GmailApiConfigDto } from './dto';
 
 @ApiTags('emails')
 @ApiBearerAuth()
 @Controller('emails')
 @Roles(Role.ADMIN)
 export class EmailsController {
-  constructor(private readonly emailsService: EmailsService) {}
+  constructor(
+    private readonly emailsService: EmailsService,
+    private readonly gmailApi: GmailApiService,
+  ) {}
 
   @Post('send')
   @UseInterceptors(FileInterceptor('attachment'))
@@ -76,5 +80,40 @@ export class EmailsController {
   @ApiOperation({ summary: 'Send a test email and report the relay response' })
   async sendTestEmail(@Body('to') to?: string) {
     return this.emailsService.sendTestEmail(to);
+  }
+
+  /*
+   * Gmail API — the transport for sending as gmail.com from a host that blocks
+   * SMTP ports. Credentials are write-only: reads say whether each is set,
+   * never its value, and a blank field on save keeps the stored one. When
+   * configured, this path takes precedence over SMTP for every email the app
+   * sends.
+   */
+  @Get('gmail-api')
+  @ApiOperation({ summary: 'Gmail API configuration (secrets masked)' })
+  async getGmailApi() {
+    return this.gmailApi.publicConfig();
+  }
+
+  @Post('gmail-api')
+  @ApiOperation({ summary: 'Save Gmail API credentials. Blank fields keep the stored value.' })
+  async saveGmailApi(@Body() dto: GmailApiConfigDto) {
+    await this.gmailApi.saveConfig(dto);
+    return this.gmailApi.publicConfig();
+  }
+
+  @Post('gmail-api/disconnect')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove Gmail API credentials and fall back to SMTP' })
+  async disconnectGmailApi() {
+    await this.gmailApi.clearConfig();
+    return this.gmailApi.publicConfig();
+  }
+
+  @Post('gmail-api/test')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Ask Google whether the saved credentials work' })
+  async testGmailApi() {
+    return this.gmailApi.testConnection();
   }
 }

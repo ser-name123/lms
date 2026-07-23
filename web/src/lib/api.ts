@@ -146,6 +146,34 @@ export const fetchSmtpConfig = () =>
  * every call site, so without this the first sign of a broken relay was a
  * family saying their invoice never arrived.
  */
+// ─── Gmail API (sends as gmail.com over HTTPS — works where SMTP ports are blocked) ──
+
+export type GmailApiConfig = {
+  configured: boolean;
+  sender: string | null;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasRefreshToken: boolean;
+};
+
+export const fetchGmailApiConfig = () => api<GmailApiConfig>("/emails/gmail-api");
+
+/** Blank secrets keep the stored ones — the form never receives them to resend. */
+export const saveGmailApiConfig = (input: {
+  clientId?: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  sender?: string;
+}) => api<GmailApiConfig>("/emails/gmail-api", { method: "POST", body: JSON.stringify(input) });
+
+export const testGmailApi = () =>
+  api<{ ok: boolean; message: string; sender?: string }>("/emails/gmail-api/test", {
+    method: "POST",
+  });
+
+export const disconnectGmailApi = () =>
+  api<GmailApiConfig>("/emails/gmail-api/disconnect", { method: "POST" });
+
 export const sendTestEmail = (to?: string) =>
   api<{
     ok: boolean;
@@ -153,6 +181,8 @@ export const sendTestEmail = (to?: string) =>
     from: string;
     response: string | null;
     error?: string;
+    /** "gmail-api" or "smtp" — which path actually sent. */
+    transport?: string;
     /** Set when the sender domain cannot authorise this relay — the usual
      *  reason mail is accepted here and still lands in spam. */
     warning: string | null;

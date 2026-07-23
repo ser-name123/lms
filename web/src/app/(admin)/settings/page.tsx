@@ -24,6 +24,7 @@ import { useSettingsStore } from "@/store/settings";
 import { ImageCropperModal } from "@/components/image-cropper";
 import { ZoomIntegrationCard } from "@/components/admin/zoom-integration";
 import { StripeIntegrationCard } from "@/components/admin/stripe-integration";
+import { GmailApiCard } from "@/components/admin/gmail-api-integration";
 
 type Tab = "brand" | "theme" | "typography" | "scripts" | "smtp" | "zoom" | "stripe" | "loader";
 
@@ -1328,6 +1329,11 @@ export default function SettingsPage() {
 
                 {activeTab === "smtp" && (
                   <div className="space-y-6 animate-fade-in">
+                    {/* Gmail API — preferred on live, where SMTP ports are blocked. */}
+                    <div className="border border-hairline/80 rounded-3xl bg-surface p-6 shadow-sm">
+                      <GmailApiCard />
+                    </div>
+
                     {/* SMTP Connection Card */}
                     <div className="border border-hairline/80 rounded-3xl bg-surface shadow-sm overflow-hidden">
                       <div className="border-b border-hairline px-6 py-5 flex items-center justify-between">
