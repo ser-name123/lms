@@ -19,7 +19,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { fetchTeacherClasses } from "@/lib/api";
+import { fetchTeacherClasses, fetchMyTrials } from "@/lib/api";
 
 export default function TeacherClasses() {
   const [classes, setClasses] = useState<any[]>([]);
@@ -29,12 +29,32 @@ export default function TeacherClasses() {
   const [courseFilter, setCourseFilter] = useState<string>("ALL");
 
   useEffect(() => {
-    fetchTeacherClasses()
-      .then((res) => {
-        setClasses(res);
+    Promise.all([
+      fetchTeacherClasses().catch(() => []),
+      fetchMyTrials("all").catch(() => []),
+    ])
+      .then(([classesRes, trialsRes]) => {
+        const mappedTrials = trialsRes.map((t) => ({
+          ...t,
+          isTrial: true,
+          courseCode: "TRIAL",
+          topic: `${t.lead ? `${t.lead.studentFirstName} ${t.lead.studentLastName}` : "Student"} (Trial)`,
+          timeStart: t.scheduledAt,
+          timeEnd: new Date(new Date(t.scheduledAt).getTime() + (t.durationMins || 30) * 60 * 1000).toISOString(),
+          status: t.status,
+          meetingUrl: t.meetingLink,
+          agenda: t.lead?.interestedSubject ? `Interested in: ${t.lead.interestedSubject}` : undefined,
+        }));
+
+        const merged = [
+          ...classesRes.map((c) => ({ ...c, isTrial: false })),
+          ...mappedTrials,
+        ].sort((a, b) => new Date(b.timeStart).getTime() - new Date(a.timeStart).getTime());
+
+        setClasses(merged);
       })
       .catch((err) => {
-        console.error("Failed to fetch classes logs", err);
+        console.error("Failed to load classes or trials", err);
       })
       .finally(() => {
         setLoading(false);
