@@ -1694,6 +1694,7 @@ const isoDay = (offsetDays) =>
         if (n >= 2) break;
         await new Promise((r) => setTimeout(r, 300));
       }
+      await new Promise((r) => setTimeout(r, 2000));
 
       const gone = await req('DELETE', `/leads/${editable.body.id}`, adminToken);
       check('an admin can delete a trial request', gone.ok, `status ${gone.status}`);
