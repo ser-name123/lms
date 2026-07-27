@@ -1691,7 +1691,7 @@ const isoDay = (offsetDays) =>
             ])
           ).rows[0].count,
         );
-        if (n > 0) break;
+        if (n >= 2) break;
         await new Promise((r) => setTimeout(r, 300));
       }
 

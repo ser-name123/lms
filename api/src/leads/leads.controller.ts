@@ -65,8 +65,11 @@ export class LeadsController {
   @ApiOperation({
     summary: 'Public: bookable 30-minute slots for one date, merged across teachers',
   })
-  availability(@Query('date') date: string) {
-    return this.availabilityService.slotsFor(date);
+  availability(
+    @Query('date') date: string,
+    @Query('gender') gender?: string,
+  ) {
+    return this.availabilityService.slotsFor(date, { gender });
   }
 
   @Get('teacher-availability')

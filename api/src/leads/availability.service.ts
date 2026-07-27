@@ -126,49 +126,144 @@ export class LeadAvailabilityService {
     return [...new Set(out)].sort();
   }
 
-  private readWindows(availability: unknown, weekday: string): Window[] {
-    if (!availability || typeof availability !== 'object') return [];
-    const day = (availability as Record<string, unknown>)[weekday];
-    if (!Array.isArray(day)) return [];
+  private getTimezoneOffset(tz: string, date: Date): number {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+        hour12: false,
+      });
 
-    const windows: Window[] = [];
-    for (const entry of day) {
-      if (!entry || typeof entry !== 'object') continue;
-      const from = this.toMinutes((entry as Record<string, unknown>).from);
-      const to = this.toMinutes((entry as Record<string, unknown>).to);
-      // A window that ends before it starts is bad data, not an overnight
-      // shift — dropping it beats generating slots that run backwards.
-      if (from === null || to === null || to <= from) continue;
-      windows.push({ from, to });
+      const parts = formatter.formatToParts(date);
+      const getPart = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+
+      const year = getPart('year');
+      const month = getPart('month') - 1;
+      const day = getPart('day');
+      let hour = getPart('hour');
+      if (hour === 24) hour = 0;
+      const minute = getPart('minute');
+
+      const localTime = Date.UTC(year, month, day, hour, minute);
+      const utcTime = Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+        date.getUTCHours(),
+        date.getUTCMinutes(),
+      );
+
+      return (localTime - utcTime) / 60000;
+    } catch {
+      return 0;
     }
-    return windows;
+  }
+
+  private readUtcWindowsForDate(
+    availability: unknown,
+    tz: string | null,
+    targetDate: Date,
+  ): Window[] {
+    if (!availability || typeof availability !== 'object') return [];
+    const timezone = tz || 'UTC';
+
+    const targetStart = targetDate.getTime();
+    const targetEnd = targetStart + 24 * 60 * 60000;
+
+    const utcWindows: Window[] = [];
+
+    // Check yesterday, today, and tomorrow reference dates relative to targetDate
+    for (let offsetDays = -1; offsetDays <= 1; offsetDays++) {
+      const refDate = new Date(targetStart + offsetDays * 24 * 60 * 60000);
+
+      let localWeekday: string;
+      let y: number;
+      let m: number;
+      let d: number;
+
+      try {
+        const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          weekday: 'long',
+        });
+        localWeekday = weekdayFormatter.format(refDate);
+
+        const dateFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          year: 'numeric',
+          month: 'numeric',
+          day: 'numeric',
+        });
+        const parts = dateFormatter.formatToParts(refDate);
+        y = Number(parts.find((p) => p.type === 'year')?.value);
+        m = Number(parts.find((p) => p.type === 'month')?.value) - 1;
+        d = Number(parts.find((p) => p.type === 'day')?.value);
+      } catch {
+        continue;
+      }
+
+      const dayConfig = (availability as Record<string, unknown>)[localWeekday];
+      if (!Array.isArray(dayConfig)) continue;
+
+      const approxUtc = Date.UTC(y, m, d);
+      const offsetMinutes = this.getTimezoneOffset(timezone, new Date(approxUtc));
+      const localMidnightUtc = approxUtc - offsetMinutes * 60000;
+
+      for (const entry of dayConfig) {
+        if (!entry || typeof entry !== 'object') continue;
+        const fromMins = this.toMinutes((entry as Record<string, unknown>).from);
+        const toMins = this.toMinutes((entry as Record<string, unknown>).to);
+        if (fromMins === null || toMins === null || toMins <= fromMins) continue;
+
+        const startTimestamp = localMidnightUtc + fromMins * 60000;
+        const endTimestamp = localMidnightUtc + toMins * 60000;
+
+        const overlapStart = Math.max(startTimestamp, targetStart);
+        const overlapEnd = Math.min(endTimestamp, targetEnd);
+
+        if (overlapStart < overlapEnd) {
+          const fromUtc = Math.round((overlapStart - targetStart) / 60000);
+          const toUtc = Math.round((overlapEnd - targetStart) / 60000);
+          utcWindows.push({ from: fromUtc, to: toUtc });
+        }
+      }
+    }
+
+    return utcWindows;
   }
 
   /** The bookable slots for one date. */
-  async slotsFor(rawDate: string): Promise<SlotResponse> {
+  async slotsFor(
+    rawDate: string,
+    filters?: { gender?: string },
+  ): Promise<SlotResponse> {
     const date = this.parseBookableDate(rawDate);
-    const weekday = WEEKDAYS[date.getUTCDay()];
 
-    // A null blob is filtered in `readWindows` rather than in the query — the
-    // Json-null filter syntax is a common source of silent mismatches.
+    const whereClause: any = {
+      availabilityApproved: true,
+    };
+
+    if (filters?.gender && filters.gender !== 'Either') {
+      whereClause.gender = filters.gender;
+    }
+
     const teachers = await this.prisma.teacherProfile.findMany({
-      where: { availabilityApproved: true },
-      select: { availability: true },
+      where: whereClause,
+      select: { availability: true, timeZone: true },
     });
 
-    const windows = teachers.flatMap((t) => this.readWindows(t.availability, weekday));
+    const windows = teachers.flatMap((t) =>
+      this.readUtcWindowsForDate(t.availability, t.timeZone, date),
+    );
     const merged = this.merge(windows);
 
-    let slots = this.toSlots(merged);
-    const fallback = slots.length === 0;
-    if (fallback) {
-      slots = this.toSlots([
-        {
-          from: this.toMinutes(FALLBACK_WINDOW.from)!,
-          to: this.toMinutes(FALLBACK_WINDOW.to)!,
-        },
-      ]);
-    }
+    const slots = this.toSlots(merged);
+    const fallback = false;
 
     const taken = await this.takenSlots(date);
     return {
@@ -190,7 +285,6 @@ export class LeadAvailabilityService {
    */
   async teacherAvailabilityFor(rawDate: string) {
     const date = this.parseBookableDate(rawDate);
-    const weekday = WEEKDAYS[date.getUTCDay()];
     const dayEnd = new Date(date.getTime() + 86_400_000);
 
     const [teachers, booked] = await Promise.all([
@@ -201,6 +295,7 @@ export class LeadAvailabilityService {
           availability: true,
           subjects: true,
           gender: true,
+          timeZone: true,
           user: { select: { firstName: true, lastName: true } },
         },
       }),
@@ -235,7 +330,9 @@ export class LeadAvailabilityService {
       timeZone: 'UTC',
       teachers: teachers
         .map((t) => {
-          const slots = this.toSlots(this.merge(this.readWindows(t.availability, weekday)));
+          const slots = this.toSlots(
+            this.merge(this.readUtcWindowsForDate(t.availability, t.timeZone, date)),
+          );
           const taken = busy.get(t.id) ?? new Set<string>();
           return {
             teacherId: t.id,

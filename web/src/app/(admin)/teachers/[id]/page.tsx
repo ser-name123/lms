@@ -25,6 +25,8 @@ import {
   type TeacherScheduleData, type TeacherAnalytics, type TeacherDocuments,
   type TeacherAvailability, type AppNotification, type TeacherBatches,
 } from "@/lib/api";
+import { COUNTRIES } from "@/lib/countries";
+import { COUNTRY_TIMEZONES } from "@/components/admin/teachers-workspace";
 
 const swalBg = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -163,8 +165,38 @@ function ProfileTab({ t, onSaved }: { t: TeacherManagement; onSaved: () => void 
         {F("WhatsApp", "whatsapp")}
         {F("Gender", "gender")}
         {F("Date of Birth", "dateOfBirth", "date")}
-        {F("Nationality", "nationality")}
-        {F("Time Zone", "timeZone")}
+        <div>
+          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Nationality</label>
+          <select
+            value={f.nationality}
+            onChange={(e) => {
+              const val = e.target.value;
+              const nextF = { ...f, nationality: val };
+              if (COUNTRY_TIMEZONES[val]) {
+                nextF.timeZone = COUNTRY_TIMEZONES[val];
+              }
+              setF(nextF);
+            }}
+            className={inp}
+          >
+            <option value="">Select Country</option>
+            {COUNTRIES.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Time Zone</label>
+          <input
+            type="text"
+            value={f.timeZone}
+            onChange={(e) => setF({ ...f, timeZone: e.target.value })}
+            placeholder="e.g. Africa/Cairo"
+            className={inp}
+          />
+        </div>
         {F("Qualification", "qualification")}
         {F("Experience (years)", "experienceYears")}
         {F("Languages (comma-sep)", "languages")}

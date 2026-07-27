@@ -104,7 +104,7 @@ const statusTone: Record<string, Tone> = {
   SUSPENDED: "critical"
 };
 
-const COUNTRY_TIMEZONES: Record<string, string> = {
+export const COUNTRY_TIMEZONES: Record<string, string> = {
   "Afghanistan": "Asia/Kabul",
   "Albania": "Europe/Tirane",
   "Algeria": "Africa/Algiers",

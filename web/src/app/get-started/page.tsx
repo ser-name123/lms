@@ -44,7 +44,13 @@ const LEARN_OPTIONS = ["Quran", "Arabic Language", "Islamic Studies"];
 const SESSION_FOR = [
   { value: "MYSELF", label: "Myself" },
   { value: "FAMILY_MEMBER", label: "A Family Member" },
-  { value: "SIBLING", label: "A Sibling" },
+];
+const STUDENT_COUNT_OPTIONS = [
+  { value: "1", label: "1" },
+  { value: "2", label: "2" },
+  { value: "3", label: "3" },
+  { value: "4", label: "4" },
+  { value: "5", label: "5" },
 ];
 const TEACHER_PREFERENCE = ["Male", "Female", "Either"];
 const HOW_FOUND = [
@@ -57,10 +63,20 @@ const HOW_FOUND = [
 
 /** Booking opens tomorrow and closes 30 days out — mirrored server-side. */
 function bookingWindow() {
-  const day = 86_400_000;
-  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
-  const todayUtc = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
-  return { min: iso(todayUtc + day), max: iso(todayUtc + 30 * day) };
+  const dayMs = 86_400_000;
+  const now = new Date();
+  const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayTime = todayLocal.getTime();
+
+  const iso = (t: number) => {
+    const d = new Date(t);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const r = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${r}`;
+  };
+
+  return { min: iso(todayTime + dayMs), max: iso(todayTime + 30 * dayMs) };
 }
 
 function detectTracking(): Record<string, string> {
@@ -102,9 +118,26 @@ export default function GetStartedPage() {
   const [country, setCountry] = useState("");
   const [learn, setLearn] = useState("");
   const [sessionFor, setSessionFor] = useState("MYSELF");
+  const [studentCount, setStudentCount] = useState(1);
   const [teacherPref, setTeacherPref] = useState("Either");
   const [howFound, setHowFound] = useState("");
   const [siblings, setSiblings] = useState<Sibling[]>([]);
+
+  const handleStudentCountChange = (countStr: string) => {
+    const count = parseInt(countStr, 10);
+    setStudentCount(count);
+    setSiblings((prev) => {
+      const next = [...prev];
+      if (next.length < count) {
+        while (next.length < count) {
+          next.push({ firstName: "", lastName: "" });
+        }
+      } else if (next.length > count) {
+        next.splice(count);
+      }
+      return next;
+    });
+  };
 
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState("");
@@ -130,13 +163,13 @@ export default function GetStartedPage() {
     }
   }, []);
 
-  const loadSlots = useCallback(async (forDate: string) => {
+  const loadSlots = useCallback(async (forDate: string, gender?: string) => {
     setSlotsLoading(true);
     setSlots(null);
     setSlot("");
     setSlotNote("");
     try {
-      const res = await fetchTrialSlots(forDate);
+      const res = await fetchTrialSlots(forDate, gender);
       setSlots(res.slots);
       if (!res.slots.length) {
         setSlotNote("Every slot on this date is taken. Please try another day.");
@@ -156,8 +189,8 @@ export default function GetStartedPage() {
   }, []);
 
   useEffect(() => {
-    if (date) void loadSlots(date);
-  }, [date, loadSlots]);
+    if (date) void loadSlots(date, teacherPref);
+  }, [date, teacherPref, loadSlots]);
 
   const addSibling = () => setSiblings((s) => [...s, { firstName: "", lastName: "" }]);
   const removeSibling = (i: number) => setSiblings((s) => s.filter((_, idx) => idx !== i));
@@ -167,31 +200,42 @@ export default function GetStartedPage() {
   const submit = async () => {
     setError("");
 
-    if (!firstName.trim() || !lastName.trim()) return setError("Please enter the student's name.");
+    if (!firstName.trim() || !lastName.trim()) return setError("Please enter your name.");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()))
       return setError("Please enter a valid email address.");
     if (mobile.replace(/\D/g, "").length < 6) return setError("Please enter a valid phone number.");
     if (!date) return setError("Please choose a date for your trial class.");
     if (!slot) return setError("Please choose a time slot.");
 
-    if ((sessionFor === "FAMILY_MEMBER" || sessionFor === "SIBLING") && siblings.length === 0) {
-      return setError(sessionFor === "SIBLING" ? "Please add at least one sibling." : "Please add at least one family member.");
+    if (sessionFor === "FAMILY_MEMBER") {
+      for (let i = 0; i < siblings.length; i++) {
+        if (!siblings[i].firstName.trim()) {
+          return setError(`Please enter the first name for Student ${i + 1}.`);
+        }
+        if (!siblings[i].lastName.trim()) {
+          return setError(`Please enter the last name for Student ${i + 1}.`);
+        }
+      }
     }
 
-    const named = siblings.filter((s) => s.firstName.trim());
-    if (siblings.length !== named.length) {
-      return setError(
-        sessionFor === "SIBLING"
-          ? "Please enter a first name for each sibling, or remove the blank row."
-          : "Please enter a first name for each family member, or remove the blank row."
-      );
+    let payloadStudentFirstName = firstName;
+    let payloadStudentLastName = lastName;
+    let payloadParentName = "";
+    let payloadSiblings = siblings;
+
+    if (sessionFor === "FAMILY_MEMBER") {
+      payloadStudentFirstName = siblings[0].firstName;
+      payloadStudentLastName = siblings[0].lastName;
+      payloadParentName = `${firstName} ${lastName}`.trim();
+      payloadSiblings = siblings.slice(1);
     }
 
     setBusy(true);
     try {
       const result = await createLead({
-        studentFirstName: firstName.trim(),
-        studentLastName: lastName.trim(),
+        studentFirstName: payloadStudentFirstName.trim(),
+        studentLastName: payloadStudentLastName.trim(),
+        parentName: payloadParentName || undefined,
         email: email.trim(),
         mobile: mobile.trim(),
         countryCode: dialCode || undefined,
@@ -203,7 +247,7 @@ export default function GetStartedPage() {
         howFound: howFound || undefined,
         preferredDate: date,
         preferredSlot: slot,
-        siblings: named.map((s) => ({
+        siblings: payloadSiblings.map((s) => ({
           firstName: s.firstName.trim(),
           lastName: s.lastName.trim() || undefined,
         })),
@@ -354,13 +398,41 @@ export default function GetStartedPage() {
               value={sessionFor}
               onChange={(val) => {
                 setSessionFor(val);
-                if ((val === "FAMILY_MEMBER" || val === "SIBLING") && siblings.length === 0) {
-                  setSiblings([{ firstName: "", lastName: "" }]);
-                } else if (val === "MYSELF") {
+                if (val === "MYSELF") {
+                  setStudentCount(1);
                   setSiblings([]);
+                } else if (val === "FAMILY_MEMBER") {
+                  setStudentCount(1);
+                  setSiblings([{ firstName: "", lastName: "" }]);
                 }
               }}
             />
+            {sessionFor === "FAMILY_MEMBER" && (
+              <>
+                <ChoiceRow
+                  label="How Many Students will Join"
+                  options={STUDENT_COUNT_OPTIONS}
+                  value={String(studentCount)}
+                  onChange={handleStudentCountChange}
+                />
+                {siblings.map((s, i) => (
+                  <div key={i} className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                    <Field
+                      label={`Student ${i + 1} First Name`}
+                      required
+                      value={s.firstName}
+                      onChange={(val) => setSibling(i, "firstName", val)}
+                    />
+                    <Field
+                      label={`Student ${i + 1} Last Name`}
+                      required
+                      value={s.lastName}
+                      onChange={(val) => setSibling(i, "lastName", val)}
+                    />
+                  </div>
+                ))}
+              </>
+            )}
             <ChoiceRow
               label="Preferred Teacher"
               options={TEACHER_PREFERENCE.map((o) => ({ value: o, label: o }))}
@@ -374,65 +446,6 @@ export default function GetStartedPage() {
               onChange={setHowFound}
             />
           </Section>
-
-          {sessionFor !== "MYSELF" && (
-            <Section
-              icon={UserPlus}
-              title={
-                sessionFor === "FAMILY_MEMBER" ? (
-                  <span>
-                    Family members <span className="text-red-500">*</span>
-                  </span>
-                ) : (
-                  <span>
-                    Siblings <span className="text-red-500">*</span>
-                  </span>
-                )
-              }
-            >
-              <div className="sm:col-span-2">
-                <p className="mb-3 text-xs text-ink-3">
-                  {sessionFor === "FAMILY_MEMBER"
-                    ? "Please add the details of the family member(s) who will attend the trial class."
-                    : "Please add the details of the sibling(s) who will attend the trial class."}
-                </p>
-
-                {siblings.map((s, i) => (
-                  <div key={i} className="mb-2 flex gap-2">
-                    <input
-                      value={s.firstName}
-                      onChange={(e) => setSibling(i, "firstName", e.target.value)}
-                      placeholder={sessionFor === "SIBLING" ? "Sibling's first name" : "First name"}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
-                    />
-                    <input
-                      value={s.lastName}
-                      onChange={(e) => setSibling(i, "lastName", e.target.value)}
-                      placeholder={sessionFor === "SIBLING" ? "Sibling's last name" : "Last name"}
-                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSibling(i)}
-                      aria-label={sessionFor === "SIBLING" ? `Remove sibling ${i + 1}` : `Remove family member ${i + 1}`}
-                      className="grid size-11 shrink-0 place-items-center rounded-xl border border-hairline text-ink-3 hover:border-red-500/40 hover:text-red-500"
-                    >
-                      <X className="size-4" />
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={addSibling}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-dashed border-hairline px-3 text-xs font-bold text-ink-2 hover:border-accent/50 hover:text-accent"
-                >
-                  <Plus className="size-3.5" />
-                  {sessionFor === "SIBLING" ? "Add a sibling" : "Add a family member"}
-                </button>
-              </div>
-            </Section>
-          )}
 
           <Section icon={CalendarDays} title="Pick your trial date & time">
             <div className="sm:col-span-2">
@@ -451,9 +464,6 @@ export default function GetStartedPage() {
                 onChange={(e) => setDate(e.target.value)}
                 className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
               />
-              <p className="mt-1.5 text-[11px] text-ink-3">
-                Trials start from tomorrow and can be booked up to 30 days ahead.
-              </p>
             </div>
 
             <div className="sm:col-span-2">
@@ -475,6 +485,14 @@ export default function GetStartedPage() {
                     <div className="flex flex-wrap gap-2">
                       {slots.map((s) => {
                         const on = slot === s;
+                        const localTime = (() => {
+                          try {
+                            const d = new Date(`${date}T${s}:00Z`);
+                            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+                          } catch {
+                            return s;
+                          }
+                        })();
                         return (
                           <button
                             key={s}
@@ -487,7 +505,7 @@ export default function GetStartedPage() {
                             }`}
                           >
                             {on && <Check className="size-3.5" />}
-                            {s}
+                            {localTime}
                           </button>
                         );
                       })}
@@ -496,7 +514,7 @@ export default function GetStartedPage() {
                   {slotNote && <p className="mt-2 text-[11px] font-semibold text-ink-3">{slotNote}</p>}
                   {timeZone && slots && slots.length > 0 && (
                     <p className="mt-2 text-[11px] text-ink-3">
-                      Times are shown in UTC. Your device is set to {timeZone}.
+                      Times are shown in your local timezone ({timeZone}).
                     </p>
                   )}
                 </>

@@ -2132,8 +2132,11 @@ export type TrialBooking = {
 };
 
 /** Bookable 30-minute slots for one date, merged across all teachers. */
-export const fetchTrialSlots = (date: string) =>
-  api<TrialSlots>(`/leads/availability?date=${encodeURIComponent(date)}`);
+export const fetchTrialSlots = (date: string, gender?: string) => {
+  let url = `/leads/availability?date=${encodeURIComponent(date)}`;
+  if (gender) url += `&gender=${encodeURIComponent(gender)}`;
+  return api<TrialSlots>(url);
+};
 
 export type TrialDayAvailability = {
   date: string;

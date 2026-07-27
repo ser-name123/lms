@@ -94,7 +94,9 @@ export class LeadsService implements OnModuleInit {
     if (!/^\d{2}:\d{2}$/.test(slot)) {
       throw new BadRequestException('Please choose a time slot');
     }
-    const offered = await this.availability.slotsFor(dto.preferredDate!);
+    const offered = await this.availability.slotsFor(dto.preferredDate!, {
+      gender: dto.preferredTeacherGender,
+    });
     if (!offered.slots.includes(slot)) {
       throw new BadRequestException(
         'That slot has just been taken. Please pick another one.',
@@ -120,6 +122,7 @@ export class LeadsService implements OnModuleInit {
         leadNumber,
         studentFirstName: dto.studentFirstName.trim(),
         studentLastName: dto.studentLastName.trim(),
+        parentName: dto.parentName?.trim() || null,
         country: dto.country || null,
         timeZone: dto.timeZone || null,
         email,
@@ -2046,7 +2049,7 @@ export class LeadsService implements OnModuleInit {
          */
         const siblingRecCourseId = i === 0
           ? report?.recommendedCourseId
-          : (siblings[i - 1]?.recommendedCourseId || null);
+          : (siblings[i - 1]?.recommendedCourseId || report?.recommendedCourseId || null);
 
         if (!courseCode && siblingRecCourseId) {
           const exists = await tx.course.findUnique({

@@ -88,6 +88,11 @@ export class CreateLeadDto {
   @IsNotEmpty()
   preferredSlot!: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  parentName?: string;
+
   @ApiPropertyOptional({ type: [SiblingDto], description: 'Extra children on the same slot' })
   @IsOptional()
   @IsArray()
