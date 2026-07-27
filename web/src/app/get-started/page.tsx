@@ -39,6 +39,7 @@ import {
 
 import { ApiError, createLead, fetchTrialSlots, type TrialBooking } from "@/lib/api";
 import { COUNTRIES, detectCountry, detectTimeZone } from "@/lib/countries";
+import { COUNTRY_TIMEZONES } from "@/components/admin/teachers-workspace";
 
 const LEARN_OPTIONS = ["Quran", "Arabic Language", "Islamic Studies"];
 const SESSION_FOR = [
@@ -371,7 +372,12 @@ export default function GetStartedPage() {
                   const match = COUNTRIES.find((c) => c.name === e.target.value);
                   // Changing country moves the dial code with it — leaving a
                   // mismatched pair behind is worse than overwriting.
-                  if (match) setDialCode(match.dial);
+                  if (match) {
+                    setDialCode(match.dial);
+                    if (COUNTRY_TIMEZONES[match.name]) {
+                      setTimeZone(COUNTRY_TIMEZONES[match.name]);
+                    }
+                  }
                 }}
                 className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
               >
@@ -488,7 +494,7 @@ export default function GetStartedPage() {
                         const localTime = (() => {
                           try {
                             const d = new Date(`${date}T${s}:00Z`);
-                            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+                            return d.toLocaleTimeString([], { timeZone: timeZone || undefined, hour: "2-digit", minute: "2-digit", hour12: false });
                           } catch {
                             return s;
                           }
