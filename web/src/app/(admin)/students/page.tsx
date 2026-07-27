@@ -1167,19 +1167,15 @@ export default function StudentsPage() {
                         className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
                       />
                     </th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student ID</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Parent</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Date of Joining</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Preferred Days</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Preferred Time</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Name</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Teacher Name</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Batch</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course Name</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Contact</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Course</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Package</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Class Type</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Scheduled Classes</th>
-                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Attendance</th>
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Student Level</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3">Status</th>
                     <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-ink-3 text-right">Actions</th>
                   </tr>
@@ -1192,8 +1188,9 @@ export default function StudentsPage() {
                     const teacherName = firstEnrollment?.teacher
                       ? `${firstEnrollment.teacher.user.firstName} ${firstEnrollment.teacher.user.lastName}`
                       : "Not Assigned";
-                    const packageName = firstEnrollment?.package?.name || "—";
+                    const packageName = firstEnrollment?.package?.name || row.preferredPackageName || "—";
                     const classesCount = firstEnrollment?.package?.classesPerMonth ?? null;
+                    const preferredDaysCount = row.preferredDays?.length || (classesCount ? Math.round(classesCount / 4) : 0);
                     const statusText = row.user.status;
                     const isSelected = selectedIds.includes(row.id);
 
@@ -1213,6 +1210,14 @@ export default function StudentsPage() {
                             className="rounded border-hairline text-accent size-4 cursor-pointer focus:ring-0"
                           />
                         </td>
+
+                        {/* 1. Student ID */}
+                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-3">{row.studentCode}</td>
+
+                        {/* 2. Date of Joining */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{formatDateLabel(row.joiningDate)}</td>
+
+                        {/* 3. Student Name */}
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-gradient-to-tr from-accent via-[#386FA4] to-[#59A5D8] text-[11px] font-bold text-white shadow-sm shadow-accent/10">
@@ -1232,66 +1237,59 @@ export default function StudentsPage() {
                           </div>
                         </td>
 
-                        {/* Student ID */}
-                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-3">{row.studentCode}</td>
+                        {/* 4. Teacher Name */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{teacherName}</td>
 
-                        {/* Parent */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.parentName || row.guardianName || "—"}</td>
+                        {/* 5. Course */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{courseName}</td>
 
-                        {/* Package */}
+                        {/* 6. Package */}
                         <td className="px-4 py-3 text-xs text-ink font-semibold">
                           <span className="px-2.5 py-1 bg-accent/5 border border-accent/10 rounded-xl text-accent font-black">
                             {packageName}
                           </span>
                         </td>
 
-                        {/* Joining date */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{formatDateLabel(row.joiningDate)}</td>
+                        {/* 7. Class Type */}
+                        <td className="px-4 py-3 text-xs">
+                          <span className={`font-extrabold text-[9px] px-2.5 py-1 rounded-lg ${
+                            row.user.status === "TRIAL"
+                              ? "bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                              : "bg-accent-soft/20 text-accent"
+                          }`}>
+                            {row.user.status === "TRIAL" ? "TRIAL" : "REGULAR"}
+                          </span>
+                        </td>
 
-                        {/* Preferred Days */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">
-                          {row.preferredDays?.length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {row.preferredDays.map((d) => (
-                                <span key={d} className="px-1.5 py-0.5 bg-surface-3 border border-hairline rounded text-[10px] font-bold text-ink-2 uppercase">
-                                  {d.slice(0, 3)}
-                                </span>
-                              ))}
+                        {/* 8. Scheduled Classes */}
+                        <td className="px-4 py-3 text-xs">
+                          <div className="font-bold text-ink">
+                            {preferredDaysCount ? `${preferredDaysCount} Classes/Week` : "—"}
+                          </div>
+                          {(row.preferredDays?.length ?? 0) > 0 && (
+                            <div className="text-[10px] text-ink-3 mt-0.5 font-medium">
+                              {row.preferredDays?.join(", ")}
                             </div>
-                          ) : (
-                            "—"
                           )}
                         </td>
 
-                        {/* Preferred Time */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-semibold text-accent animate-pulse-subtle">
-                          {row.preferredTime || "—"}
+                        {/* 9. Student Level */}
+                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">
+                          {row.learningLevel || "—"}
                         </td>
 
-                        {/* Teacher Name */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{teacherName}</td>
-
-                        {/* Batch */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.batchCode || "—"}</td>
-
-                        {/* Course Name */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{courseName}</td>
-
-                        {/* Mobile Phone Number */}
-                        <td className="px-4 py-3 text-xs text-ink-2 font-medium">{row.phone || "—"}</td>
-
-                        {/* Scheduled Classes */}
-                        <td className="tnum px-4 py-3 text-xs font-bold text-ink">{classesCount != null ? `${classesCount} Classes` : "—"}</td>
-
-                        {/* Attendance */}
-                        <td className="tnum px-4 py-3 text-xs font-bold text-ink-2">{row.attendanceRate != null ? `${row.attendanceRate}%` : "—"}</td>
-
-                        {/* Account Status */}
-                        <td className="px-4 py-3">
-                          <Badge tone={statusTone[statusText] || "neutral"}>{statusText}</Badge>
+                        {/* 9b. Payment status — an unpaid invoice shows "Invoice Sent", otherwise "Active". */}
+                        <td className="px-4 py-3 text-xs">
+                          <span className={`font-extrabold text-[9px] px-2.5 py-1 rounded-lg ${
+                            row.invoicePending
+                              ? "bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                              : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                          }`}>
+                            {row.invoicePending ? "INVOICE SENT" : "ACTIVE"}
+                          </span>
                         </td>
 
-                        {/* Actions Dropdown Menu */}
+                        {/* 10. Actions Dropdown Menu */}
                         <td className="px-4 py-3 text-right">
                           <div className="relative inline-block text-left">
                             <button
@@ -1393,7 +1391,7 @@ export default function StudentsPage() {
 
                   {students.length === 0 && (
                     <tr>
-                      <td colSpan={13} className="px-5 py-16 text-center">
+                      <td colSpan={14} className="px-5 py-16 text-center">
                         <p className="text-sm font-semibold text-ink">No students found</p>
                         <p className="mt-1 text-xs text-ink-3">
                           Try a different search term or clear the filters.

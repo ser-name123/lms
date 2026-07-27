@@ -303,6 +303,12 @@ export type StudentProfile = {
   attendanceRate?: number | null;
   preferredDays?: string[] | null;
   preferredTime?: string | null;
+  preferredPackageName?: string | null;
+  scheduledClassesCount?: number | null;
+  learningLevel?: string | null;
+  // True when the student holds an issued-but-unpaid invoice (SENT/PENDING/
+  // PARTIALLY_PAID/OVERDUE). Drives the "Invoice Sent" vs "Active" status badge.
+  invoicePending?: boolean;
 };
 
 export const fetchStudents = (params: {
@@ -2513,7 +2519,15 @@ export const submitTrialInfoForm = (
 
 export const leadCoachDecision = (
   id: string,
-  dto: { decision: "ENROLL" | "REJECT" | "FOLLOW_UP"; notes?: string; courseCode?: string },
+  dto: {
+    decision: "ENROLL" | "REJECT" | "FOLLOW_UP";
+    notes?: string;
+    courseCode?: string;
+    packageId?: string;
+    followUpAt?: string;
+    preferredStartDate?: string;
+    preferredTime?: string;
+  },
 ) => api<Lead>(`/leads/${id}/decision`, { method: "POST", body: JSON.stringify(dto) });
 
 export const fetchLeadFunnel = () => api<LeadFunnel>("/leads/funnel");

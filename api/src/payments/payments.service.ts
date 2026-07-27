@@ -120,6 +120,7 @@ export class PaymentsService {
       currency: invoice.currency.toLowerCase(),
       customer: customerId ?? undefined,
       automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
       /*
        * The webhook arrives with nothing but the intent, so the invoice id has
        * to travel on it. Without this the only way back to the invoice would be

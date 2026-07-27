@@ -635,7 +635,7 @@ function TrialTab({ lead, teachers, onChange }: { lead: Lead; teachers: { id: st
           </CardBody>
         </Card>
       ) : (
-        trials.map((t) => <TrialCard key={t.id} trial={t} teachers={teachers} onChange={refresh} />)
+        trials.map((t) => <TrialCard key={t.id} trial={t} teachers={teachers} recommendedTeacherId={lead.recommendedTeacherId} onChange={refresh} />)
       )}
     </div>
   );
@@ -876,7 +876,17 @@ function ScheduleTrialForm({ lead, teachers, onCancel, onScheduled }: {
   );
 }
 
-function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
+function TrialCard({
+  trial,
+  teachers,
+  recommendedTeacherId,
+  onChange,
+}: {
+  trial: LeadTrial;
+  teachers: { id: string; name: string }[];
+  recommendedTeacherId?: string | null;
+  onChange: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   /*
@@ -939,7 +949,7 @@ function TrialCard({ trial, teachers, onChange }: { trial: LeadTrial; teachers: 
           />
         )}
 
-        <AssignTeacherRow trial={trial} teachers={teachers} onChange={onChange} />
+        <AssignTeacherRow trial={trial} teachers={teachers} recommendedTeacherId={recommendedTeacherId} onChange={onChange} />
 
         <MissingInfoRow trial={trial} onChange={onChange} />
 
@@ -1107,12 +1117,28 @@ function useFreeTeachers(whenIso: string, durationMins: number) {
   }, [avail, whenIso, durationMins]);
 }
 
-function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; teachers: { id: string; name: string }[]; onChange: () => void }) {
+function AssignTeacherRow({
+  trial,
+  teachers,
+  recommendedTeacherId,
+  onChange,
+}: {
+  trial: LeadTrial;
+  teachers: { id: string; name: string }[];
+  recommendedTeacherId?: string | null;
+  onChange: () => void;
+}) {
   const [teacherId, setTeacherId] = useState("");
   const [busy, setBusy] = useState(false);
 
   const open = !trial.teacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
   const free = useFreeTeachers(trial.scheduledAt, trial.durationMins);
+
+  useEffect(() => {
+    if (recommendedTeacherId) {
+      setTeacherId(recommendedTeacherId);
+    }
+  }, [recommendedTeacherId]);
 
   if (!open) return null;
 
@@ -1123,8 +1149,35 @@ function AssignTeacherRow({ trial, teachers, onChange }: { trial: LeadTrial; tea
    * exists to close.
    */
   const options = free.length
-    ? free.map((t) => ({ id: t.teacherId, label: t.name, free: true }))
-    : teachers.map((t) => ({ id: t.id, label: t.name, free: false }));
+    ? free.map((t) => {
+        const isRec = t.teacherId === recommendedTeacherId;
+        return {
+          id: t.teacherId,
+          label: isRec ? `${t.name} (Recommended)` : t.name,
+          free: true,
+        };
+      })
+    : teachers.map((t) => {
+        const isRec = t.id === recommendedTeacherId;
+        return {
+          id: t.id,
+          label: isRec ? `${t.name} (Recommended)` : t.name,
+          free: false,
+        };
+      });
+
+  // If there are free teachers and the recommended teacher is not free,
+  // we still inject the recommended teacher in options so it can be selected/rendered.
+  if (free.length && recommendedTeacherId && !options.some((o) => o.id === recommendedTeacherId)) {
+    const recTeacher = teachers.find((t) => t.id === recommendedTeacherId);
+    if (recTeacher) {
+      options.push({
+        id: recTeacher.id,
+        label: `${recTeacher.name} (Recommended)`,
+        free: false,
+      });
+    }
+  }
 
   const assign = async () => {
     if (!teacherId) return;
@@ -1335,6 +1388,10 @@ function FeedbackBlock({ trial, side, onChange }: { trial: LeadTrial; side: "tea
 
 // ── Coach decision + conversion (Steps 13–14) ─────────────────────────────────
 function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
+  const [decision, setDecision] = useState<"ENROLL" | "FOLLOW_UP" | "REJECT">("ENROLL");
+  const [followUpAt, setFollowUpAt] = useState("");
+  const [enrollDate, setEnrollDate] = useState(new Date().toISOString().slice(0, 10));
+  const [enrollTime, setEnrollTime] = useState("");
   const [notes, setNotes] = useState(lead.coachDecisionNotes || "");
   const [busy, setBusy] = useState(false);
   const converted = !!lead.convertedStudentId;
@@ -1373,11 +1430,31 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
       } else {
         setFamilyPackageName(null);
       }
+
+      // Initialize enrollDate & enrollTime from the latest trial report details
+      const latestTrial = trialsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      if (latestTrial) {
+        if (latestTrial.preferredStartDate) {
+          setEnrollDate(new Date(latestTrial.preferredStartDate).toISOString().slice(0, 10));
+        }
+        if (latestTrial.preferredTime) {
+          setEnrollTime(latestTrial.preferredTime);
+        }
+      }
     }).catch(() => undefined);
   }, [lead.id, converted]);
 
-  const decide = async (decision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
-    if (decision === "ENROLL") {
+  const decide = async (selectedDecision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
+    if ((selectedDecision === "REJECT" || selectedDecision === "FOLLOW_UP") && !notes.trim()) {
+      Swal.fire({ title: "Required", text: "Notes are compulsory for this decision.", icon: "warning", background: swalBg() });
+      return;
+    }
+    if (selectedDecision === "FOLLOW_UP" && !followUpAt) {
+      Swal.fire({ title: "Required", text: "Please select a date and time for follow up.", icon: "warning", background: swalBg() });
+      return;
+    }
+
+    if (selectedDecision === "ENROLL") {
       let warningText = "This creates an active student account, raises the first invoice, and emails the family their login, package and invoice.";
       if (!packageId) {
         if (familyPackageName) {
@@ -1396,11 +1473,14 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
     setBusy(true);
     try {
       await leadCoachDecision(lead.id, {
-        decision,
+        decision: selectedDecision,
         notes: notes || undefined,
-        ...(decision === "ENROLL" && packageId ? { packageId } : {}),
+        ...(selectedDecision === "ENROLL" && packageId ? { packageId } : {}),
+        ...(selectedDecision === "ENROLL" && enrollDate ? { preferredStartDate: new Date(enrollDate).toISOString() } : {}),
+        ...(selectedDecision === "ENROLL" && enrollTime ? { preferredTime: enrollTime } : {}),
+        ...(selectedDecision === "FOLLOW_UP" && followUpAt ? { followUpAt: new Date(followUpAt).toISOString() } : {}),
       });
-      Swal.fire({ toast: true, position: "top-end", icon: "success", title: decision === "ENROLL" ? "Converted to student 🎉" : "Decision recorded", showConfirmButton: false, timer: 2200 });
+      Swal.fire({ toast: true, position: "top-end", icon: "success", title: selectedDecision === "ENROLL" ? "Converted to student 🎉" : "Decision recorded", showConfirmButton: false, timer: 2200 });
       onChange();
     } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() }); }
     finally { setBusy(false); }
@@ -1452,43 +1532,132 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         </div>
         <p className="mb-4 text-xs text-ink-3">Record the outcome after the trial. Enrolling converts this lead into an active student and sends login credentials.</p>
 
-        <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Package to bill</label>
-        <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
-          className="mb-1.5 h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
-          {familyPackageName ? (
-            <option value="">Use the package the family chose ({familyPackageName})</option>
-          ) : (
-            <option value="">Select a package...</option>
-          )}
-          {packages.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} — {p.classesPerMonth} classes/month
-            </option>
-          ))}
-        </select>
-        <p className="mb-4 text-[11px] text-ink-3">
-          The first invoice is raised from this, one per child, and goes out with the welcome
-          email. With no package on record none is raised and the timeline says so.
-        </p>
-
-        <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Decision notes (optional)</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Summary of the decision…"
-          className="mb-4 w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
-
-        <div className="grid gap-2.5 sm:grid-cols-3">
-          <button onClick={() => decide("ENROLL")} disabled={busy}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60">
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />} Enrol as Student
+        <label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Select Outcome</label>
+        <div className="mb-5 grid gap-2.5 sm:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setDecision("ENROLL")}
+            className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl text-xs font-black transition cursor-pointer border ${
+              decision === "ENROLL"
+                ? "bg-emerald-600 border-emerald-600 text-white shadow-sm font-extrabold"
+                : "bg-surface border-hairline text-ink-2 hover:bg-surface-2"
+            }`}
+          >
+            <UserPlus className="size-4" /> Enrol as Student
           </button>
-          <button onClick={() => decide("FOLLOW_UP")} disabled={busy}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-hairline bg-surface text-sm font-bold text-ink-2 hover:bg-surface-2 disabled:opacity-60">
-            <CalendarClock className="size-4 text-accent" /> Follow Up Later
+          <button
+            type="button"
+            onClick={() => setDecision("FOLLOW_UP")}
+            className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl text-xs font-black transition cursor-pointer border ${
+              decision === "FOLLOW_UP"
+                ? "bg-accent border-accent text-white shadow-sm font-extrabold"
+                : "bg-surface border-hairline text-ink-2 hover:bg-surface-2"
+            }`}
+          >
+            <CalendarClock className="size-4" /> Follow Up Later
           </button>
-          <button onClick={() => decide("REJECT")} disabled={busy}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/5 text-sm font-bold text-rose-600 hover:bg-rose-500/10 disabled:opacity-60">
+          <button
+            type="button"
+            onClick={() => setDecision("REJECT")}
+            className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl text-xs font-black transition cursor-pointer border ${
+              decision === "REJECT"
+                ? "bg-rose-600 border-rose-600 text-white shadow-sm font-extrabold"
+                : "bg-surface border-hairline text-ink-2 hover:bg-surface-2"
+            }`}
+          >
             <XCircle className="size-4" /> Not Enrolling
           </button>
         </div>
+
+        {decision === "ENROLL" && (
+          <div className="mb-4 space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Enroll Start Date</label>
+                <input
+                  type="date"
+                  value={enrollDate}
+                  onChange={(e) => setEnrollDate(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Preferred Class Time</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 10:00 AM or 14:30"
+                  value={enrollTime}
+                  onChange={(e) => setEnrollTime(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Package to bill</label>
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
+                className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+                {familyPackageName ? (
+                  <option value="">Use the package the family chose ({familyPackageName})</option>
+                ) : (
+                  <option value="">Select a package...</option>
+                )}
+                {packages.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.classesPerMonth} classes/month
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] text-ink-3">
+                The first invoice is raised from this, one per child, and goes out with the welcome
+                email. With no package on record none is raised and the timeline says so.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {decision === "FOLLOW_UP" && (
+          <div className="mb-4">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Date & Time for Follow Up</label>
+            <input
+              type="datetime-local"
+              value={followUpAt}
+              onChange={(e) => setFollowUpAt(e.target.value)}
+              className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+            />
+          </div>
+        )}
+
+        <div className="mb-4">
+          <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">
+            Decision notes {decision === "ENROLL" ? "(optional)" : "(compulsory)"}
+          </label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder={decision === "ENROLL" ? "Summary of the decision (optional)…" : "Please explain the reason for this decision (compulsory)…"}
+            className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
+        </div>
+
+        <button
+          onClick={() => decide(decision)}
+          disabled={busy || (decision === "FOLLOW_UP" && !followUpAt) || ((decision === "FOLLOW_UP" || decision === "REJECT") && !notes.trim())}
+          className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold text-white hover:opacity-90 disabled:opacity-50 cursor-pointer transition ${
+            decision === "ENROLL"
+              ? "bg-emerald-600"
+              : decision === "FOLLOW_UP"
+              ? "bg-accent"
+              : "bg-rose-600"
+          }`}
+        >
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : decision === "ENROLL" ? (
+            <UserPlus className="size-4" />
+          ) : decision === "FOLLOW_UP" ? (
+            <CalendarClock className="size-4" />
+          ) : (
+            <XCircle className="size-4" />
+          )}
+          {decision === "ENROLL" ? "Convert & Enrol as Student" : decision === "FOLLOW_UP" ? "Schedule Follow Up" : "Confirm Not Enrolling"}
+        </button>
       </CardBody>
     </Card>
   );

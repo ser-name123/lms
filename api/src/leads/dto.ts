@@ -323,6 +323,12 @@ export class CoachDecisionDto {
       'Package to bill the first invoice for. Defaults to the one the trial report captured.',
   })
   @IsOptional() @IsString() packageId?: string;
+  @ApiPropertyOptional({ description: 'Date and time of next follow up' })
+  @IsOptional() @IsString() followUpAt?: string;
+  @ApiPropertyOptional({ description: 'Date when student starts class' })
+  @IsOptional() @IsString() preferredStartDate?: string;
+  @ApiPropertyOptional({ description: 'Time when student has classes, e.g. 10:00' })
+  @IsOptional() @IsString() preferredTime?: string;
 }
 
 export class ListLeadsDto {

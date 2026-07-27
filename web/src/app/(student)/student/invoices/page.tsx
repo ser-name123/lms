@@ -96,6 +96,8 @@ export default function StudentInvoices() {
     }
   };
 
+  const [autoPayEnabled, setAutoPayEnabled] = useState(true);
+
   const handleConfirmPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stripeInstance || !elementsInstance) return;
@@ -250,15 +252,19 @@ export default function StudentInvoices() {
       {/* Pay Invoice Stripe Elements Modal */}
       {activeInvoice && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
-          <div className="bg-surface border border-hairline rounded-3xl w-full max-w-md shadow-pop overflow-hidden p-6 space-y-6 animate-fade-up">
+          <form 
+            onSubmit={handleConfirmPayment}
+            className="bg-surface border border-hairline rounded-3xl w-full max-w-md max-h-[90vh] shadow-pop overflow-hidden flex flex-col animate-fade-up"
+          >
             
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-hairline pb-4">
+            <div className="flex items-center justify-between border-b border-hairline px-6 py-4">
               <div>
                 <h2 className="font-extrabold text-base text-ink">Pay Invoice</h2>
                 <p className="text-xs text-ink-3 mt-0.5">Settle {activeInvoice.number} securely via Stripe Card</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setActiveInvoice(null)} 
                 className="size-8 hover:bg-surface-2 rounded-xl flex items-center justify-center text-ink-3 cursor-pointer"
               >
@@ -266,51 +272,74 @@ export default function StudentInvoices() {
               </button>
             </div>
 
-            {/* Error alerts */}
-            {stripeError && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="size-4 shrink-0" />
-                <span>{stripeError}</span>
-              </div>
-            )}
-
-            {/* Main Form */}
-            <form onSubmit={handleConfirmPayment} className="space-y-4">
-              
-              {/* Payment Element Mount Container */}
-              <div className="min-h-[180px] relative flex flex-col justify-center">
-                {stripeLoading && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 z-10 gap-2">
-                    <Loader2 className="size-7 animate-spin text-accent" />
-                    <p className="text-xs text-ink-3 font-semibold">Setting up secure form...</p>
-                  </div>
-                )}
-                <div id="payment-element-mount" className="w-full" />
-              </div>
-
-              {/* Action Buttons */}
-              {!stripeLoading && (
-                <div className="flex justify-end gap-3 pt-4 border-t border-hairline">
-                  <button 
-                    type="button" 
-                    onClick={() => setActiveInvoice(null)} 
-                    disabled={paying}
-                    className="h-10 px-5 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit" 
-                    disabled={paying || !stripeInstance}
-                    className="h-10 px-6 rounded-xl bg-accent text-xs font-bold text-white flex items-center gap-1.5 justify-center hover:bg-accent-active cursor-pointer transition-all active:scale-98 disabled:opacity-50"
-                  >
-                    {paying ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Confirm &amp; Pay {money(Number(activeInvoice.amount) - Number(activeInvoice.paidAmount ?? 0), activeInvoice.currency)}
-                  </button>
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 [scrollbar-width:thin] min-h-0">
+              {/* Error alerts */}
+              {stripeError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>{stripeError}</span>
                 </div>
               )}
-            </form>
-          </div>
+
+              <div className="space-y-4">
+                {/* Payment Element Mount Container */}
+                <div className="min-h-[180px] relative flex flex-col justify-center">
+                  {stripeLoading && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 z-10 gap-2">
+                      <Loader2 className="size-7 animate-spin text-accent" />
+                      <p className="text-xs text-ink-3 font-semibold">Setting up secure form...</p>
+                    </div>
+                  )}
+                  <div id="payment-element-mount" className="w-full" />
+                </div>
+
+                {/* Auto-Pay Option */}
+                {!stripeLoading && (
+                  <div className="p-4 rounded-2xl border border-accent/30 bg-accent/5 flex items-start gap-3 transition-all duration-200 shadow-sm shadow-accent/5 hover:border-accent/40">
+                    <input 
+                      type="checkbox" 
+                      id="auto-pay-checkbox" 
+                      checked={autoPayEnabled}
+                      onChange={(e) => setAutoPayEnabled(e.target.checked)}
+                      className="mt-0.5 rounded border-hairline text-accent size-4.5 cursor-pointer focus:ring-0"
+                    />
+                    <label htmlFor="auto-pay-checkbox" className="min-w-0 flex-1 cursor-pointer select-none">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-ink">Enable Auto-Pay (Recommended)</span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-accent text-white rounded-md font-extrabold uppercase tracking-wide">Enabled</span>
+                      </div>
+                      <p className="text-[10px] text-ink-3 mt-1 leading-normal">
+                        Saves your card to auto-debit future monthly invoices. Cancel anytime.
+                      </p>
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action Buttons (Sticky Footer) */}
+            {!stripeLoading && (
+              <div className="flex justify-end gap-3 p-6 border-t border-hairline bg-surface-2/50">
+                <button 
+                  type="button" 
+                  onClick={() => setActiveInvoice(null)} 
+                  disabled={paying}
+                  className="h-10 px-5 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={paying || !stripeInstance}
+                  className="h-10 px-6 rounded-xl bg-accent text-xs font-bold text-white flex items-center gap-1.5 justify-center hover:bg-accent-active cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                >
+                  {paying ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Confirm &amp; Pay {money(Number(activeInvoice.amount) - Number(activeInvoice.paidAmount ?? 0), activeInvoice.currency)}
+                </button>
+              </div>
+            )}
+          </form>
         </div>
       )}
     </>

@@ -1698,6 +1698,7 @@ model Lead {
   coachDecision      String?   // ENROLL / REJECT / FOLLOW_UP
   coachDecisionNotes String?
   coachDecisionAt    DateTime?
+  followUpAt         DateTime?
 
   // Conversion (Phase 4) — a real StudentProfile is created on ENROLL.
   // The singular pair points at the primary student; with siblings on the

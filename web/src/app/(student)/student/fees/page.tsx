@@ -1,25 +1,23 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Loader2,
-  Receipt,
-  Wallet,
-  CalendarClock,
-  FileText,
-  ChevronDown,
-  ChevronRight,
-  Printer,
-  Award,
-  CreditCard,
+  X,
   AlertCircle,
+  MoreVertical,
+  Download,
+  Eye,
+  FileText,
+  CreditCard,
 } from "lucide-react";
+import Swal from "sweetalert2";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { fetchStudentFinance } from "@/lib/api";
+import { fetchStudentFinance, createPaymentIntent } from "@/lib/api";
+import { money } from "@/lib/currency";
 
 type InvoiceItem = { type: string; label: string; amount: number };
 type Invoice = {
@@ -98,14 +96,118 @@ const invoiceStatusLabel: Record<string, string> = {
 export default function StudentFees() {
   const [data, setData] = useState<StudentFinance | null>(null);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Stripe States
+  const [activeInvoice, setActiveInvoice] = useState<any | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [stripeError, setStripeError] = useState("");
+  const [stripeInstance, setStripeInstance] = useState<any>(null);
+  const [elementsInstance, setElementsInstance] = useState<any>(null);
+  const [autoPayEnabled, setAutoPayEnabled] = useState(true);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  const loadInvoices = () => {
+    setLoading(true);
     fetchStudentFinance()
       .then((res) => setData(res))
       .catch((err) => console.error("Failed to load student finance", err))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadInvoices();
+
+    // Check for redirection param
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment_success") === "true") {
+      Swal.fire({
+        title: "Payment Succeeded!",
+        text: "Your invoice has been paid successfully.",
+        icon: "success",
+        confirmButtonColor: "#386FA4",
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
+
+  const loadStripeScript = (): Promise<void> => {
+    return new Promise((resolve) => {
+      if ((window as any).Stripe) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://js.stripe.com/v3/";
+      script.async = true;
+      script.onload = () => resolve();
+      document.body.appendChild(script);
+    });
+  };
+
+  const handlePayClick = async (invoice: any) => {
+    setActiveInvoice(invoice);
+    setStripeLoading(true);
+    setStripeError("");
+    try {
+      const res = await createPaymentIntent(invoice.id);
+      await loadStripeScript();
+      
+      if (!(window as any).Stripe) {
+        throw new Error("Failed to load Stripe payment gateway.");
+      }
+
+      const stripe = (window as any).Stripe(res.publishableKey);
+      setStripeInstance(stripe);
+
+      const elements = stripe.elements({
+        clientSecret: res.clientSecret,
+        appearance: {
+          theme: document.documentElement.classList.contains("dark") ? "night" : "flat",
+          variables: {
+            colorPrimary: "#386FA4",
+          }
+        }
+      });
+      setElementsInstance(elements);
+
+      setTimeout(() => {
+        const paymentElement = elements.create("payment");
+        paymentElement.mount("#payment-element-mount-fees");
+        setStripeLoading(false);
+      }, 300);
+
+    } catch (err: any) {
+      console.error("Payment initialization failed", err);
+      setStripeError(err?.message || "Could not initialize payment. Please try again.");
+      setStripeLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripeInstance || !elementsInstance) return;
+
+    setPaying(true);
+    setStripeError("");
+
+    try {
+      const { error } = await stripeInstance.confirmPayment({
+        elements: elementsInstance,
+        confirmParams: {
+          return_url: `${window.location.origin}/student/fees?payment_success=true`,
+        },
+      });
+
+      if (error) {
+        setStripeError(error.message || "Payment failed.");
+      }
+    } catch (err: any) {
+      setStripeError(err?.message || "An unexpected error occurred.");
+    } finally {
+      setPaying(false);
+    }
+  };
 
   const handlePrintReceipt = (r: ReceiptRow, studentName: string) => {
     const win = window.open("", "_blank", "width=720,height=880");
@@ -166,213 +268,70 @@ export default function StudentFees() {
     );
   }
 
-  const cards = data?.cards;
   const invoices = data?.invoices ?? [];
   const paymentHistory = data?.paymentHistory ?? [];
   const receipts = data?.receipts ?? [];
-  const scholarships = data?.scholarships ?? [];
   const studentName = data?.profile?.name ?? "";
+
+  // Filter pending/unpaid invoices
+  const pendingInvoices = invoices.filter(
+    (inv) =>
+      inv.status === "SENT" ||
+      inv.status === "OVERDUE" ||
+      inv.status === "PARTIALLY_PAID" ||
+      inv.balance > 0
+  );
+
+  // Filter paid/void/cancelled invoices for Payment History
+  const historyInvoices = invoices.filter(
+    (inv) =>
+      inv.status === "PAID" ||
+      inv.status === "VOID" ||
+      inv.status === "CANCELLED" ||
+      inv.balance === 0
+  );
 
   return (
     <>
-      <Topbar title="My Fees" subtitle="Fee status, invoices, receipts, and scholarships" />
+      <Topbar title="My Fees" subtitle="Manage your pending dues and payment history" />
 
       <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
-        {/* Read-only note */}
-        <div className="flex items-start gap-2.5 p-3.5 rounded-2xl border border-hairline bg-surface-2/40 text-xs">
-          <AlertCircle className="size-4.5 text-accent shrink-0 mt-0.5" />
-          <p className="text-ink-3 leading-relaxed">
-            This is a read-only view of your fee account. Payments are recorded by the academy office — please contact
-            administration to settle any outstanding balance.
-          </p>
-        </div>
-
-        {/* Fee status cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-            <div className="size-12 rounded-2xl bg-critical-soft/20 text-critical flex items-center justify-center shrink-0">
-              <Wallet className="size-6" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Outstanding</span>
-              <h4 className="text-xl font-black text-ink leading-none mt-1">{fmt(cards?.outstanding)}</h4>
-            </div>
-          </Card>
-
-          <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-            <div className="size-12 rounded-2xl bg-warning-soft/20 text-warning flex items-center justify-center shrink-0">
-              <CalendarClock className="size-6" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Next Due</span>
-              <h4 className="text-xl font-black text-ink leading-none mt-1">{fmt(cards?.nextDueAmount)}</h4>
-              <p className="text-[10px] text-ink-3 mt-1">
-                {cards?.nextDueDate ? new Date(cards.nextDueDate).toLocaleDateString() : "No upcoming dues"}
-              </p>
-            </div>
-          </Card>
-
-          <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-            <div className="size-12 rounded-2xl bg-good-soft/20 text-good flex items-center justify-center shrink-0">
-              <CreditCard className="size-6" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Total Paid</span>
-              <h4 className="text-xl font-black text-ink leading-none mt-1">{fmt(cards?.totalPaid)}</h4>
-            </div>
-          </Card>
-
-          <Card className="border border-hairline bg-surface rounded-3xl p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition">
-            <div className="size-12 rounded-2xl bg-accent-soft/20 text-accent flex items-center justify-center shrink-0">
-              <Receipt className="size-6" />
-            </div>
-            <div>
-              <span className="block text-[10px] font-extrabold text-ink-3 uppercase tracking-wider">Open Invoices</span>
-              <h4 className="text-xl font-black text-ink leading-none mt-1">{cards?.openInvoices ?? 0}</h4>
-            </div>
-          </Card>
-        </div>
-
-        {/* Invoices */}
+        
+        {/* Pending Invoices Container */}
         <Card className="border border-hairline bg-surface rounded-3xl overflow-hidden shadow-sm">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline bg-surface-2/10">
             <FileText className="size-4.5 text-accent" />
-            <h3 className="font-extrabold text-sm text-ink">Invoices ({invoices.length})</h3>
+            <h3 className="font-extrabold text-sm text-ink">Pending Invoices</h3>
           </div>
 
-          {invoices.length > 0 ? (
+          {pendingInvoices.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs font-semibold text-ink-2">
                 <thead>
                   <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
-                    <th className="p-4 pl-6 w-6"></th>
-                    <th className="p-4">Invoice #</th>
-                    <th className="p-4">Period</th>
-                    <th className="p-4">Issued</th>
-                    <th className="p-4">Due</th>
+                    <th className="p-4 pl-6">Invoice Number</th>
+                    <th className="p-4">Date</th>
+                    <th className="p-4">Due Date</th>
                     <th className="p-4">Amount</th>
-                    <th className="p-4">Paid</th>
-                    <th className="p-4 font-bold text-ink">Balance</th>
-                    <th className="p-4 pr-6 text-right">Status</th>
+                    <th className="p-4 pr-6 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
-                  {invoices.map((inv) => {
-                    const isOpen = expanded === inv.id;
-                    return (
-                      <Fragment key={inv.id}>
-                        <tr
-                          onClick={() => setExpanded(isOpen ? null : inv.id)}
-                          className="hover:bg-surface-2/10 transition cursor-pointer"
-                        >
-                          <td className="p-4 pl-6 text-ink-3">
-                            {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                          </td>
-                          <td className="p-4 font-mono font-bold text-ink whitespace-nowrap">{inv.number}</td>
-                          <td className="p-4 text-ink-3">{inv.periodLabel || "—"}</td>
-                          <td className="p-4 text-ink-3 whitespace-nowrap">{new Date(inv.issuedAt).toLocaleDateString()}</td>
-                          <td className="p-4 text-ink-3 whitespace-nowrap">
-                            {inv.dueAt ? new Date(inv.dueAt).toLocaleDateString() : "Upon Receipt"}
-                          </td>
-                          <td className="p-4 text-ink-2">{fmt(inv.amount, inv.currency)}</td>
-                          <td className="p-4 text-good">{fmt(inv.paidAmount, inv.currency)}</td>
-                          <td className="p-4 font-extrabold text-ink">{fmt(inv.balance, inv.currency)}</td>
-                          <td className="p-4 pr-6 text-right">
-                            <Badge tone={invoiceStatusTone[inv.status] || "neutral"}>
-                              {invoiceStatusLabel[inv.status] || inv.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                        {isOpen && (
-                          <tr className="bg-surface-2/20">
-                            <td colSpan={9} className="px-6 py-4">
-                              <p className="text-[10px] font-extrabold text-ink-3 uppercase tracking-wider mb-2">
-                                Line Items
-                              </p>
-                              {inv.items && inv.items.length > 0 ? (
-                                <div className="space-y-1.5 max-w-md">
-                                  {inv.items.map((it, i) => (
-                                    <div
-                                      key={i}
-                                      className="flex items-center justify-between text-xs py-1.5 border-b border-hairline last:border-0"
-                                    >
-                                      <span className="text-ink-2">
-                                        <span className="text-[9px] font-extrabold text-ink-3 uppercase tracking-wider mr-2">
-                                          {it.type}
-                                        </span>
-                                        {it.label}
-                                      </span>
-                                      <span className="font-bold text-ink">{fmt(it.amount, inv.currency)}</span>
-                                    </div>
-                                  ))}
-                                  <div className="flex items-center justify-between text-xs pt-2 font-extrabold text-ink">
-                                    <span>Total</span>
-                                    <span>{fmt(inv.amount, inv.currency)}</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="text-xs text-ink-3">No line item breakdown available.</p>
-                              )}
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-16 space-y-3">
-              <div className="size-16 rounded-full bg-surface-2 flex items-center justify-center mx-auto text-ink-3">
-                <FileText className="size-8 text-ink-3/40" />
-              </div>
-              <h5 className="font-extrabold text-sm text-ink">No invoices found</h5>
-              <p className="text-[10px] text-ink-3">You have no fee invoices registered at this time.</p>
-            </div>
-          )}
-        </Card>
-
-        {/* Payment history */}
-        <Card className="border border-hairline bg-surface rounded-3xl overflow-hidden shadow-sm">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline">
-            <CreditCard className="size-4.5 text-accent" />
-            <h3 className="font-extrabold text-sm text-ink">Payment History ({paymentHistory.length})</h3>
-          </div>
-
-          {paymentHistory.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-xs font-semibold text-ink-2">
-                <thead>
-                  <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
-                    <th className="p-4 pl-6">Invoice</th>
-                    <th className="p-4">Amount</th>
-                    <th className="p-4">Method</th>
-                    <th className="p-4">Paid Date</th>
-                    <th className="p-4 pr-6 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {paymentHistory.map((p, i) => (
-                    <tr key={i} className="hover:bg-surface-2/10 transition">
-                      <td className="p-4 pl-6 font-mono font-bold text-ink whitespace-nowrap">{p.invoice || "—"}</td>
-                      <td className="p-4 font-extrabold text-ink">{fmt(p.amount)}</td>
-                      <td className="p-4 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 bg-surface-2/45 px-2.5 py-1 rounded-lg">
-                          <CreditCard className="size-3.5 text-ink-3" />
-                          {p.method || "—"}
-                        </span>
-                      </td>
+                  {pendingInvoices.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-surface-2/5 transition">
+                      <td className="p-4 pl-6 font-mono font-bold text-ink whitespace-nowrap">{inv.number}</td>
+                      <td className="p-4 text-ink-3 whitespace-nowrap">{new Date(inv.issuedAt).toLocaleDateString()}</td>
                       <td className="p-4 text-ink-3 whitespace-nowrap">
-                        {p.paidAt ? new Date(p.paidAt).toLocaleDateString() : "—"}
+                        {inv.dueAt ? new Date(inv.dueAt).toLocaleDateString() : "Upon Receipt"}
                       </td>
+                      <td className="p-4 font-extrabold text-accent">{fmt(inv.balance, inv.currency)}</td>
                       <td className="p-4 pr-6 text-right">
-                        <Badge
-                          tone={p.status === "PAID" || p.status === "SUCCESS" ? "good" : "warning"}
-                          className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5"
+                        <button
+                          onClick={() => handlePayClick(inv)}
+                          className="px-4 py-1.5 bg-accent text-white font-bold rounded-xl text-xs hover:bg-accent-active cursor-pointer active:scale-98 transition shadow-sm"
                         >
-                          {p.status}
-                        </Badge>
+                          PAY
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -380,91 +339,216 @@ export default function StudentFees() {
               </table>
             </div>
           ) : (
-            <div className="text-center py-14 text-ink-3">
-              <p className="font-bold text-sm">No payments recorded yet.</p>
+            <div className="text-center py-12 text-ink-3 font-semibold text-sm">
+              There is no Pending Invoices
             </div>
           )}
         </Card>
 
-        {/* Receipts + Scholarships */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Receipts */}
-          <Card className="border border-hairline bg-surface rounded-3xl overflow-hidden shadow-sm">
-            <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline">
-              <Receipt className="size-4.5 text-accent" />
-              <h3 className="font-extrabold text-sm text-ink">Receipts ({receipts.length})</h3>
-            </div>
-            {receipts.length > 0 ? (
-              <ul className="divide-y divide-hairline">
-                {receipts.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
-                    <div className="min-w-0">
-                      <p className="font-mono font-bold text-xs text-ink truncate">{r.number}</p>
-                      <p className="text-[10px] text-ink-3 mt-0.5">
-                        {r.invoice ? `Invoice ${r.invoice} · ` : ""}
-                        {r.issuedAt ? new Date(r.issuedAt).toLocaleDateString() : ""} · {r.method}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="font-extrabold text-xs text-ink">{fmt(r.amount, r.currency)}</span>
-                      <Button
-                        onClick={() => handlePrintReceipt(r, studentName)}
-                        variant="outline"
-                        className="h-8 px-3 text-[11px] font-bold text-ink-2 border border-hairline hover:bg-surface-2 rounded-xl inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Printer className="size-3.5" />
-                        View / Print
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-center py-14 text-ink-3">
-                <p className="font-bold text-sm">No receipts issued yet.</p>
-              </div>
-            )}
-          </Card>
+        {/* Payment History Container */}
+        <Card className="border border-hairline bg-surface rounded-3xl overflow-hidden shadow-sm">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline bg-surface-2/10">
+            <CreditCard className="size-4.5 text-accent" />
+            <h3 className="font-extrabold text-sm text-ink">Payment History</h3>
+          </div>
 
-          {/* Scholarships */}
-          <Card className="border border-hairline bg-surface rounded-3xl overflow-hidden shadow-sm">
-            <div className="flex items-center gap-2 px-5 py-4 border-b border-hairline">
-              <Award className="size-4.5 text-accent" />
-              <h3 className="font-extrabold text-sm text-ink">Scholarships ({scholarships.length})</h3>
+          {historyInvoices.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-xs font-semibold text-ink-2">
+                <thead>
+                  <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
+                    <th className="p-4 pl-6">Invoice Date</th>
+                    <th className="p-4">Number</th>
+                    <th className="p-4">Amount</th>
+                    <th className="p-4">Due Date</th>
+                    <th className="p-4">Payment Date</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 pr-6 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {historyInvoices.map((inv) => {
+                    const paymentRecord = paymentHistory.find((p) => p.invoice === inv.number);
+                    const paymentDate = paymentRecord && paymentRecord.paidAt 
+                      ? new Date(paymentRecord.paidAt).toLocaleDateString() 
+                      : "—";
+                    const receiptRecord = receipts.find((r) => r.invoice === inv.number);
+
+                    return (
+                      <tr key={inv.id} className="hover:bg-surface-2/5 transition">
+                        <td className="p-4 pl-6 text-ink-3 whitespace-nowrap">{new Date(inv.issuedAt).toLocaleDateString()}</td>
+                        <td className="p-4 font-mono font-bold text-ink whitespace-nowrap">{inv.number}</td>
+                        <td className="p-4 font-bold text-ink whitespace-nowrap">{fmt(inv.amount, inv.currency)}</td>
+                        <td className="p-4 text-ink-3 whitespace-nowrap">
+                          {inv.dueAt ? new Date(inv.dueAt).toLocaleDateString() : "Upon Receipt"}
+                        </td>
+                        <td className="p-4 text-ink-3 whitespace-nowrap">{paymentDate}</td>
+                        <td className="p-4 whitespace-nowrap">
+                          <Badge tone={invoiceStatusTone[inv.status] || "neutral"}>
+                            {invoiceStatusLabel[inv.status] || inv.status}
+                          </Badge>
+                        </td>
+                        <td className="p-4 pr-6 text-right">
+                          <div className="relative inline-block text-left">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(activeMenuId === inv.id ? null : inv.id);
+                              }}
+                              className="size-8 rounded-lg hover:bg-surface-3 flex items-center justify-center text-ink-2 cursor-pointer transition-colors"
+                            >
+                              <MoreVertical className="size-4" />
+                            </button>
+                            {activeMenuId === inv.id && (
+                              <>
+                                <div 
+                                  className="fixed inset-0 z-10" 
+                                  onClick={() => setActiveMenuId(null)}
+                                />
+                                <div className="absolute right-0 mt-1.5 w-36 rounded-xl border border-hairline bg-surface shadow-pop py-1 z-20 text-left">
+                                  {receiptRecord ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuId(null);
+                                          handlePrintReceipt(receiptRecord, studentName);
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs font-bold text-ink-2 hover:bg-surface-2 flex items-center gap-2 cursor-pointer"
+                                      >
+                                        <Eye className="size-3.5 text-ink-3" />
+                                        View
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveMenuId(null);
+                                          handlePrintReceipt(receiptRecord, studentName);
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs font-bold text-ink-2 hover:bg-surface-2 flex items-center gap-2 cursor-pointer"
+                                      >
+                                        <Download className="size-3.5 text-ink-3" />
+                                        Download
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <div className="px-3 py-2 text-xs text-ink-3">
+                                      No Receipt
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            {scholarships.length > 0 ? (
-              <ul className="divide-y divide-hairline">
-                {scholarships.map((s, i) => (
-                  <li key={i} className="flex items-center justify-between gap-3 px-5 py-3.5">
-                    <div className="min-w-0">
-                      <p className="font-bold text-xs text-ink truncate">{s.name}</p>
-                      <p className="text-[10px] text-ink-3 mt-0.5">
-                        {s.type === "PERCENTAGE" ? `${s.value}% discount` : fmt(s.value)}
-                      </p>
+          ) : (
+            <div className="text-center py-12 text-ink-3 font-semibold text-sm">
+              No payments recorded yet.
+            </div>
+          )}
+        </Card>
+      </main>
+
+      {/* Pay Invoice Stripe Elements Modal */}
+      {activeInvoice && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
+          <form 
+            onSubmit={handleConfirmPayment}
+            className="bg-surface border border-hairline rounded-3xl w-full max-w-md max-h-[90vh] shadow-pop overflow-hidden flex flex-col animate-fade-up"
+          >
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-hairline px-6 py-4">
+              <div>
+                <h2 className="font-extrabold text-base text-ink">Pay Invoice</h2>
+                <p className="text-xs text-ink-3 mt-0.5">Settle {activeInvoice.number} securely via Stripe Card</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setActiveInvoice(null)} 
+                className="size-8 hover:bg-surface-2 rounded-xl flex items-center justify-center text-ink-3 cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 [scrollbar-width:thin] min-h-0">
+              {/* Error alerts */}
+              {stripeError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>{stripeError}</span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {/* Payment Element Mount Container */}
+                <div className="min-h-[180px] relative flex flex-col justify-center">
+                  {stripeLoading && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 z-10 gap-2">
+                      <Loader2 className="size-7 animate-spin text-accent" />
+                      <p className="text-xs text-ink-3 font-semibold">Setting up secure form...</p>
                     </div>
-                    <Badge
-                      tone={
-                        s.status === "APPROVED" || s.status === "APPLIED"
-                          ? "good"
-                          : s.status === "REJECTED"
-                            ? "critical"
-                            : "warning"
-                      }
-                      className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5"
-                    >
-                      {s.status}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-center py-14 text-ink-3">
-                <p className="font-bold text-sm">No scholarships on record.</p>
+                  )}
+                  <div id="payment-element-mount-fees" className="w-full" />
+                </div>
+
+                {/* Auto-Pay Option */}
+                {!stripeLoading && (
+                  <div className="p-4 rounded-2xl border border-accent/30 bg-accent/5 flex items-start gap-3 transition-all duration-200 shadow-sm shadow-accent/5 hover:border-accent/40">
+                    <input 
+                      type="checkbox" 
+                      id="auto-pay-checkbox-fees" 
+                      checked={autoPayEnabled}
+                      onChange={(e) => setAutoPayEnabled(e.target.checked)}
+                      className="mt-0.5 rounded border-hairline text-accent size-4.5 cursor-pointer focus:ring-0"
+                    />
+                    <label htmlFor="auto-pay-checkbox-fees" className="min-w-0 flex-1 cursor-pointer select-none">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-ink">Enable Auto-Pay (Recommended)</span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-accent text-white rounded-md font-extrabold uppercase tracking-wide">Enabled</span>
+                      </div>
+                      <p className="text-[10px] text-ink-3 mt-1 leading-normal">
+                        Saves your card to auto-debit future monthly invoices. Cancel anytime.
+                      </p>
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action Buttons (Sticky Footer) */}
+            {!stripeLoading && (
+              <div className="flex justify-end gap-3 p-6 border-t border-hairline bg-surface-2/50">
+                <button 
+                  type="button" 
+                  onClick={() => setActiveInvoice(null)} 
+                  disabled={paying}
+                  className="h-10 px-5 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={paying || !stripeInstance}
+                  className="h-10 px-6 rounded-xl bg-accent text-xs font-bold text-white flex items-center gap-1.5 justify-center hover:bg-accent-active cursor-pointer transition-all active:scale-98 disabled:opacity-50"
+                >
+                  {paying ? <Loader2 className="size-4 animate-spin" /> : null}
+                  Confirm &amp; Pay {money(Number(activeInvoice.amount) - Number(activeInvoice.paidAmount ?? 0), activeInvoice.currency)}
+                </button>
               </div>
             )}
-          </Card>
+          </form>
         </div>
-      </main>
+      )}
     </>
   );
 }

@@ -94,6 +94,7 @@ export default function GetStartedPage({
   initialTimeZone?: string;
 }) {
   const { min, max } = useMemo(bookingWindow, []);
+  const [mounted, setMounted] = useState(false);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -160,6 +161,7 @@ export default function GetStartedPage({
         setTimeZone(COUNTRY_TIMEZONES[guess.name]);
       }
     }
+    setMounted(true);
   }, [initialCountryCode, initialTimeZone]);
 
   const loadSlots = useCallback(async (forDate: string, gender?: string) => {
@@ -263,6 +265,17 @@ export default function GetStartedPage({
       setBusy(false);
     }
   };
+
+  if (!mounted) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-page px-4 py-10">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-8 animate-spin text-accent" />
+          <p className="text-sm font-semibold text-ink-3">Loading booking form...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (booked) {
     const when = new Date(booked.scheduledAt);
@@ -614,6 +627,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:border-accent focus:outline-none"
+        suppressHydrationWarning
       />
     </div>
   );

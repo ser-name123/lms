@@ -107,15 +107,28 @@ export class LeadsService implements OnModuleInit {
       date.getTime() + Number(slot.slice(0, 2)) * 3_600_000 + Number(slot.slice(3)) * 60_000,
     );
 
+    const leadNumber = await this.nextLeadNumber();
+    const coachId = await this.nextCoachInRotation();
+
+    // Find the first teacher who is free at this slot to set as recommendedTeacherId
+    let recommendedTeacherId: string | null = null;
+    try {
+      recommendedTeacherId = await this.availability.pickTeacherFor({
+        date: dto.preferredDate!,
+        slot,
+        subject: dto.interestedSubject,
+        preferredGender: dto.preferredTeacherGender,
+      });
+    } catch (e) {
+      // Safe fallback
+    }
+
     const siblings = (dto.siblings ?? [])
       .filter((s) => s && (s.firstName ?? '').trim())
       .map((s) => ({
         firstName: (s.firstName ?? '').trim(),
         lastName: (s.lastName ?? '').trim(),
       }));
-
-    const leadNumber = await this.nextLeadNumber();
-    const coachId = await this.nextCoachInRotation();
 
     const lead = await this.prisma.lead.create({
       data: {
@@ -148,6 +161,7 @@ export class LeadsService implements OnModuleInit {
         priority: LeadPriority.MEDIUM,
         assignedCoachId: coachId,
         assignedCoachAt: coachId ? new Date() : null,
+        recommendedTeacherId,
       },
     });
 
@@ -426,10 +440,29 @@ export class LeadsService implements OnModuleInit {
      * Filtering explicitly by "Converted" still reaches them: this is the
      * default view, not a restriction.
      */
-    const hideConverted = !status;
+    const hideConverted = !status || status === 'NOT_NEW';
 
     const where: any = {
-      ...(status ? { status } : { status: { not: LeadStatus.CONVERTED } }),
+      ...(status
+        ? status === 'NEW'
+          ? {
+              OR: [
+                { status: LeadStatus.NEW },
+                { status: LeadStatus.TRIAL_SCHEDULED, assignedTeacherId: null },
+              ],
+            }
+          : status === 'NOT_NEW'
+            ? {
+                status: {
+                  notIn: [LeadStatus.NEW, LeadStatus.CONVERTED],
+                },
+                NOT: {
+                  status: LeadStatus.TRIAL_SCHEDULED,
+                  assignedTeacherId: null,
+                },
+              }
+            : { status }
+        : { status: { not: LeadStatus.CONVERTED } }),
       ...(priority ? { priority } : {}),
       ...(country ? { country: { contains: country, mode: 'insensitive' } } : {}),
       ...(subject ? { interestedSubject: { contains: subject, mode: 'insensitive' } } : {}),
@@ -499,6 +532,27 @@ export class LeadsService implements OnModuleInit {
 
   async getOne(id: string, user?: Actor) {
     const lead = await this.assertAccess(id, user);
+    if (!lead.recommendedTeacherId && lead.preferredDate && lead.preferredSlot) {
+      try {
+        const slot = lead.preferredSlot;
+        const dateStr = new Date(lead.preferredDate).toISOString().slice(0, 10);
+        const recId = await this.availability.pickTeacherFor({
+          date: dateStr,
+          slot,
+          subject: lead.interestedSubject,
+          preferredGender: lead.preferredTeacherGender,
+        });
+        if (recId) {
+          await this.prisma.lead.update({
+            where: { id: lead.id },
+            data: { recommendedTeacherId: recId },
+          });
+          lead.recommendedTeacherId = recId;
+        }
+      } catch (e) {
+        // Safe fallback
+      }
+    }
     const [withNames] = await this.attachNames([lead]);
     return withNames;
   }
@@ -523,10 +577,19 @@ export class LeadsService implements OnModuleInit {
     const statusCounts: Record<string, number> = {};
     byStatus.forEach((r) => (statusCounts[r.status] = r._count._all));
 
-    const [total, converted, rejected, avgRatingAgg] = await Promise.all([
+    const [total, converted, rejected, newRequestsCount, avgRatingAgg] = await Promise.all([
       this.prisma.lead.count({ where: scope }),
       this.prisma.lead.count({ where: { ...scope, status: LeadStatus.CONVERTED } }),
       this.prisma.lead.count({ where: { ...scope, status: LeadStatus.REJECTED } }),
+      this.prisma.lead.count({
+        where: {
+          ...scope,
+          OR: [
+            { status: LeadStatus.NEW },
+            { status: LeadStatus.TRIAL_SCHEDULED, assignedTeacherId: null },
+          ],
+        },
+      }),
       this.prisma.lead.aggregate({ where: scope, _avg: { overallScore: true } }),
     ]);
 
@@ -540,9 +603,9 @@ export class LeadsService implements OnModuleInit {
       total,
       converted,
       rejected,
-      newLeads: statusCounts[LeadStatus.NEW] || 0,
+      newLeads: newRequestsCount,
       inPipeline:
-        total - (statusCounts[LeadStatus.CONVERTED] || 0) - (statusCounts[LeadStatus.REJECTED] || 0) - (statusCounts[LeadStatus.CLOSED] || 0),
+        total - newRequestsCount - (statusCounts[LeadStatus.CONVERTED] || 0) - (statusCounts[LeadStatus.REJECTED] || 0) - (statusCounts[LeadStatus.CLOSED] || 0),
       conversionRate: total ? Math.round((converted / total) * 100) : 0,
       avgScore: avgRatingAgg._avg.overallScore ? Math.round(avgRatingAgg._avg.overallScore) : 0,
       statusCounts,
@@ -1175,6 +1238,26 @@ export class LeadsService implements OnModuleInit {
           data.scheduledAt,
           data.durationMins ?? trial.durationMins,
         );
+      }
+    } else if (dto.status !== 'CANCELLED' && !dto.meetingLink && (dto.meetingProvider === 'Zoom' || trial.meetingProvider === 'Zoom')) {
+      try {
+        const lead = await this.prisma.lead.findUnique({ where: { id: trial.leadId } });
+        if (lead) {
+          const zoom = await this.zoom.createTrialMeeting({
+            topic: `Trial — ${lead.studentFirstName} ${lead.studentLastName}`.trim(),
+            startAt: data.scheduledAt ?? trial.scheduledAt,
+            durationMins: data.durationMins ?? trial.durationMins,
+            timeZone: data.timeZone || trial.timeZone || lead.timeZone || 'UTC',
+            agenda: lead.interestedSubject ? `Trial class: ${lead.interestedSubject}` : undefined,
+          });
+          if (zoom.ok && zoom.meeting) {
+            data.meetingId = zoom.meeting.meetingId;
+            data.meetingLink = zoom.meeting.joinUrl;
+            data.meetingHostUrl = zoom.meeting.hostUrl;
+          }
+        }
+      } catch (e) {
+        // Safe fallback
       }
     }
 
@@ -1819,16 +1902,45 @@ export class LeadsService implements OnModuleInit {
       throw new BadRequestException('This lead has already been converted to a student.');
     }
 
+    if ((dto.decision === 'REJECT' || dto.decision === 'FOLLOW_UP') && !dto.notes?.trim()) {
+      throw new BadRequestException('Notes are compulsory for follow up or reject decisions.');
+    }
+    if (dto.decision === 'FOLLOW_UP' && !dto.followUpAt) {
+      throw new BadRequestException('Follow up date and time is required.');
+    }
+
     await this.prisma.lead.update({
       where: { id: leadId },
       data: {
         coachDecision: dto.decision,
         coachDecisionNotes: dto.notes || null,
         coachDecisionAt: new Date(),
+        followUpAt: dto.decision === 'FOLLOW_UP' && dto.followUpAt ? new Date(dto.followUpAt) : null,
       },
     });
 
     if (dto.decision === 'ENROLL') {
+      const latestTrial = await this.prisma.leadTrial.findFirst({
+        where: { leadId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (latestTrial) {
+        let preferredPackage = latestTrial.preferredPackage;
+        if (dto.packageId) {
+          const pkg = await this.prisma.lmsPackage.findUnique({ where: { id: dto.packageId } });
+          if (pkg) {
+            preferredPackage = pkg.title;
+          }
+        }
+        await this.prisma.leadTrial.update({
+          where: { id: latestTrial.id },
+          data: {
+            ...(dto.preferredStartDate ? { preferredStartDate: new Date(dto.preferredStartDate) } : {}),
+            ...(dto.preferredTime ? { preferredTime: dto.preferredTime } : {}),
+            preferredPackage,
+          },
+        });
+      }
       return this.convert(lead, dto.courseCode, actor, dto.packageId);
     }
 

@@ -11,6 +11,7 @@ import { currencyForCountry } from '../common/currency';
 import {
   Role,
   EnrollmentStatus,
+  InvoiceStatus,
 } from '../generated/prisma/enums';
 import type { Prisma } from '../generated/prisma/client';
 import type {
@@ -33,6 +34,7 @@ const PROFILE_SELECT = {
   joiningDate: true,
   lastPaymentDate: true,
   nextPaymentDate: true,
+  learningLevel: true,
   batches: { select: { batch: { select: { code: true, name: true } } }, take: 1 },
   user: {
     select: {
@@ -158,7 +160,7 @@ export class StudentsService {
     const coachIds = [...new Set(items.map((s) => s.coachId).filter(Boolean) as string[])];
     const parentEmails = items.map((s) => s.parentEmail).filter(Boolean) as string[];
 
-    const [attRows, coaches, leads] = await Promise.all([
+    const [attRows, coaches, leads, pendingInvoiceRows] = await Promise.all([
       ids.length
         ? this.prisma.classAttendee.groupBy({ by: ['studentId', 'status'], where: { studentId: { in: ids } }, _count: true })
         : Promise.resolve([] as { studentId: string; status: string | null; _count: number }[]),
@@ -170,15 +172,37 @@ export class StudentsService {
             where: { email: { in: parentEmails } },
             include: {
               trials: {
-                where: { reportSubmittedAt: { not: null } },
-                orderBy: { reportSubmittedAt: 'desc' },
+                orderBy: { createdAt: 'desc' },
                 take: 1,
               },
             },
           })
         : Promise.resolve([]),
+      // A student has money owing when they hold at least one issued-but-unpaid
+      // invoice. DRAFT is not yet sent; PAID/CANCELLED/VOID are settled — so only
+      // these four count as "payment pending".
+      ids.length
+        ? this.prisma.invoice.findMany({
+            where: {
+              studentId: { in: ids },
+              status: {
+                in: [
+                  InvoiceStatus.SENT,
+                  InvoiceStatus.PENDING,
+                  InvoiceStatus.PARTIALLY_PAID,
+                  InvoiceStatus.OVERDUE,
+                ],
+              },
+            },
+            select: { studentId: true },
+            distinct: ['studentId'],
+          })
+        : Promise.resolve([] as { studentId: string | null }[]),
     ]);
 
+    const pendingInvoiceIds = new Set(
+      pendingInvoiceRows.map((r) => r.studentId).filter(Boolean) as string[],
+    );
     const coachName = new Map(coaches.map((c) => [c.id, `${c.firstName} ${c.lastName}`]));
     const leadMap = new Map(leads.map((l) => [l.email, l]));
     const attAcc = new Map<string, { present: number; denom: number }>();
@@ -204,13 +228,18 @@ export class StudentsService {
         ? trial.preferredTime 
         : (lead?.preferredTimeSlots?.[0] || null);
 
+      const preferredPackageName = trial?.preferredPackage || null;
+
       return {
         ...s,
         coachName: s.coachId ? coachName.get(s.coachId) ?? null : null,
         batchCode: s.batches[0]?.batch.code ?? null,
         attendanceRate: a && a.denom ? Math.round((a.present / a.denom) * 100) : null,
+        scheduledClassesCount: a?.denom ?? 0,
+        invoicePending: pendingInvoiceIds.has(s.id),
         preferredDays,
         preferredTime,
+        preferredPackageName,
       };
     });
 
