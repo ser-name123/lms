@@ -41,8 +41,7 @@ const studentNavItems = [
   { label: "My Progress", href: "/student/progress", icon: TrendingUp },
   { label: "Knowledge Base", href: "/student/knowledgebase", icon: Library },
   { label: "My Subscription", href: "/student/subscription", icon: PackageIcon },
-  { label: "Billing & Invoices", href: "/student/invoices", icon: Receipt },
-  { label: "Fees & Payments", href: "/student/fees", icon: Receipt },
+  { label: "Invoices and Payments", href: "/student/fees", icon: Receipt },
   { label: "Support Chat", href: "/student/chat", icon: MessageCircle },
   { label: "My Profile", href: "/student/profile", icon: User },
 ];

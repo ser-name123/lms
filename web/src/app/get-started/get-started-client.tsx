@@ -291,8 +291,28 @@ export default function GetStartedPage({
           </p>
 
           <div className="mt-6 space-y-2 rounded-2xl border border-hairline bg-page p-4 text-left text-sm">
-            <Row icon={CalendarDays} label="Date" value={when.toUTCString().slice(0, 16)} />
-            <Row icon={Clock} label="Time" value={`${when.toISOString().slice(11, 16)} UTC`} />
+            <Row
+              icon={CalendarDays}
+              label="Date"
+              value={when.toLocaleDateString(undefined, {
+                timeZone: timeZone || undefined,
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            />
+            <Row
+              icon={Clock}
+              label="Time"
+              value={when.toLocaleTimeString(undefined, {
+                timeZone: timeZone || undefined,
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+                timeZoneName: "short",
+              })}
+            />
             <Row icon={User} label="Reference" value={booked.leadNumber} />
           </div>
 

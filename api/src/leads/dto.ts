@@ -329,6 +329,8 @@ export class CoachDecisionDto {
   @IsOptional() @IsString() preferredStartDate?: string;
   @ApiPropertyOptional({ description: 'Time when student has classes, e.g. 10:00' })
   @IsOptional() @IsString() preferredTime?: string;
+  @ApiPropertyOptional({ description: 'Preferred days of classes', type: [String] })
+  @IsOptional() @IsArray() @IsString({ each: true }) preferredDays?: string[];
 }
 
 export class ListLeadsDto {
@@ -347,6 +349,9 @@ export class ListLeadsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() subject?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() coachId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() trialStatus?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() date?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() startDate?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() endDate?: string;
 
   // Optional numeric guard reused by nothing yet, kept for future range use.
   @ApiPropertyOptional()

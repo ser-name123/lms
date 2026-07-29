@@ -54,7 +54,7 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 const SLOTS = ["Morning", "Afternoon", "Evening"];
 const SKILLS = ["Zoom", "Google Meet"];
 // Start-hour options a teacher can pick per selected slot ("available from").
-const HOURS = Array.from({ length: 17 }, (_, i) => `${String(i + 6).padStart(2, "0")}:00`); // 06:00–22:00
+const HOURS = Array.from({ length: 25 }, (_, i) => `${String(i).padStart(2, "0")}:00`); // 00:00–24:00
 
 const DOCS = [
   { key: "resumeUrl", label: "Resume / CV", required: true },

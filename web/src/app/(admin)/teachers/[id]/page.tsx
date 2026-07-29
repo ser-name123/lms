@@ -189,13 +189,18 @@ function ProfileTab({ t, onSaved }: { t: TeacherManagement; onSaved: () => void 
         </div>
         <div>
           <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Time Zone</label>
-          <input
-            type="text"
+          <select
             value={f.timeZone}
             onChange={(e) => setF({ ...f, timeZone: e.target.value })}
-            placeholder="e.g. Africa/Cairo"
             className={inp}
-          />
+          >
+            <option value="">Select Timezone</option>
+            {Array.from(new Set(Object.values(COUNTRY_TIMEZONES))).sort().map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </select>
         </div>
         {F("Qualification", "qualification")}
         {F("Experience (years)", "experienceYears")}
@@ -262,7 +267,7 @@ function ChipEditor({ label, values, setValues, placeholder }: { label: string; 
 }
 
 // ── Availability ──────────────────────────────────────────────────────────────
-const HOURS = Array.from({ length: 33 }, (_, i) => `${String(6 + Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
+const HOURS = Array.from({ length: 49 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
 function AvailabilityTab({ t, onSaved }: { t: TeacherManagement; onSaved: () => void }) {
   const [av, setAv] = useState<TeacherAvailability>(() => t.availability || {});
   const [busy, setBusy] = useState(false);

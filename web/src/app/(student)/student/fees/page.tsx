@@ -257,7 +257,7 @@ export default function StudentFees() {
   if (loading) {
     return (
       <>
-        <Topbar title="My Fees" subtitle="Check your fee status" />
+        <Topbar title="Invoices and Payments" subtitle="Check your fee status" />
         <div className="flex h-[calc(100vh-4.5rem)] items-center justify-center">
           <div className="text-center">
             <Loader2 className="mx-auto size-8 animate-spin text-accent" />
@@ -293,7 +293,7 @@ export default function StudentFees() {
 
   return (
     <>
-      <Topbar title="My Fees" subtitle="Manage your pending dues and payment history" />
+      <Topbar title="Invoices and Payments" subtitle="Manage your pending dues and payment history" />
 
       <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
         
@@ -353,7 +353,7 @@ export default function StudentFees() {
           </div>
 
           {historyInvoices.length > 0 ? (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto min-h-[180px]">
               <table className="w-full border-collapse text-left text-xs font-semibold text-ink-2">
                 <thead>
                   <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">

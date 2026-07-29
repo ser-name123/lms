@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Menu, Moon, Search, Sun, X } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/store/ui";
@@ -11,9 +12,40 @@ import { GlobalSearch } from "./global-search";
 
 export function Topbar({ title, subtitle }: { title: string; subtitle?: string }) {
   const { theme, toggleTheme, setMobileNav } = useUI();
+  const pathname = usePathname();
   // The inline search is too wide for a phone, so below `md` it collapses to an
   // icon that swaps the whole bar for a full-width search row.
   const [mobileSearch, setMobileSearch] = useState(false);
+  const [currentTime, setCurrentTime] = useState("");
+
+  useEffect(() => {
+    const isDashboard = pathname === "/dashboard" || pathname === "/teacher/dashboard" || pathname === "/student/dashboard";
+    if (!isDashboard) return;
+
+    const updateTime = () => {
+      const d = new Date();
+      setCurrentTime(
+        d.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, [pathname]);
+
+  const displaySubtitle = (() => {
+    if (!subtitle) return undefined;
+    const isDashboard = pathname === "/dashboard" || pathname === "/teacher/dashboard" || pathname === "/student/dashboard";
+    if (isDashboard && currentTime) {
+      return `${subtitle} · ${currentTime}`;
+    }
+    return subtitle;
+  })();
 
   if (mobileSearch) {
     return (
@@ -44,7 +76,7 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
 
       <div className="min-w-0 flex flex-col justify-center">
         <span className="block truncate text-base font-extrabold tracking-tight text-ink leading-tight">{title}</span>
-        {subtitle && <span className="block truncate text-[11px] text-ink-3 font-semibold mt-1 leading-normal">{subtitle}</span>}
+        {displaySubtitle && <span className="block truncate text-[11px] text-ink-3 font-semibold mt-1 leading-normal">{displaySubtitle}</span>}
       </div>
 
       {/* Search */}

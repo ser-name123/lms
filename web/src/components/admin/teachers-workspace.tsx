@@ -400,6 +400,20 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
     }
   };
 
+  const handleEmpCountryChange = (val: string) => {
+    setEmpCountry(val);
+    if (COUNTRY_TIMEZONES[val]) {
+      setEmpTimezone(COUNTRY_TIMEZONES[val]);
+    }
+  };
+
+  const handleManageEmpCountryChange = (val: string) => {
+    setManageEmpCountry(val);
+    if (COUNTRY_TIMEZONES[val]) {
+      setManageEmpTimezone(COUNTRY_TIMEZONES[val]);
+    }
+  };
+
   const handleCourseToggle = (id: string) => {
     setCourseIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
@@ -3190,7 +3204,12 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone Key</label>
-                  <input type="text" value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="e.g. Africa/Cairo" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                  <select value={timezone} onChange={e => setTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                    <option value="">Select Timezone</option>
+                    {Array.from(new Set(Object.values(COUNTRY_TIMEZONES))).sort().map(tz => (
+                      <option key={tz} value={tz}>{tz}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -3446,7 +3465,12 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone</label>
-                      <input type="text" value={manageTimezone} onChange={e => setManageTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                      <select value={manageTimezone} onChange={e => setManageTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                        <option value="">Select Timezone</option>
+                        {Array.from(new Set(Object.values(COUNTRY_TIMEZONES))).sort().map(tz => (
+                          <option key={tz} value={tz}>{tz}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
@@ -3660,11 +3684,21 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Country Location</label>
-                  <input type="text" value={empCountry} onChange={e => setEmpCountry(e.target.value)} placeholder="e.g. India" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                  <select value={empCountry} onChange={e => handleEmpCountryChange(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                    <option value="">Select Country</option>
+                    {COUNTRIES.map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone</label>
-                  <input type="text" value={empTimezone} onChange={e => setEmpTimezone(e.target.value)} placeholder="e.g. Asia/Kolkata" className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                  <select value={empTimezone} onChange={e => setEmpTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                    <option value="">Select Timezone</option>
+                    {Array.from(new Set(Object.values(COUNTRY_TIMEZONES))).sort().map(tz => (
+                      <option key={tz} value={tz}>{tz}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -3902,11 +3936,21 @@ export function TeachersWorkspace({ lockedTab }: { lockedTab?: TeachersTab }) {
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Country Location</label>
-                      <input type="text" value={manageEmpCountry} onChange={e => setManageEmpCountry(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                      <select value={manageEmpCountry} onChange={e => handleManageEmpCountryChange(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                        <option value="">Select Country</option>
+                        {COUNTRIES.map(c => (
+                          <option key={c.name} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-bold text-ink-2">Timezone</label>
-                      <input type="text" value={manageEmpTimezone} onChange={e => setManageEmpTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent" />
+                      <select value={manageEmpTimezone} onChange={e => setManageEmpTimezone(e.target.value)} className="h-10 w-full px-3 rounded-lg border border-hairline bg-surface text-xs text-ink focus:outline-none focus:border-accent">
+                        <option value="">Select Timezone</option>
+                        {Array.from(new Set(Object.values(COUNTRY_TIMEZONES))).sort().map(tz => (
+                          <option key={tz} value={tz}>{tz}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 

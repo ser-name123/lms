@@ -25,6 +25,7 @@ import {
   BadgeCheck,
   Link as LinkIcon,
   Pencil,
+  AlertCircle,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -61,6 +62,8 @@ import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_TONE,
   isTrialClosed,
+  getLeadStatusLabel,
+  getLeadStatusTone,
 } from "@/components/leads/lead-meta";
 import { SubmittedReport } from "@/components/leads/trial-report";
 
@@ -89,6 +92,7 @@ export default function LeadDetailPage() {
   const [teachers, setTeachers] = useState<{ id: string; name: string }[]>([]);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
 
   const reload = () => fetchLead(id).then(setLead).catch(() => undefined);
 
@@ -151,6 +155,23 @@ export default function LeadDetailPage() {
           <ArrowLeft className="size-4" /> Back to Trial Classes
         </button>
 
+        {lead.duplicateCount !== undefined && lead.duplicateCount > 0 && (
+          <div className="flex items-center justify-between p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 rounded-2xl text-xs font-semibold animate-pulse shadow-sm">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="size-5 shrink-0" />
+              <span>
+                <strong>Warning:</strong> This student has <strong>{lead.duplicateCount} duplicate request{lead.duplicateCount > 1 ? "s" : ""}</strong> under the same Email or Mobile number.
+              </span>
+            </div>
+            <button
+              onClick={() => setShowDuplicatesModal(true)}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[11px] font-bold transition-all shadow-sm cursor-pointer ml-4 whitespace-nowrap"
+            >
+              View Duplicates
+            </button>
+          </div>
+        )}
+
         {/* Header controls */}
         <Card className="border border-hairline bg-surface shadow-sm">
           <CardBody className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
@@ -161,8 +182,17 @@ export default function LeadDetailPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-black text-ink">{lead.studentFirstName} {lead.studentLastName}</h2>
-                  <Badge tone={LEAD_STATUS_TONE[lead.status]}>{LEAD_STATUS_LABEL[lead.status]}</Badge>
+                  <Badge tone={getLeadStatusTone(lead)}>{getLeadStatusLabel(lead)}</Badge>
                   <Badge tone={LEAD_PRIORITY_TONE[lead.priority]}>{lead.priority}</Badge>
+                  {lead.duplicateCount !== undefined && lead.duplicateCount > 0 && (
+                    <button
+                      onClick={() => setShowDuplicatesModal(true)}
+                      className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 text-rose-600 px-2 py-0.5 text-[10px] font-bold border border-rose-500/20 animate-pulse cursor-pointer hover:bg-rose-500/20"
+                    >
+                      <AlertCircle className="size-3" />
+                      {lead.duplicateCount} Duplicates
+                    </button>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-ink-3">{lead.interestedSubject || "General"} · {lead.country || "—"} · {lead.email}</p>
               </div>
@@ -196,6 +226,82 @@ export default function LeadDetailPage() {
         {tab === "trial" && <TrialTab lead={lead} teachers={teachers} onChange={() => { reload(); refreshActivities(); }} />}
         {tab === "decision" && <DecisionTab lead={lead} onChange={() => { reload(); refreshActivities(); }} />}
         {tab === "timeline" && <TimelineTab activities={activities} />}
+
+        {showDuplicatesModal && lead.duplicateLeads && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-[2px] transition-opacity">
+            <div className="bg-surface border border-hairline rounded-3xl w-full max-w-3xl max-h-[90vh] shadow-pop overflow-hidden flex flex-col transition-all">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-hairline px-6 py-4">
+                <div>
+                  <h2 className="font-extrabold text-base text-ink">Duplicate Lead Requests</h2>
+                  <p className="text-xs text-ink-3 mt-0.5">Other bookings matching this lead's email ({lead.email}) or mobile ({lead.mobile})</p>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setShowDuplicatesModal(false)} 
+                  className="size-8 hover:bg-surface-2 rounded-xl flex items-center justify-center text-ink-3 cursor-pointer"
+                >
+                  <XCircle className="size-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="overflow-x-auto rounded-xl border border-hairline bg-surface shadow-sm">
+                  <table className="w-full text-left text-xs font-semibold text-ink-2 border-collapse">
+                    <thead>
+                      <tr className="border-b border-hairline text-ink-3 uppercase text-[10px] tracking-wider bg-surface-2/15">
+                        <th className="p-3 pl-4">Request ID</th>
+                        <th className="p-3">Student Name</th>
+                        <th className="p-3">Email</th>
+                        <th className="p-3">Mobile No.</th>
+                        <th className="p-3">Applied Date</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 pr-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-hairline">
+                      {lead.duplicateLeads.map((dup: any) => (
+                        <tr key={dup.id} className="hover:bg-surface-2/5 transition">
+                          <td className="p-3 pl-4 font-mono font-bold text-accent">{dup.leadNumber}</td>
+                          <td className="p-3 font-bold text-ink">{dup.studentFirstName} {dup.studentLastName}</td>
+                          <td className="p-3 text-ink-3">{dup.email}</td>
+                          <td className="p-3 text-ink-3">{dup.mobile}</td>
+                          <td className="p-3 text-ink-3">{new Date(dup.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
+                          <td className="p-3"><Badge tone={getLeadStatusTone(dup)}>{getLeadStatusLabel(dup)}</Badge></td>
+                          <td className="p-3 pr-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowDuplicatesModal(false);
+                                router.push(`/leads/${dup.id}`);
+                              }}
+                              className="px-3 py-1 bg-accent text-white font-bold rounded-lg text-[10px] hover:bg-accent-active cursor-pointer"
+                            >
+                              Open Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end p-4 border-t border-hairline bg-surface-2/50">
+                <button 
+                  type="button" 
+                  onClick={() => setShowDuplicatesModal(false)} 
+                  className="h-9 px-4 rounded-xl border border-hairline bg-surface hover:bg-surface-2 text-xs font-bold text-ink-2 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -635,7 +741,16 @@ function TrialTab({ lead, teachers, onChange }: { lead: Lead; teachers: { id: st
           </CardBody>
         </Card>
       ) : (
-        trials.map((t) => <TrialCard key={t.id} trial={t} teachers={teachers} recommendedTeacherId={lead.recommendedTeacherId} onChange={refresh} />)
+        trials.map((t) => (
+          <TrialCard
+            key={t.id}
+            trial={t}
+            teachers={teachers}
+            recommendedTeacherId={lead.recommendedTeacherId}
+            leadAssignedTeacherId={lead.assignedTeacherId}
+            onChange={refresh}
+          />
+        ))
       )}
     </div>
   );
@@ -880,11 +995,13 @@ function TrialCard({
   trial,
   teachers,
   recommendedTeacherId,
+  leadAssignedTeacherId,
   onChange,
 }: {
   trial: LeadTrial;
   teachers: { id: string; name: string }[];
   recommendedTeacherId?: string | null;
+  leadAssignedTeacherId?: string | null;
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -912,7 +1029,11 @@ function TrialCard({
             <div className="flex items-center gap-2">
               <CalendarClock className="size-4 text-accent" />
               <p className="text-sm font-black text-ink">{new Date(trial.scheduledAt).toLocaleString()}</p>
-              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${TRIAL_STATUS_TONE[trial.status] || ""}`}>{trial.status.replace(/_/g, " ")}</span>
+              {!leadAssignedTeacherId && trial.status === "SCHEDULED" ? (
+                <span className="rounded-full border px-2 py-0.5 text-[10px] font-bold bg-blue-500/10 text-blue-600 border-blue-500/20">REQUEST</span>
+              ) : (
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${TRIAL_STATUS_TONE[trial.status] || ""}`}>{trial.status.replace(/_/g, " ")}</span>
+              )}
             </div>
             <p className="mt-1 text-xs text-ink-3">
               {trial.durationMins} mins · {trial.teacherName || "Unassigned teacher"}{trial.meetingProvider ? ` · ${trial.meetingProvider}` : ""}
@@ -949,7 +1070,13 @@ function TrialCard({
           />
         )}
 
-        <AssignTeacherRow trial={trial} teachers={teachers} recommendedTeacherId={recommendedTeacherId} onChange={onChange} />
+        <AssignTeacherRow
+          trial={trial}
+          teachers={teachers}
+          recommendedTeacherId={recommendedTeacherId}
+          leadAssignedTeacherId={leadAssignedTeacherId}
+          onChange={onChange}
+        />
 
         <MissingInfoRow trial={trial} onChange={onChange} />
 
@@ -1121,24 +1248,28 @@ function AssignTeacherRow({
   trial,
   teachers,
   recommendedTeacherId,
+  leadAssignedTeacherId,
   onChange,
 }: {
   trial: LeadTrial;
   teachers: { id: string; name: string }[];
   recommendedTeacherId?: string | null;
+  leadAssignedTeacherId?: string | null;
   onChange: () => void;
 }) {
   const [teacherId, setTeacherId] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const open = !trial.teacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
+  const open = !leadAssignedTeacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
   const free = useFreeTeachers(trial.scheduledAt, trial.durationMins);
 
   useEffect(() => {
     if (recommendedTeacherId) {
       setTeacherId(recommendedTeacherId);
+    } else if (trial.teacherId) {
+      setTeacherId(trial.teacherId);
     }
-  }, [recommendedTeacherId]);
+  }, [recommendedTeacherId, trial.teacherId]);
 
   if (!open) return null;
 
@@ -1192,9 +1323,9 @@ function AssignTeacherRow({
   };
 
   return (
-    <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
-      <p className="text-xs font-bold text-amber-700 dark:text-amber-400">
-        No teacher assigned — this class appears on nobody&apos;s schedule.
+    <div className="mt-4 rounded-xl border border-blue-500/40 bg-blue-500/10 p-3">
+      <p className="text-xs font-bold text-blue-700 dark:text-blue-400">
+        Trial Request Pending Confirmation — Assign teacher to confirm and schedule the trial class.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select value={teacherId} onChange={(e) => setTeacherId(e.target.value)} disabled={busy}
@@ -1206,7 +1337,7 @@ function AssignTeacherRow({
         </select>
         <button onClick={assign} disabled={busy || !teacherId}
           className="inline-flex h-9 items-center gap-1 rounded-lg bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <GraduationCap className="size-3.5" />} Assign
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <GraduationCap className="size-3.5" />} Confirm Schedule
         </button>
       </div>
       {!free.length && (
@@ -1386,15 +1517,93 @@ function FeedbackBlock({ trial, side, onChange }: { trial: LeadTrial; side: "tea
   );
 }
 
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+const parsePreferredTime = (
+  preferredTime: string | null | undefined,
+  preferredDays: string[],
+): Record<string, string> => {
+  const result: Record<string, string> = {};
+  if (!preferredTime) return result;
+
+  const pairs = preferredTime.split(",").map((p) => p.trim());
+  let parsedAny = false;
+  pairs.forEach((pair) => {
+    const colonIndex = pair.indexOf(":");
+    if (colonIndex !== -1) {
+      const day = pair.slice(0, colonIndex).trim();
+      const time = pair.slice(colonIndex + 1).trim();
+      if (preferredDays.includes(day)) {
+        result[day] = time;
+        parsedAny = true;
+      }
+    }
+  });
+
+  if (!parsedAny && preferredTime.trim().length > 0) {
+    preferredDays.forEach((day) => {
+      result[day] = preferredTime.trim();
+    });
+  }
+
+  return result;
+};
+
+const serializePreferredTime = (
+  preferredDays: string[],
+  dayTimes: Record<string, string>,
+): string | undefined => {
+  if (!preferredDays || preferredDays.length === 0) return undefined;
+  if (preferredDays.length === 1) {
+    return dayTimes[preferredDays[0]] || undefined;
+  }
+  const parts = preferredDays
+    .map((day) => {
+      const time = dayTimes[day];
+      return time ? `${day}: ${time}` : null;
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : undefined;
+};
+
 // ── Coach decision + conversion (Steps 13–14) ─────────────────────────────────
 function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
-  const [decision, setDecision] = useState<"ENROLL" | "FOLLOW_UP" | "REJECT">("ENROLL");
+  const [decision, setDecision] = useState<"ENROLL" | "FOLLOW_UP" | "REJECT">(
+    (lead as any).coachDecision === "FOLLOW_UP"
+      ? "FOLLOW_UP"
+      : (lead as any).coachDecision === "REJECT"
+      ? "REJECT"
+      : "ENROLL"
+  );
   const [followUpAt, setFollowUpAt] = useState("");
   const [enrollDate, setEnrollDate] = useState(new Date().toISOString().slice(0, 10));
   const [enrollTime, setEnrollTime] = useState("");
+  const [chosenDays, setChosenDays] = useState<string[]>([]);
+  const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
+
+  const handleDayToggle = (day: string) => {
+    setChosenDays((prev) => {
+      const on = prev.includes(day);
+      return on ? prev.filter((d) => d !== day) : [...prev, day];
+    });
+  };
+
+  useEffect(() => {
+    const serialized = serializePreferredTime(chosenDays, dayTimes);
+    setEnrollTime(serialized || "");
+  }, [chosenDays, dayTimes]);
   const [notes, setNotes] = useState(lead.coachDecisionNotes || "");
   const [busy, setBusy] = useState(false);
+  const [activities, setActivities] = useState<LeadActivity[]>([]);
   const converted = !!lead.convertedStudentId;
+
+  const loadActivities = () => {
+    fetchLeadActivities(lead.id).then(setActivities).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    loadActivities();
+  }, [lead.id]);
 
   /*
    * The package decides the first invoice. Left blank the server falls back to
@@ -1431,15 +1640,26 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         setFamilyPackageName(null);
       }
 
-      // Initialize enrollDate & enrollTime from the latest trial report details
+      // Initialize enrollDate & weekly schedule from the latest trial or lead preferences
       const latestTrial = trialsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
       if (latestTrial) {
         if (latestTrial.preferredStartDate) {
-          setEnrollDate(new Date(latestTrial.preferredStartDate).toISOString().slice(0, 10));
+          const dtStr = new Date(latestTrial.preferredStartDate).toISOString().slice(0, 10);
+          setEnrollDate(dtStr);
         }
-        if (latestTrial.preferredTime) {
-          setEnrollTime(latestTrial.preferredTime);
-        }
+        const initialDays = latestTrial.preferredDays?.length 
+          ? latestTrial.preferredDays 
+          : (lead.preferredDays ?? []);
+        setChosenDays(initialDays);
+
+        const initialTimeStr = latestTrial.preferredTime || "";
+        const parsed = parsePreferredTime(initialTimeStr, initialDays);
+        setDayTimes(parsed);
+      } else {
+        const initialDays = lead.preferredDays ?? [];
+        setChosenDays(initialDays);
+        const parsed = parsePreferredTime(lead.preferredSlot ? `${lead.preferredSlot}` : "", initialDays);
+        setDayTimes(parsed);
       }
     }).catch(() => undefined);
   }, [lead.id, converted]);
@@ -1478,10 +1698,16 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         ...(selectedDecision === "ENROLL" && packageId ? { packageId } : {}),
         ...(selectedDecision === "ENROLL" && enrollDate ? { preferredStartDate: new Date(enrollDate).toISOString() } : {}),
         ...(selectedDecision === "ENROLL" && enrollTime ? { preferredTime: enrollTime } : {}),
+        ...(selectedDecision === "ENROLL" && chosenDays?.length ? { preferredDays: chosenDays } : {}),
         ...(selectedDecision === "FOLLOW_UP" && followUpAt ? { followUpAt: new Date(followUpAt).toISOString() } : {}),
       });
       Swal.fire({ toast: true, position: "top-end", icon: "success", title: selectedDecision === "ENROLL" ? "Converted to student 🎉" : "Decision recorded", showConfirmButton: false, timer: 2200 });
+      if (selectedDecision === "FOLLOW_UP") {
+        setNotes("");
+        setFollowUpAt("");
+      }
       onChange();
+      loadActivities();
     } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed.", icon: "error", background: swalBg() }); }
     finally { setBusy(false); }
   };
@@ -1582,14 +1808,42 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Preferred Class Time</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 10:00 AM or 14:30"
-                  value={enrollTime}
-                  onChange={(e) => setEnrollTime(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
-                />
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Preferred Class Day &amp; Time</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {WEEKDAYS.map((d) => {
+                    const on = chosenDays.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => handleDayToggle(d)}
+                        className={`h-9 rounded-lg border px-3 text-[11.5px] font-bold transition cursor-pointer ${
+                          on ? "border-accent bg-accent/10 text-accent" : "border-hairline bg-surface text-ink-3 hover:bg-surface-2"
+                        }`}
+                      >
+                        {d.slice(0, 3)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {chosenDays.length > 0 && (
+                  <div className="grid gap-2 sm:grid-cols-2 mt-2">
+                    {chosenDays.map((day) => (
+                      <div key={day} className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-ink-3 w-10">{day.slice(0, 3)}:</span>
+                        <input
+                          type="time"
+                          value={dayTimes[day] ?? ""}
+                          onChange={(e) => {
+                            const timeVal = e.target.value;
+                            setDayTimes((prev) => ({ ...prev, [day]: timeVal }));
+                          }}
+                          className="h-9 w-full rounded-lg border border-hairline bg-surface px-3 text-xs text-ink focus:outline-none focus:border-accent cursor-pointer"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1658,6 +1912,39 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
           )}
           {decision === "ENROLL" ? "Convert & Enrol as Student" : decision === "FOLLOW_UP" ? "Schedule Follow Up" : "Confirm Not Enrolling"}
         </button>
+
+        {(() => {
+          const followUps = activities.filter(
+            (a) => a.type === "FOLLOW_UP_SCHEDULED" ||
+                   (a.type === "COACH_DECISION" && a.message.toLowerCase().includes("follow up"))
+          );
+          if (followUps.length === 0) return null;
+          return (
+            <div className="mt-6 border-t border-hairline pt-5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-ink-3 mb-3">Follow Up History</h4>
+              <div className="space-y-3">
+                {followUps.map((f) => (
+                  <div key={f.id} className="rounded-xl border border-hairline bg-surface-2/40 p-3.5 text-xs animate-fade-in">
+                    <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                      <span className="font-bold text-ink flex items-center gap-1.5">
+                        <CalendarClock className="size-3.5 text-accent" />
+                        {f.message.split(" — ")[0]}
+                      </span>
+                      <span className="text-[10px] text-ink-3">
+                        Recorded by {f.actorName || "Coach"} on {new Date(f.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    {f.message.includes(" — ") && (
+                      <p className="text-ink-2 font-medium bg-surface border border-hairline/60 rounded-lg p-2.5 mt-1 whitespace-pre-wrap">
+                        {f.message.split(" — ").slice(1).join(" — ")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </CardBody>
     </Card>
   );

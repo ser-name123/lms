@@ -172,9 +172,9 @@ function isoDay(offset) {
       `${t1[0]?.teacherId} vs female ${teacherIds.female}`,
     );
     check(
-      'the lead carries the same teacher',
-      t1[0]?.assignedTeacherId === t1[0]?.teacherId,
-      `${t1[0]?.assignedTeacherId}`,
+      'the lead is initially unassigned (trial request)',
+      t1[0]?.assignedTeacherId === null,
+      String(t1[0]?.assignedTeacherId),
     );
 
     // The opposite preference must pick the other one, or the first result was

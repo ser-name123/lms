@@ -264,8 +264,8 @@ const isoDay = (offsetDays) =>
       stored.preferredSlot === slotList[0],
       `sessionFor=${stored.sessionFor} howFound=${stored.howFound} slot=${stored.preferredSlot}`);
     check(
-      'the lead opens as TRIAL_SCHEDULED, not NEW',
-      stored.status === 'TRIAL_SCHEDULED',
+      'the lead opens as NEW',
+      stored.status === 'NEW',
       stored.status,
     );
 

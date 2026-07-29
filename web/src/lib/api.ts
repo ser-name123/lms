@@ -2053,6 +2053,17 @@ export interface Lead {
   utmSource: string | null;
   utmCampaign: string | null;
   utmMedium: string | null;
+  duplicateCount?: number;
+  duplicateLeads?: {
+    id: string;
+    leadNumber: string;
+    studentFirstName: string;
+    studentLastName: string;
+    email: string;
+    mobile: string;
+    createdAt: string;
+    status: string;
+  }[];
   status: LeadStatus;
   priority: LeadPriority;
   assignedCoachId: string | null;
@@ -2071,11 +2082,20 @@ export interface Lead {
   coachDecision: string | null;
   coachDecisionNotes: string | null;
   coachDecisionAt: string | null;
+  followUpAt?: string | null;
   convertedStudentId: string | null;
   convertedStudentCode: string | null;
+  invoicePending?: boolean;
   convertedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  trials?: {
+    id: string;
+    status: string;
+    scheduledAt: string;
+    reportSubmittedAt: string | null;
+    createdAt: string;
+  }[];
 }
 
 export interface LeadActivity {
@@ -2093,6 +2113,9 @@ export interface LeadStats {
   converted: number;
   rejected: number;
   newLeads: number;
+  trialAssigned: number;
+  trialCompleted: number;
+  followUp: number;
   inPipeline: number;
   conversionRate: number;
   avgScore: number;
@@ -2185,9 +2208,12 @@ export const fetchLeads = (params: {
   subject?: string;
   coachId?: string;
   trialStatus?: string;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
 }) => {
   const q: Record<string, string> = { page: String(params.page), limit: String(params.limit) };
-  (["search", "status", "priority", "country", "subject", "coachId", "trialStatus"] as const).forEach((k) => {
+  (["search", "status", "priority", "country", "subject", "coachId", "trialStatus", "date", "startDate", "endDate"] as const).forEach((k) => {
     const v = params[k];
     if (v && v !== "All") q[k] = String(v);
   });

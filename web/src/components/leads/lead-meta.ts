@@ -86,3 +86,17 @@ export const EVALUATION_SKILLS = [
   "Homework",
   "Concentration",
 ];
+
+export function getLeadStatusLabel(lead: { status: LeadStatus; coachDecision?: string | null }) {
+  if (lead.coachDecision === "FOLLOW_UP" && lead.status === "WAITING_PARENT_DECISION") {
+    return "Follow Up Later";
+  }
+  return LEAD_STATUS_LABEL[lead.status];
+}
+
+export function getLeadStatusTone(lead: { status: LeadStatus; coachDecision?: string | null }): Tone {
+  if (lead.coachDecision === "FOLLOW_UP" && lead.status === "WAITING_PARENT_DECISION") {
+    return "warning";
+  }
+  return LEAD_STATUS_TONE[lead.status];
+}

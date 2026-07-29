@@ -262,8 +262,15 @@ export class LeadAvailabilityService {
     );
     const merged = this.merge(windows);
 
-    const slots = this.toSlots(merged);
-    const fallback = false;
+    let slots = this.toSlots(merged);
+    let fallback = false;
+
+    if (slots.length === 0) {
+      fallback = true;
+      const fallbackFrom = this.toMinutes(FALLBACK_WINDOW.from)!;
+      const fallbackTo = this.toMinutes(FALLBACK_WINDOW.to)!;
+      slots = this.toSlots([{ from: fallbackFrom, to: fallbackTo }]);
+    }
 
     const taken = await this.takenSlots(date);
     return {

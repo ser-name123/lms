@@ -11,6 +11,13 @@ import {
   UserCheck,
   UserX,
   Trash2,
+  ClipboardList,
+  ClipboardCheck,
+  PhoneCall,
+  XCircle,
+  GraduationCap,
+  Eye,
+  MessageSquare,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -22,6 +29,8 @@ import { fetchLeads, fetchLeadStats, fetchLeadFunnel, bulkDeleteLeads, type Lead
 import {
   LEAD_STATUS_LABEL,
   LEAD_STATUS_TONE,
+  getLeadStatusLabel,
+  getLeadStatusTone,
 } from "@/components/leads/lead-meta";
 
 const swalBg = () =>
@@ -33,10 +42,14 @@ export default function LeadsPage() {
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [funnelData, setFunnelData] = useState<LeadFunnel | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"request" | "session">("request");
+  const [activeTab, setActiveTab] = useState<"request" | "assigned" | "completed" | "followup" | "rejected" | "converted">("request");
   const [showConverted, setShowConverted] = useState(false);
   const [priority, setPriority] = useState("All");
   const [trialStatus, setTrialStatus] = useState("All");
+  const [sessionStatus, setSessionStatus] = useState("All");
+  const [dateFilter, setDateFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [search, setSearch] = useState("");
   /*
    * The table used to ask for one page of 100 and print "Total Requests 340"
@@ -53,15 +66,32 @@ export default function LeadsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
 
-  const statusQuery = showConverted
-    ? "CONVERTED"
-    : activeTab === "request"
+  const statusQuery = 
+    activeTab === "request"
       ? "NEW"
-      : "NOT_NEW";
+      : activeTab === "assigned"
+      ? "TEACHER_ASSIGNED_ALL"
+      : activeTab === "completed"
+      ? "TRIAL_COMPLETED"
+      : activeTab === "followup"
+      ? "FOLLOW_UP_ALL"
+      : activeTab === "rejected"
+      ? "REJECTED"
+      : "CONVERTED";
 
   const load = () => {
     setLoading(true);
-    fetchLeads({ page, limit: PAGE_SIZE, status: statusQuery, priority, trialStatus, search: search || undefined })
+    fetchLeads({
+      page,
+      limit: PAGE_SIZE,
+      status: statusQuery,
+      priority,
+      trialStatus,
+      search: search || undefined,
+      date: dateFilter || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    })
       .then((res) => {
         setItems(res.items);
         setMeta({
@@ -78,18 +108,22 @@ export default function LeadsPage() {
     fetchLeadFunnel().then(setFunnelData).catch(() => undefined);
   };
 
-  const handleTabChange = (tab: "request" | "session") => {
+  const handleTabChange = (tab: "request" | "assigned" | "completed" | "followup" | "rejected" | "converted") => {
     setActiveTab(tab);
-    setShowConverted(false);
+    setShowConverted(tab === "converted");
+    setSessionStatus("All");
+    setDateFilter("");
+    setStartDate("");
+    setEndDate("");
     setPage(1);
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [activeTab, showConverted, priority, trialStatus, page]);
+  useEffect(() => { load(); }, [activeTab, showConverted, priority, trialStatus, sessionStatus, dateFilter, startDate, endDate, page]);
 
   // A filter change makes the current page number meaningless.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setPage(1); }, [activeTab, showConverted, priority, trialStatus]);
+  useEffect(() => { setPage(1); }, [activeTab, showConverted, priority, trialStatus, sessionStatus, dateFilter, startDate, endDate]);
 
 
   const toggle = (id: string) =>
@@ -165,13 +199,23 @@ export default function LeadsPage() {
 
   const tr = funnelData?.trials;
   const trialStats = [
-    { label: "Trials Scheduled", value: tr?.scheduled ?? 0, icon: CalendarClock, color: "text-accent bg-accent/10", statusValue: "SCHEDULED_ALL" },
-    { label: "Attended", value: tr?.attended ?? 0, icon: UserCheck, color: "text-emerald-500 bg-emerald-500/10", statusValue: "ATTENDED" },
-    { label: "No-shows", value: tr?.noShow ?? 0, icon: UserX, color: "text-rose-500 bg-rose-500/10", statusValue: "NO_SHOW" },
-    // Out of trials that have actually concluded, which is why "Upcoming" is
-    // shown too — otherwise the four tiles cannot be added up by the reader.
-    { label: "Upcoming", value: tr?.upcoming ?? 0, icon: CalendarClock, color: "text-amber-500 bg-amber-500/10", statusValue: "UPCOMING" },
-  ];
+    { label: "Trial Request", value: stats?.newLeads ?? 0, icon: ClipboardList, color: "text-blue-500 bg-blue-500/10", tabValue: "request" },
+    { label: "Trial Assigned", value: stats?.trialAssigned ?? 0, icon: UserCheck, color: "text-emerald-500 bg-emerald-500/10", tabValue: "assigned" },
+    { label: "Trial Completed", value: stats?.trialCompleted ?? 0, icon: ClipboardCheck, color: "text-purple-500 bg-purple-500/10", tabValue: "completed" },
+    { label: "Follow up", value: stats?.followUp ?? 0, icon: PhoneCall, color: "text-amber-500 bg-amber-500/10", tabValue: "followup" },
+    { label: "Not Enrolled", value: stats?.rejected ?? 0, icon: XCircle, color: "text-rose-500 bg-rose-500/10", tabValue: "rejected" },
+    { label: "Enrolled Student", value: stats?.converted ?? 0, icon: GraduationCap, color: "text-teal-500 bg-teal-500/10", tabValue: "converted" },
+  ] as const;
+
+  const showComments = (studentName: string, notes: string | null) => {
+    Swal.fire({
+      title: `${studentName}'s Comments`,
+      text: notes || "No comments recorded.",
+      icon: "info",
+      confirmButtonText: "Close",
+      background: swalBg(),
+    });
+  };
 
   return (
     <>
@@ -180,21 +224,15 @@ export default function LeadsPage() {
       <div className="animate-fade-up space-y-6 p-4 sm:p-6">
         {/* Trial & conversion analytics */}
         <div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
             {trialStats.map((k) => {
-              const isClickable = k.statusValue !== undefined;
-              const isActive = isClickable && trialStatus === k.statusValue;
+              const isActive = activeTab === k.tabValue;
               return (
                 <Card 
                   key={k.label} 
-                  onClick={() => {
-                    if (isClickable) {
-                      setTrialStatus(prev => prev === k.statusValue ? "All" : k.statusValue!);
-                    }
-                  }}
+                  onClick={() => handleTabChange(k.tabValue)}
                   className={cn(
-                    "border border-hairline bg-surface shadow-sm transition-all duration-200 select-none",
-                    isClickable ? "cursor-pointer hover:border-accent/40 hover:bg-surface-2/40 active:scale-98" : "",
+                    "border border-hairline bg-surface shadow-sm transition-all duration-200 select-none cursor-pointer hover:border-accent/40 hover:bg-surface-2/40 active:scale-98",
                     isActive ? "ring-2 ring-accent border-accent/80 bg-accent/5 shadow-md shadow-accent/5" : ""
                   )}
                 >
@@ -216,57 +254,30 @@ export default function LeadsPage() {
           </div>
         </div>
 
-        {/* Tabs Bar */}
-        <div className="border-b border-hairline flex gap-6">
-          <button
-            onClick={() => handleTabChange("request")}
-            className={`pb-3 text-sm font-bold relative transition-all ${
-              activeTab === "request" && !showConverted
-                ? "text-accent font-extrabold"
-                : "text-ink-3 hover:text-ink-2"
-            }`}
-          >
-            Trial Request
-            {stats?.newLeads !== undefined && (
-              <span className={`ml-2 px-2 py-0.5 text-[10px] font-extrabold rounded-full ${
-                activeTab === "request" && !showConverted
-                  ? "bg-accent/10 text-accent"
-                  : "bg-surface-3 text-ink-3"
-              }`}>
-                {stats.newLeads}
-              </span>
-            )}
-            {activeTab === "request" && !showConverted && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabChange("session")}
-            className={`pb-3 text-sm font-bold relative transition-all ${
-              activeTab === "session" && !showConverted
-                ? "text-accent font-extrabold"
-                : "text-ink-3 hover:text-ink-2"
-            }`}
-          >
-            Trial Session
-            {stats?.total !== undefined && (
-              <span className={`ml-2 px-2 py-0.5 text-[10px] font-extrabold rounded-full ${
-                activeTab === "session" && !showConverted
-                  ? "bg-accent/10 text-accent"
-                  : "bg-surface-3 text-ink-3"
-              }`}>
-                {stats.total - stats.newLeads - (stats.converted ?? 0)}
-              </span>
-            )}
-            {activeTab === "session" && !showConverted && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />
-            )}
-          </button>
-        </div>
-
         {/* Filters */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          {/* Start Date Filter */}
+          <div className="relative max-w-xs w-full sm:w-auto flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-ink-3 uppercase">From</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-xs font-semibold text-ink-2 focus:outline-none focus:border-accent"
+            />
+          </div>
+
+          {/* End Date Filter */}
+          <div className="relative max-w-xs w-full sm:w-auto flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-ink-3 uppercase">To</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-xs font-semibold text-ink-2 focus:outline-none focus:border-accent"
+            />
+          </div>
+
           <form onSubmit={(e) => { e.preventDefault(); load(); }} className="relative max-w-xs w-full">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-3" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, mobile, lead #…" className="h-10 w-full rounded-xl border border-hairline bg-surface pl-9 pr-3 text-xs text-ink focus:outline-none focus:border-accent" />
@@ -325,6 +336,34 @@ export default function LeadsPage() {
                     <th className="px-5 py-4">Course</th>
                     <th className="px-5 py-4">Preferred Teacher</th>
                     <th className="px-5 py-4">Preferred Date &amp; Time</th>
+                    
+                    {/* Dynamic Headers */}
+                    {activeTab === "assigned" && (
+                      <th className="px-5 py-4">Teacher Name</th>
+                    )}
+                    {activeTab === "completed" && (
+                      <>
+                        <th className="px-5 py-4">Teacher Name</th>
+                        <th className="px-5 py-4">Completed Date</th>
+                      </>
+                    )}
+                    {activeTab === "followup" && (
+                      <>
+                        <th className="px-5 py-4">Follow up Date &amp; Time</th>
+                        <th className="px-5 py-4">Comments</th>
+                      </>
+                    )}
+                    {activeTab === "rejected" && (
+                      <th className="px-5 py-4">Comments</th>
+                    )}
+                    {activeTab === "converted" && (
+                      <>
+                        <th className="px-5 py-4">Student Status</th>
+                        <th className="px-5 py-4">Date of Joining</th>
+                        <th className="px-5 py-4">Teacher Name</th>
+                      </>
+                    )}
+
                     <th className="px-5 py-4">Status</th>
                     <th className="px-5 py-4 text-right">Action</th>
                   </tr>
@@ -349,10 +388,114 @@ export default function LeadsPage() {
                       <td className="px-5 py-3.5 text-xs text-ink-2">{l.interestedSubject || "—"}</td>
                       <td className="px-5 py-3.5 text-xs text-ink-3">{l.preferredTeacherGender || "Any"}</td>
                       <td className="px-5 py-3.5 text-xs">
-                        <p className="font-bold text-ink">{l.preferredDate ? new Date(l.preferredDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</p>
-                        <p className="text-[10px] text-ink-3">{l.preferredSlot || "—"}</p>
+                        {(() => {
+                          if (!l.preferredDate || !l.preferredSlot) {
+                            return (
+                              <>
+                                <p className="font-bold text-ink">—</p>
+                                <p className="text-[10px] text-ink-3">—</p>
+                              </>
+                            );
+                          }
+                          try {
+                            const datePart = l.preferredDate.slice(0, 10);
+                            const d = new Date(`${datePart}T${l.preferredSlot}:00Z`);
+                            if (isNaN(d.getTime())) {
+                              return (
+                                <>
+                                  <p className="font-bold text-ink">{new Date(l.preferredDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>
+                                  <p className="text-[10px] text-ink-3">{l.preferredSlot}</p>
+                                </>
+                              );
+                            }
+                            return (
+                              <>
+                                <p className="font-bold text-ink">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>
+                                <p className="text-[10px] text-ink-3">
+                                  {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
+                                </p>
+                              </>
+                            );
+                          } catch {
+                            return (
+                              <>
+                                <p className="font-bold text-ink">{new Date(l.preferredDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>
+                                <p className="text-[10px] text-ink-3">{l.preferredSlot}</p>
+                              </>
+                            );
+                          }
+                        })()}
                       </td>
-                      <td className="px-5 py-3.5"><Badge tone={LEAD_STATUS_TONE[l.status]}>{LEAD_STATUS_LABEL[l.status]}</Badge></td>
+
+                      {/* Dynamic Columns */}
+                      {activeTab === "assigned" && (
+                        <td className="px-5 py-3.5 text-xs text-ink-2 font-bold">{l.assignedTeacherName || "—"}</td>
+                      )}
+                      {activeTab === "completed" && (() => {
+                        const completedTrial = l.trials?.find(t => t.status === "COMPLETED" || t.reportSubmittedAt);
+                        const completedDateText = completedTrial?.reportSubmittedAt 
+                          ? new Date(completedTrial.reportSubmittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) 
+                          : completedTrial?.scheduledAt 
+                          ? new Date(completedTrial.scheduledAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                          : "—";
+                        return (
+                          <>
+                            <td className="px-5 py-3.5 text-xs text-ink-2 font-bold">{l.assignedTeacherName || "—"}</td>
+                            <td className="px-5 py-3.5 text-xs text-ink-3 font-semibold">{completedDateText}</td>
+                          </>
+                        );
+                      })()}
+                      {activeTab === "followup" && (() => {
+                        const followUpText = l.followUpAt
+                          ? new Date(l.followUpAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
+                          : "—";
+                        return (
+                          <>
+                            <td className="px-5 py-3.5 text-xs text-ink-2 font-semibold">{followUpText}</td>
+                            <td className="px-5 py-3.5 text-xs text-ink-3" onClick={(e) => e.stopPropagation()}>
+                              <button 
+                                onClick={() => showComments(`${l.studentFirstName} ${l.studentLastName}`, l.coachDecisionNotes)}
+                                className="p-1 rounded-lg hover:bg-surface-3 text-accent cursor-pointer flex items-center justify-center"
+                                title="View Follow up comments"
+                              >
+                                <MessageSquare className="size-4" />
+                              </button>
+                            </td>
+                          </>
+                        );
+                      })()}
+                      {activeTab === "rejected" && (
+                        <td className="px-5 py-3.5 text-xs text-ink-3" onClick={(e) => e.stopPropagation()}>
+                          <button 
+                            onClick={() => showComments(`${l.studentFirstName} ${l.studentLastName}`, l.coachDecisionNotes)}
+                            className="p-1 rounded-lg hover:bg-surface-3 text-accent cursor-pointer flex items-center justify-center"
+                            title="View rejection comments"
+                          >
+                            <MessageSquare className="size-4" />
+                          </button>
+                        </td>
+                      )}
+                      {activeTab === "converted" && (
+                        <>
+                          <td className="px-5 py-3.5 text-xs">
+                            <span className={`font-extrabold text-[9px] px-2.5 py-1 rounded-lg ${
+                              l.invoicePending
+                                ? "bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                                : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                            }`}>
+                              {l.invoicePending ? "INVOICE SENT" : "ACTIVE"}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 text-xs text-ink-3">
+                            {l.convertedAt ? new Date(l.convertedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                          </td>
+                          <td className="px-5 py-3.5 text-xs text-ink-2 font-bold">
+                            {l.assignedTeacherName || "—"}
+                          </td>
+                        </>
+                      )}
+
+                      <td className="px-5 py-3.5"><Badge tone={getLeadStatusTone(l)}>{getLeadStatusLabel(l)}</Badge></td>
                       <td className="px-5 py-3.5 text-right">
                         <ArrowRight className="ml-auto size-4 text-ink-3" />
                       </td>

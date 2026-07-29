@@ -157,7 +157,7 @@ export class LeadsService implements OnModuleInit {
         utmSource: dto.utmSource || null,
         utmCampaign: dto.utmCampaign || null,
         utmMedium: dto.utmMedium || null,
-        status: LeadStatus.TRIAL_SCHEDULED,
+        status: LeadStatus.NEW,
         priority: LeadPriority.MEDIUM,
         assignedCoachId: coachId,
         assignedCoachAt: coachId ? new Date() : null,
@@ -169,7 +169,7 @@ export class LeadsService implements OnModuleInit {
      * The slot came from merged availability, so it belongs to no one teacher.
      * We leave it null for the coach/admin to fill in manually.
      */
-    const teacherId = null;
+    const teacherId = recommendedTeacherId;
 
     const trial = await this.prisma.leadTrial.create({
       data: {
@@ -183,12 +183,6 @@ export class LeadsService implements OnModuleInit {
       },
     });
 
-    if (teacherId) {
-      await this.prisma.lead.update({
-        where: { id: lead.id },
-        data: { assignedTeacherId: teacherId, assignedTeacherAt: new Date() },
-      });
-    }
 
     const zoom = await this.zoom.createTrialMeeting({
       topic: `Free trial — ${lead.studentFirstName} ${lead.studentLastName}`.trim(),
@@ -451,6 +445,15 @@ export class LeadsService implements OnModuleInit {
                 { status: LeadStatus.TRIAL_SCHEDULED, assignedTeacherId: null },
               ],
             }
+          : status === 'TEACHER_ASSIGNED_ALL'
+            ? {
+                status: LeadStatus.TRIAL_SCHEDULED,
+                assignedTeacherId: { not: null },
+              }
+          : status === 'FOLLOW_UP_ALL'
+            ? {
+                coachDecision: 'FOLLOW_UP',
+              }
           : status === 'NOT_NEW'
             ? {
                 status: {
@@ -484,15 +487,36 @@ export class LeadsService implements OnModuleInit {
     };
 
     if (trialStatus && trialStatus !== 'All') {
-      if (trialStatus === 'SCHEDULED_ALL') {
-        where.trials = { some: {} };
-      } else if (trialStatus === 'ATTENDED') {
-        where.trials = { some: { status: 'COMPLETED' } };
+      const trialsFilter: any = {};
+      if (trialStatus === 'ATTENDED') {
+        trialsFilter.status = 'COMPLETED';
       } else if (trialStatus === 'NO_SHOW') {
-        where.trials = { some: { status: 'NO_SHOW' } };
+        trialsFilter.status = 'NO_SHOW';
       } else if (trialStatus === 'UPCOMING') {
-        where.trials = { some: { status: { in: ['SCHEDULED', 'RESCHEDULED'] } } };
+        trialsFilter.status = { in: ['SCHEDULED', 'RESCHEDULED'] };
       }
+      where.trials = { some: trialsFilter };
+    }
+
+    if (dto.startDate || dto.endDate) {
+      const dateRange: any = {};
+      if (dto.startDate && dto.endDate) {
+        dateRange.gte = new Date(`${dto.startDate}T00:00:00.000Z`);
+        dateRange.lte = new Date(`${dto.endDate}T23:59:59.999Z`);
+      } else if (dto.startDate) {
+        dateRange.gte = new Date(`${dto.startDate}T00:00:00.000Z`);
+        dateRange.lte = new Date(`${dto.startDate}T23:59:59.999Z`);
+      } else if (dto.endDate) {
+        dateRange.lte = new Date(`${dto.endDate}T23:59:59.999Z`);
+      }
+      where.preferredDate = dateRange;
+    } else if (dto.date) {
+      const startDate = new Date(`${dto.date}T00:00:00.000Z`);
+      const endDate = new Date(startDate.getTime() + 86400000);
+      where.preferredDate = {
+        gte: startDate,
+        lt: endDate,
+      };
     }
 
     const [items, total] = await this.prisma.$transaction([
@@ -501,6 +525,17 @@ export class LeadsService implements OnModuleInit {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: {
+          trials: {
+            select: {
+              id: true,
+              status: true,
+              scheduledAt: true,
+              reportSubmittedAt: true,
+              createdAt: true,
+            },
+          },
+        },
       }),
       this.prisma.lead.count({ where }),
     ]);
@@ -554,7 +589,33 @@ export class LeadsService implements OnModuleInit {
       }
     }
     const [withNames] = await this.attachNames([lead]);
-    return withNames;
+
+    // Find duplicates based on same email or mobile
+    const duplicateLeads = await this.prisma.lead.findMany({
+      where: {
+        id: { not: lead.id },
+        OR: [
+          { email: lead.email },
+          { mobile: lead.mobile },
+        ],
+      },
+      select: {
+        id: true,
+        leadNumber: true,
+        studentFirstName: true,
+        studentLastName: true,
+        email: true,
+        mobile: true,
+        createdAt: true,
+        status: true,
+      },
+    });
+
+    return {
+      ...withNames,
+      duplicateCount: duplicateLeads.length,
+      duplicateLeads,
+    };
   }
 
   async listActivities(id: string, user?: Actor) {
@@ -577,7 +638,16 @@ export class LeadsService implements OnModuleInit {
     const statusCounts: Record<string, number> = {};
     byStatus.forEach((r) => (statusCounts[r.status] = r._count._all));
 
-    const [total, converted, rejected, newRequestsCount, avgRatingAgg] = await Promise.all([
+    const [
+      total,
+      converted,
+      rejected,
+      newRequestsCount,
+      trialAssignedCount,
+      trialCompletedCount,
+      followUpCount,
+      avgRatingAgg
+    ] = await Promise.all([
       this.prisma.lead.count({ where: scope }),
       this.prisma.lead.count({ where: { ...scope, status: LeadStatus.CONVERTED } }),
       this.prisma.lead.count({ where: { ...scope, status: LeadStatus.REJECTED } }),
@@ -588,6 +658,25 @@ export class LeadsService implements OnModuleInit {
             { status: LeadStatus.NEW },
             { status: LeadStatus.TRIAL_SCHEDULED, assignedTeacherId: null },
           ],
+        },
+      }),
+      this.prisma.lead.count({
+        where: {
+          ...scope,
+          status: LeadStatus.TRIAL_SCHEDULED,
+          assignedTeacherId: { not: null },
+        },
+      }),
+      this.prisma.lead.count({
+        where: {
+          ...scope,
+          status: LeadStatus.TRIAL_COMPLETED,
+        },
+      }),
+      this.prisma.lead.count({
+        where: {
+          ...scope,
+          coachDecision: 'FOLLOW_UP',
         },
       }),
       this.prisma.lead.aggregate({ where: scope, _avg: { overallScore: true } }),
@@ -604,6 +693,9 @@ export class LeadsService implements OnModuleInit {
       converted,
       rejected,
       newLeads: newRequestsCount,
+      trialAssigned: trialAssignedCount,
+      trialCompleted: trialCompletedCount,
+      followUp: followUpCount,
       inPipeline:
         total - newRequestsCount - (statusCounts[LeadStatus.CONVERTED] || 0) - (statusCounts[LeadStatus.REJECTED] || 0) - (statusCounts[LeadStatus.CLOSED] || 0),
       conversionRate: total ? Math.round((converted / total) * 100) : 0,
@@ -1158,9 +1250,20 @@ export class LeadsService implements OnModuleInit {
   }
 
   async listTrials(leadId: string, user?: Actor) {
-    await this.assertAccess(leadId, user);
+    const lead = await this.assertAccess(leadId, user);
+    const relatedLeads = await this.prisma.lead.findMany({
+      where: {
+        OR: [
+          { email: lead.email },
+          { mobile: lead.mobile },
+        ],
+      },
+      select: { id: true },
+    });
+    const leadIds = relatedLeads.map((l) => l.id);
+
     const trials = await this.prisma.leadTrial.findMany({
-      where: { leadId },
+      where: { leadId: { in: leadIds } },
       orderBy: { scheduledAt: 'desc' },
     });
     return this.attachTrialNames(trials);
@@ -1269,17 +1372,27 @@ export class LeadsService implements OnModuleInit {
      * lead pointing at the old person — or at nobody — and every screen that
      * reads the lead rather than the trial disagreed with this one.
      */
-    if (data.teacherId && data.teacherId !== trial.teacherId) {
-      await this.prisma.lead.update({
+    if (data.teacherId) {
+      const lead = await this.prisma.lead.findUnique({
         where: { id: trial.leadId },
-        data: { assignedTeacherId: data.teacherId, assignedTeacherAt: new Date() },
+        select: { assignedTeacherId: true, status: true },
       });
-      await this.addActivity(
-        trial.leadId,
-        'TEACHER_ASSIGNED',
-        trial.teacherId ? 'Trial teacher changed.' : 'Teacher assigned to the trial.',
-        actor,
-      );
+      if (lead && lead.assignedTeacherId !== data.teacherId) {
+        await this.prisma.lead.update({
+          where: { id: trial.leadId },
+          data: {
+            assignedTeacherId: data.teacherId,
+            assignedTeacherAt: new Date(),
+            status: LeadStatus.TEACHER_ASSIGNED,
+          },
+        });
+        await this.addActivity(
+          trial.leadId,
+          'TEACHER_ASSIGNED',
+          trial.teacherId ? 'Trial teacher changed.' : 'Teacher assigned to the trial.',
+          actor,
+        );
+      }
     }
 
     // Reflect terminal trial states onto the lead pipeline.
@@ -1937,6 +2050,7 @@ export class LeadsService implements OnModuleInit {
           data: {
             ...(dto.preferredStartDate ? { preferredStartDate: new Date(dto.preferredStartDate) } : {}),
             ...(dto.preferredTime ? { preferredTime: dto.preferredTime } : {}),
+            ...(dto.preferredDays ? { preferredDays: dto.preferredDays } : {}),
             preferredPackage,
           },
         });
@@ -1946,14 +2060,31 @@ export class LeadsService implements OnModuleInit {
 
     const status = dto.decision === 'REJECT' ? LeadStatus.REJECTED : LeadStatus.WAITING_PARENT_DECISION;
     const updated = await this.prisma.lead.update({ where: { id: leadId }, data: { status } });
-    await this.addActivity(
-      leadId,
-      'COACH_DECISION',
-      dto.decision === 'REJECT'
-        ? `Coach decision: not enrolling${dto.notes ? ` — ${dto.notes}` : ''}.`
-        : `Coach decision: follow up later${dto.notes ? ` — ${dto.notes}` : ''}.`,
-      actor,
-    );
+    if (dto.decision === 'FOLLOW_UP') {
+      const followUpTime = new Date(dto.followUpAt!).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+      await this.addActivity(
+        leadId,
+        'FOLLOW_UP_SCHEDULED',
+        `Follow up scheduled for ${followUpTime}${dto.notes ? ` — ${dto.notes}` : ''}`,
+        actor,
+      );
+    } else {
+      await this.addActivity(
+        leadId,
+        'COACH_DECISION',
+        dto.decision === 'REJECT'
+          ? `Coach decision: not enrolling${dto.notes ? ` — ${dto.notes}` : ''}.`
+          : `Coach decision: enrolling${dto.notes ? ` — ${dto.notes}` : ''}.`,
+        actor,
+      );
+    }
     // Let the family know when the lead is closed out.
     if (dto.decision === 'REJECT') {
       this.notifyDecision(lead, false).catch(() => undefined);
@@ -2069,11 +2200,16 @@ export class LeadsService implements OnModuleInit {
      * the parent's own contact details, collected in the report precisely so a
      * parent account could be created, never leave the trial row.
      */
-    const [report] = await this.prisma.leadTrial.findMany({
-      where: { leadId: lead.id, reportSubmittedAt: { not: null } },
-      orderBy: { reportSubmittedAt: 'desc' },
-      take: 1,
-    });
+    const [report, latestTrial] = await Promise.all([
+      this.prisma.leadTrial.findFirst({
+        where: { leadId: lead.id, reportSubmittedAt: { not: null } },
+        orderBy: { reportSubmittedAt: 'desc' },
+      }),
+      this.prisma.leadTrial.findFirst({
+        where: { leadId: lead.id },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
     // One password per child, so handing one out never exposes the others.
     const passwords = children.map(() => this.tempPassword());
@@ -2135,7 +2271,7 @@ export class LeadsService implements OnModuleInit {
             coachId: lead.assignedCoachId || null,
             // A family that asked to start next month should not be dated as
             // having joined today.
-            joiningDate: report?.preferredStartDate ?? now,
+            joiningDate: report?.preferredStartDate ?? latestTrial?.preferredStartDate ?? now,
             user: {
               create: {
                 email: child.email,
@@ -2175,7 +2311,7 @@ export class LeadsService implements OnModuleInit {
                 courseId: exists.id,
                 packageId: pkg?.id ?? null,
                 status: EnrollmentStatus.ACTIVE,
-                startedAt: report.preferredStartDate ?? now,
+                startedAt: report?.preferredStartDate ?? latestTrial?.preferredStartDate ?? now,
               },
             });
           }
@@ -2343,7 +2479,12 @@ export class LeadsService implements OnModuleInit {
     });
     if (!profile) return [];
 
-    const where: any = { teacherId: profile.id };
+    const where: any = {
+      teacherId: profile.id,
+      lead: {
+        assignedTeacherId: profile.id,
+      },
+    };
     const now = new Date();
     if (scope === 'today') {
       const start = new Date(now); start.setHours(0, 0, 0, 0);
@@ -2782,8 +2923,9 @@ export class LeadsService implements OnModuleInit {
         leads.flatMap((l) => [l.assignedTeacherId, l.recommendedTeacherId]).filter(Boolean),
       ),
     ];
+    const studentIds = [...new Set(leads.map((l) => l.convertedStudentId).filter(Boolean))];
 
-    const [coaches, teachers] = await Promise.all([
+    const [coaches, teachers, students] = await Promise.all([
       coachIds.length
         ? this.prisma.user.findMany({
             where: { id: { in: coachIds as string[] } },
@@ -2796,12 +2938,19 @@ export class LeadsService implements OnModuleInit {
             select: { id: true, teacherCode: true, user: { select: { firstName: true, lastName: true } } },
           })
         : [],
+      studentIds.length
+        ? this.prisma.invoice.findMany({
+            where: { studentId: { in: studentIds as string[] }, status: { in: ['SENT', 'OVERDUE'] } },
+            select: { studentId: true },
+          })
+        : [],
     ]);
 
     const coachMap = new Map(coaches.map((c) => [c.id, `${c.firstName} ${c.lastName}`]));
     const teacherMap = new Map(
       teachers.map((t) => [t.id, `${t.user.firstName} ${t.user.lastName}`]),
     );
+    const pendingStudentIds = new Set(students.map((inv) => inv.studentId).filter(Boolean));
 
     return leads.map((l) => ({
       ...l,
@@ -2810,6 +2959,7 @@ export class LeadsService implements OnModuleInit {
       recommendedTeacherName: l.recommendedTeacherId
         ? teacherMap.get(l.recommendedTeacherId) || null
         : null,
+      invoicePending: l.convertedStudentId ? pendingStudentIds.has(l.convertedStudentId) : false,
     }));
   }
 
