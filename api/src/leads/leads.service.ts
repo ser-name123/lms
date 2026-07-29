@@ -447,7 +447,7 @@ export class LeadsService implements OnModuleInit {
             }
           : status === 'TEACHER_ASSIGNED_ALL'
             ? {
-                status: LeadStatus.TRIAL_SCHEDULED,
+                status: { in: [LeadStatus.TEACHER_ASSIGNED, LeadStatus.TRIAL_SCHEDULED] },
                 assignedTeacherId: { not: null },
               }
           : status === 'FOLLOW_UP_ALL'
@@ -663,7 +663,7 @@ export class LeadsService implements OnModuleInit {
       this.prisma.lead.count({
         where: {
           ...scope,
-          status: LeadStatus.TRIAL_SCHEDULED,
+          status: { in: [LeadStatus.TEACHER_ASSIGNED, LeadStatus.TRIAL_SCHEDULED] },
           assignedTeacherId: { not: null },
         },
       }),
