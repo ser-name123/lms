@@ -80,6 +80,26 @@ export class LeadsController {
     return this.availabilityService.teacherAvailabilityFor(date);
   }
 
+  @Get('enrollment-teachers')
+  @ApiOperation({
+    summary: 'Teachers who can take a recurring weekly schedule — the enrollment assignment search',
+  })
+  enrollmentTeachers(
+    @Query('courseId') courseId?: string,
+    @Query('gender') gender?: string,
+    @Query('days') days?: string,
+    @Query('time') time?: string,
+    @Query('durationMinutes') durationMinutes?: string,
+  ) {
+    return this.availabilityService.searchTeachersForEnrollment({
+      courseId: courseId || null,
+      gender: gender || null,
+      days: (days ?? '').split(',').map((d) => d.trim()).filter(Boolean),
+      time: time || '00:00',
+      durationMinutes: Number(durationMinutes) || 60,
+    });
+  }
+
   @Get()
   @ApiOperation({ summary: 'List / filter leads (a coach sees only their own)' })
   list(@Query() query: ListLeadsDto, @CurrentUser() user: AuthUser) {

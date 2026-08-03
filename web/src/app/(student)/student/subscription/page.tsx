@@ -19,12 +19,15 @@ import {
   fetchMyPackageOptions,
   fetchMySubscription,
   fetchMySubscriptionRequests,
+  fetchMyUpcomingSessions,
+  rescheduleClass,
   requestPackageChange,
   requestScheduleChange,
   type CurrentSubscription,
   type MySubscriptionRequest,
   type SubscriptionPackage,
   type SubscriptionRequestStatus,
+  type UpcomingSession,
 } from "@/lib/api";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -50,6 +53,16 @@ const swalBg = () =>
 
 const fmtDate = (v: string | null | undefined) =>
   v ? new Date(v).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+const CYCLE_LABELS: Record<string, string> = {
+  ONE_TIME: "One-time",
+  MONTHLY: "Monthly",
+  QUARTERLY: "Quarterly",
+  HALF_YEARLY: "Half-yearly",
+  YEARLY: "Yearly",
+  CUSTOM: "Custom",
+};
+const fmtCycle = (v: string | null | undefined) => (v ? (CYCLE_LABELS[v] ?? v) : "—");
 
 export default function StudentSubscriptionPage() {
   const [sub, setSub] = useState<CurrentSubscription | null>(null);
@@ -144,8 +157,12 @@ export default function StudentSubscriptionPage() {
               </InfoTile>
 
               <InfoTile icon={BadgeCheck} label="Status">
-                <Badge tone={sub.status === "ACTIVE" ? "good" : sub.status === "PAUSED" ? "warning" : "neutral"}>
-                  {sub.status === "NONE" ? "No subscription" : sub.status.charAt(0) + sub.status.slice(1).toLowerCase()}
+                <Badge tone={sub.status === "ACTIVE" ? "good" : sub.status === "PAUSED" ? "warning" : sub.status === "PENDING_PAYMENT" ? "warning" : "neutral"}>
+                  {sub.status === "NONE"
+                    ? "No subscription"
+                    : sub.status === "PENDING_PAYMENT"
+                      ? "Pending payment"
+                      : sub.status.charAt(0) + sub.status.slice(1).toLowerCase()}
                 </Badge>
               </InfoTile>
             </div>
@@ -174,6 +191,74 @@ export default function StudentSubscriptionPage() {
                   </ul>
                 </CardBody>
               </Card>
+            )}
+
+            {/* ── Full subscription record (model, plan, live counters) ───── */}
+            {sub.record && (
+              <Card className="border border-hairline bg-surface shadow-sm">
+                <CardBody className="p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-ink">Subscription details</h3>
+                    {sub.record.model && (
+                      <Badge tone={sub.record.pricingMode === "HOURLY" ? "accent" : "neutral"}>
+                        {sub.record.model.name}
+                        {sub.record.tier ? ` · ${sub.record.tier}` : ""}
+                      </Badge>
+                    )}
+                  </div>
+                  {sub.record.status === "PENDING_PAYMENT" && (
+                    <div className="mb-4 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2.5 text-[12px] font-semibold text-amber-700 dark:text-amber-300">
+                      Awaiting payment — pay your first invoice to activate your subscription. Your
+                      classes are scheduled once payment is confirmed; no classes are booked yet.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
+                    <RecordStat label="Model">
+                      {sub.record.pricingMode === "HOURLY" ? "Hourly Subscription" : "Monthly Package"}
+                    </RecordStat>
+                    <RecordStat label="Course">{sub.record.course?.title ?? sub.course?.title ?? "—"}</RecordStat>
+                    <RecordStat label="Currency">{sub.record.currency ?? sub.currency}</RecordStat>
+                    <RecordStat label="Billing cycle">{fmtCycle(sub.record.billingCycle)}</RecordStat>
+                    <RecordStat label={sub.record.pricingMode === "HOURLY" ? "Hourly rate" : "Monthly price"}>
+                      {sub.record.pricingMode === "HOURLY"
+                        ? `${money(sub.record.hourlyRate, sub.currency)} / hr`
+                        : money(sub.record.monthlyPrice, sub.currency, { emptyText: "Not set" })}
+                    </RecordStat>
+                    <RecordStat label="Class duration">{sub.record.durationMinutes} min</RecordStat>
+                    <RecordStat label="Weekly classes">{sub.record.weeklyClasses}×/week</RecordStat>
+                    <RecordStat label="Monthly hours">{sub.record.monthlyHours} hrs</RecordStat>
+                    <RecordStat label="Est. monthly tuition">
+                      {money(sub.record.monthlyPrice, sub.currency, { emptyText: "Not set" })}
+                    </RecordStat>
+                    <RecordStat label="Classes remaining">
+                      {sub.record.remainingClasses}
+                      <span className="text-[11px] font-normal text-ink-3"> · {sub.record.completedClasses} done</span>
+                    </RecordStat>
+                    <RecordStat label="Reschedules left">
+                      <span className={sub.record.reschedulesLeft > 0 ? "text-emerald-500" : "text-ink-3"}>
+                        {sub.record.reschedulesLeft}
+                      </span>
+                      <span className="text-[11px] font-normal text-ink-3"> of {sub.record.rescheduleLimit}</span>
+                    </RecordStat>
+                    {sub.record.familyDiscountPct > 0 && (
+                      <RecordStat label="Family discount">{sub.record.familyDiscountPct}%</RecordStat>
+                    )}
+                    <RecordStat label="Cycle start">
+                      {sub.record.actualCycleStartDate
+                        ? fmtDate(sub.record.actualCycleStartDate)
+                        : sub.record.status === "PENDING_PAYMENT"
+                          ? "After payment"
+                          : fmtDate(sub.record.preferredStartDate)}
+                    </RecordStat>
+                    <RecordStat label="Renews on">{fmtDate(sub.record.renewalDate)}</RecordStat>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* ── Reschedule a class (within the plan's allowance) ────────── */}
+            {sub.record && sub.record.rescheduleLimit > 0 && (
+              <RescheduleCard reschedulesLeft={sub.record.reschedulesLeft} onDone={load} />
             )}
 
             {/* ── Module 2: the only two things a student can do ──────────── */}
@@ -284,6 +369,92 @@ export default function StudentSubscriptionPage() {
         )}
       </div>
     </>
+  );
+}
+
+function RescheduleCard({ reschedulesLeft, onDone }: { reschedulesLeft: number; onDone: () => void }) {
+  const [sessions, setSessions] = useState<UpcomingSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pick, setPick] = useState<string>("");
+  const [newAt, setNewAt] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchMyUpcomingSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => load(), [load]);
+
+  const fmt = (v: string) => new Date(v).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  const submit = async () => {
+    if (!pick || !newAt) return;
+    setBusy(true);
+    try {
+      // datetime-local has no timezone; send it as an ISO instant.
+      const res = await rescheduleClass({ sessionId: pick, newStartsAt: new Date(newAt).toISOString() });
+      await Swal.fire({ title: "Class rescheduled", text: `Done. ${res.reschedulesLeft} reschedule${res.reschedulesLeft === 1 ? "" : "s"} left this cycle.`, icon: "success", background: swalBg(), confirmButtonColor: "#10b981" });
+      setPick(""); setNewAt("");
+      load();
+      onDone();
+    } catch (e) {
+      Swal.fire({ title: "Could not reschedule", text: e instanceof Error ? e.message : "Please try again.", icon: "error", background: swalBg() });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="border border-hairline bg-surface shadow-sm">
+      <CardBody className="p-5">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-ink">Reschedule a class</h3>
+          <span className="text-[11px] font-bold text-ink-3">{reschedulesLeft} left this cycle</span>
+        </div>
+        <p className="mb-3 text-[11px] text-ink-3">Move one upcoming class. At least 4 hours' notice, the teacher must be free, and it must stay within your current cycle.</p>
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Loading classes…</div>
+        ) : !sessions.length ? (
+          <p className="text-xs text-ink-3">You have no upcoming classes to reschedule.</p>
+        ) : reschedulesLeft <= 0 ? (
+          <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs font-semibold text-amber-700 dark:text-amber-400">You've used all your reschedules for this cycle.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Class to move</label>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} disabled={busy}
+                className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+                <option value="">— Choose a class —</option>
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>{fmt(s.startsAt)} · {s.title}{s.teacher ? ` · ${s.teacher}` : ""}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">New date & time</label>
+              <input type="datetime-local" value={newAt} onChange={(e) => setNewAt(e.target.value)} disabled={busy}
+                className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent" />
+            </div>
+            <button onClick={submit} disabled={busy || !pick || !newAt}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <CalendarClock className="size-4" />} Reschedule
+            </button>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function RecordStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink-3">{label}</p>
+      <p className="mt-1 text-sm font-black text-ink">{children}</p>
+    </div>
   );
 }
 

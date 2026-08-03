@@ -295,9 +295,31 @@ export class PaymentsService {
       : intent.amount_received / 100;
     const balance = round2(Number(invoice.amount) - Number(invoice.paidAmount));
     if (balance <= 0) {
+      /*
+       * The invoice is already fully paid (e.g. a second PaymentIntent for the
+       * same invoice, or a cash payment recorded meanwhile). Booking it would
+       * over-pay, but the family WAS charged — so refund the whole payment
+       * rather than silently keeping it (M1). Best-effort; logged loudly on
+       * failure so it can be refunded by hand.
+       */
       this.logger.warn(
-        `Invoice ${invoiceId} was already settled when ${intent.id} arrived — no double booking`,
+        `Invoice ${invoiceId} was already settled when ${intent.id} arrived — refunding the duplicate charge`,
       );
+      if (paid > 0) {
+        try {
+          await this.stripe.createRefund({
+            payment_intent: intent.id,
+            reason: 'duplicate',
+            metadata: { invoiceId, reason: 'invoice already settled — duplicate charge' },
+          });
+          this.logger.warn(`Refunded duplicate charge on ${intent.id} for invoice ${invoiceId}.`);
+        } catch (e) {
+          this.logger.error(
+            `FAILED to refund duplicate charge on ${intent.id} for invoice ${invoiceId} ` +
+              `— refund by hand in Stripe: ${(e as Error).message}`,
+          );
+        }
+      }
       return invoiceId;
     }
 
@@ -312,6 +334,34 @@ export class PaymentsService {
       { name: 'Stripe' },
     );
     this.logger.log(`Invoice ${invoiceId} settled by ${intent.id}`);
+
+    /*
+     * Overcharge refund (M2): the balance can shrink between checkout and
+     * settlement (e.g. a staff member records a cash payment meanwhile), so
+     * Stripe may have charged MORE than was owed. We only book the balance
+     * above — the excess must go back to the family, not sit unaccounted. Refund
+     * exactly the difference; best-effort, and logged loudly if it fails so it
+     * can be handled by hand.
+     */
+    const overcharge = round2(paid - balance);
+    if (overcharge > 0) {
+      try {
+        await this.stripe.createRefund({
+          payment_intent: intent.id,
+          amount: this.toMinor(overcharge, invoice.currency),
+          reason: 'requested_by_customer',
+          metadata: { invoiceId, reason: 'overcharge — balance shrank before settlement' },
+        });
+        this.logger.warn(
+          `Refunded overcharge of ${invoice.currency} ${overcharge} on ${intent.id} for invoice ${invoiceId}.`,
+        );
+      } catch (e) {
+        this.logger.error(
+          `FAILED to refund overcharge of ${invoice.currency} ${overcharge} on ${intent.id} ` +
+            `for invoice ${invoiceId} — refund by hand in Stripe: ${(e as Error).message}`,
+        );
+      }
+    }
     return invoiceId;
   }
 
@@ -326,8 +376,32 @@ export class PaymentsService {
     return invoiceId;
   }
 
-  async verifyIntent(paymentIntentId: string): Promise<{ status: string; invoiceId?: string }> {
+  async verifyIntent(
+    paymentIntentId: string,
+    actor?: { id?: string; role?: Role },
+  ): Promise<{ status: string; invoiceId?: string }> {
     const intent = await this.stripe.retrievePaymentIntent(paymentIntentId);
+
+    /*
+     * Ownership (M7): a student may only verify an intent that settles their own
+     * invoice — otherwise anyone could POST another family's intent id and both
+     * trigger its settlement and learn which invoice it belongs to. Staff
+     * (ADMIN/SUPERVISOR/COACH) may verify any. Checked against the intent's
+     * invoice metadata before any settlement runs.
+     */
+    if (actor?.role === Role.STUDENT) {
+      const invoiceId = intent.metadata?.invoiceId ?? null;
+      const owned = invoiceId
+        ? await this.prisma.invoice.findFirst({
+            where: { id: invoiceId, student: { userId: actor.id } },
+            select: { id: true },
+          })
+        : null;
+      if (!owned) {
+        throw new NotFoundException('No such payment to verify for this account.');
+      }
+    }
+
     if (intent.status !== 'succeeded') {
       return { status: intent.status };
     }

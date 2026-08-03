@@ -243,6 +243,7 @@ model StudentProfile {
   parentLinks    ParentLink[]
   subscriptionRequests SubscriptionRequest[]
   nextCycle            SubscriptionNextCycle?
+  subscriptions        StudentSubscription[]
 }
 
 // A requested change (teacher / batch / course) that needs approval before it
@@ -271,6 +272,27 @@ model StudentTransfer {
 enum SubscriptionRequestType {
   PACKAGE_CHANGE
   SCHEDULE_CHANGE
+  // Migrating a student from one subscription model to another (e.g. legacy
+  // Monthly Package → Hourly Subscription). Applied at the next cycle like any
+  // other change, so historical invoices/attendance stay on the old model.
+  MODEL_CHANGE
+}
+
+// How a subscription model prices a student. This is the ONLY axis code branches
+// on — everything else about a model (name, tiers, features) is data. A new
+// model (Corporate/Promotional/Summer/Family) is a `SubscriptionModel` row that
+// reuses one of these two modes and needs no code change.
+enum SubscriptionPricingMode {
+  FIXED_MONTHLY // legacy Monthly Package — a flat price per cycle
+  HOURLY        // hourly rate × (duration ÷ 60) × weekly classes × 4 weeks
+}
+
+enum StudentSubscriptionStatus {
+  PENDING // agreed but not yet started (legacy waypoint)
+  PENDING_PAYMENT // enrolled, invoice raised, awaiting first payment — no classes/teacher block yet
+  ACTIVE
+  PAUSED
+  ENDED // superseded by a migration, or cancelled
 }
 
 // PENDING → APPROVED → APPLIED, or PENDING → REJECTED. APPROVED and APPLIED are
@@ -480,6 +502,31 @@ model Package {
   createdAt       DateTime @default(now())
 
   /*
+   * Subscription-model attributes. Which model this plan belongs to decides how
+   * it is priced: a FIXED_MONTHLY model uses priceUSD/AED/GBP above; an HOURLY
+   * model uses hourlyRate* below and multiplies by the student's chosen duration
+   * and weekly classes. All nullable because the columns arrived after the rows
+   * and a legacy package is treated as a FIXED_MONTHLY plan with no model link.
+   */
+  modelId         String?
+  model           SubscriptionModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  tier            String? // Simple/Essential/Premium/Elite or Basic/Standard/Premium/Platinum — free text so new tiers need no enum change
+  durationMinutes Int?    // 30 / 60 — fixed for a monthly plan; chosen per-subscription for hourly
+  weeklyClasses   Int?    // fixed for a monthly plan
+  monthlyHours    Int?
+  hourlyRateUSD   Decimal? @db.Decimal(10, 2)
+  hourlyRateAED   Decimal? @db.Decimal(10, 2)
+  hourlyRateGBP   Decimal? @db.Decimal(10, 2)
+  rescheduleLimit Int      @default(0)
+  familyDiscountPct Decimal @default(0) @db.Decimal(5, 2)
+  // Typed feature toggles: { nativeArabicTeacher, eCertificate, eSyllabus,
+  // directChat, coachingSessions, progressReport, topRatedTeacher, videoRecording }
+  featureMatrix   Json?
+  eSyllabus       Boolean  @default(false) // mirrored from featureMatrix for querying
+  displayOrder    Int      @default(0)
+  badge           String?  // "Popular", "Best value" — display only
+
+  /*
    * The fee plan that bills this package. Packages and billing grew up apart —
    * a package carried a price nobody charged, while invoices came from a fee
    * plan that knew nothing about packages. Without this link, approving a
@@ -494,6 +541,90 @@ model Package {
   enrollments          Enrollment[]
   subscriptionRequests SubscriptionRequest[]
   nextCycles           SubscriptionNextCycle[]
+  studentSubscriptions StudentSubscription[]
+}
+
+// A subscription model the academy sells under. Admin-configurable rows so new
+// models (Corporate/Promotional/Summer/Family) can be added without code — the
+// only thing code reads is `pricingMode`. `key` is a stable slug; MONTHLY and
+// HOURLY are seeded on boot.
+model SubscriptionModel {
+  id           String                  @id @default(uuid())
+  key          String                  @unique // MONTHLY / HOURLY / CORPORATE …
+  name         String
+  pricingMode  SubscriptionPricingMode
+  active       Boolean                 @default(true)
+  displayOrder Int                     @default(0)
+  createdAt    DateTime                @default(now())
+
+  packages             Package[]
+  studentSubscriptions StudentSubscription[]
+}
+
+// The one stored record of what a student is subscribed to. Before this, a
+// "subscription" was assembled read-only from three unrelated rows (Enrollment +
+// Batch + StudentFeeAssignment), which could not hold live counters. This row
+// snapshots the price/tier/limits agreed at enrolment so later catalogue edits
+// never rewrite an existing subscription, and a migration ENDs the old row and
+// creates a new one — leaving historical invoices/attendance untouched.
+model StudentSubscription {
+  id           String         @id @default(uuid())
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollmentId String? // the Enrollment this subscription bills (plain id, resolved in service)
+  courseId     String?
+
+  modelId     String
+  model       SubscriptionModel       @relation(fields: [modelId], references: [id])
+  pricingMode SubscriptionPricingMode // snapshot of the model's mode at creation
+  planId      String?
+  plan        Package?                @relation(fields: [planId], references: [id], onDelete: SetNull)
+  tier        String?
+
+  // Snapshots — the numbers agreed, immune to later catalogue changes.
+  currency        String
+  monthlyPrice    Decimal? @db.Decimal(10, 2) // FIXED_MONTHLY: the flat price; HOURLY: the computed monthly estimate
+  hourlyRate      Decimal? @db.Decimal(10, 2) // HOURLY only
+  durationMinutes Int
+  weeklyClasses   Int
+  monthlyHours    Int
+
+  billingCycle FeePlanCycle @default(MONTHLY)
+  startDate    DateTime     @default(now())
+  renewalDate  DateTime?
+  // The official cycle start, set only after the first payment. Distinct from the
+  // preferred start (carried on the lead/trial). Classes and the 28-day cycle are
+  // anchored here; never backdated. adminStartOverride lets staff force an earlier
+  // start than the preferred date.
+  actualCycleStartDate DateTime?
+  adminStartOverride   Boolean  @default(false)
+  // Preferred teacher gender carried from the lead, so a renewal re-assignment can
+  // honour it without reopening the lead. Male / Female / Either.
+  preferredTeacherGender String?
+
+  remainingClasses  Int     @default(0)
+  completedClasses  Int     @default(0)
+  minutesUsed       Int     @default(0) // taught minutes consumed this cycle; reset at cycle close
+  rescheduleCounter Int     @default(0) // resets each billing cycle
+  rescheduleLimit   Int     @default(0) // snapshot from the plan
+  familyDiscountPct Decimal @default(0) @db.Decimal(5, 2)
+
+  batchId         String? // the recurring-schedule Batch (plain id) — set only on activation
+  feeAssignmentId String? // the recurring StudentFeeAssignment (plain id) — set only on activation
+
+  // The schedule the family chose, held while PENDING_PAYMENT so activation can
+  // build the batch + 28-day sessions after payment without reopening the lead.
+  pendingDays        String[]  @default([])
+  pendingTime        String?
+  pendingTeacherId   String?
+  preferredStartDate DateTime? // the family's requested commencement date (preferred, not actual)
+
+  status    StudentSubscriptionStatus @default(ACTIVE)
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+
+  @@index([studentId, status])
+  @@index([status])
 }
 
 // ─── Learning ─────────────────────────────────────────────────────────────────
@@ -553,6 +684,10 @@ model ClassSession {
   // Locking (no edits once locked, unless an approved correction)
   attendanceLocked Boolean   @default(false)
   lockedAt         DateTime?
+  // Set when the billing cycle this class belonged to is closed. A locked class
+  // is a past cycle's and can no longer be rescheduled (distinct from
+  // attendanceLocked, which finalises one class's attendance after it ends).
+  cycleLocked Boolean @default(false)
 
   attendees   ClassAttendee[]
   corrections AttendanceCorrection[]
@@ -937,6 +1072,7 @@ model Invoice {
   // ── Finance & Reporting: fee-plan billing + partial payment tracking ──
   feePlanId     String?   // FeePlan this invoice was generated from (plain id)
   assignmentId  String?   // StudentFeeAssignment that generated a recurring invoice
+  subscriptionId String?  // StudentSubscription this invoice bills (enrol + 28-day renewal), plain id
   periodLabel   String?   // "March 2026" for recurring invoices
   periodStart   DateTime?
   periodEnd     DateTime?
@@ -955,6 +1091,7 @@ model Invoice {
   @@index([status])
   @@index([studentId])
   @@index([assignmentId])
+  @@index([subscriptionId])
 }
 
 // A single fee line on an invoice (Course Fee, Admission Fee, ...).
@@ -1243,6 +1380,27 @@ model LmsPackage {
    * `Package.feePlanId`.
    */
   feePlanId String?
+
+  /*
+   * Subscription-model attributes, mirrored onto the relational `Package` (which
+   * the enrolment/billing side reads). Flat plain ids/scalars by design — the
+   * enforced relations live on `Package`. See the note on `Package` for what
+   * each field means. All nullable so legacy rows keep working untouched.
+   */
+  modelId           String?
+  tier              String?
+  durationMinutes   Int?
+  weeklyClasses     Int?
+  monthlyHours      Int?
+  hourlyRateUSD     Float?
+  hourlyRateAED     Float?
+  hourlyRateGBP     Float?
+  rescheduleLimit   Int?     @default(0)
+  familyDiscountPct Float?   @default(0)
+  featureMatrix     Json?
+  eSyllabus         Boolean? @default(false)
+  displayOrder      Int?     @default(0)
+  badge             String?
 }
 
 model LmsClass {

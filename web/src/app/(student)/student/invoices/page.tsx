@@ -156,6 +156,8 @@ export default function StudentInvoices() {
   const statusToneMap: Record<string, Tone> = {
     PAID: "good",
     SENT: "accent",
+    PENDING: "accent",
+    PARTIALLY_PAID: "warning",
     OVERDUE: "critical",
     DRAFT: "neutral",
     VOID: "neutral",
@@ -164,6 +166,8 @@ export default function StudentInvoices() {
   const statusLabelMap: Record<string, string> = {
     PAID: "Paid",
     SENT: "Unpaid / Due",
+    PENDING: "Pending",
+    PARTIALLY_PAID: "Partially paid",
     OVERDUE: "Overdue",
     DRAFT: "Draft",
     VOID: "Voided",

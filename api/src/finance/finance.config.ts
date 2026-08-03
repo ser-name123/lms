@@ -71,6 +71,25 @@ export function addMonths(date: Date, months: number): Date {
   return d;
 }
 
+/**
+ * A student subscription bills and schedules in fixed 28-day cycles (4 weeks),
+ * NOT calendar months — the spec's "every 4 weeks OR when the package hours are
+ * completed". This is intentionally separate from `cycleMonths`, which stays for
+ * the generic/legacy fee-plan calendar billing.
+ */
+export const SUBSCRIPTION_CYCLE_DAYS = 28;
+
+export function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+}
+
+/** The end (exclusive) of the 28-day subscription cycle that starts at `start`. */
+export function subscriptionCycleEnd(start: Date): Date {
+  return addDays(start, SUBSCRIPTION_CYCLE_DAYS);
+}
+
 /** Human period label for a recurring invoice, e.g. "March 2026". */
 export function periodLabelFor(date: Date): string {
   return date.toLocaleString('en-US', { month: 'long', year: 'numeric' });

@@ -190,8 +190,16 @@ function StudentLayoutGuard({ children }: { children: React.ReactNode }) {
     notFound();
   }
 
-  // Find any unpaid/due invoices
-  const unpaidInvoice = invoices.find(inv => inv.status === "SENT" || inv.status === "OVERDUE");
+  // Find any outstanding invoice. Must match the server's notion of "unpaid"
+  // (SENT / PENDING / PARTIALLY_PAID / OVERDUE) — a partial payment or a pending
+  // invoice still owes a balance, so it must lock too, not just SENT/OVERDUE.
+  const unpaidInvoice = invoices.find(
+    (inv) =>
+      inv.status === "SENT" ||
+      inv.status === "OVERDUE" ||
+      inv.status === "PENDING" ||
+      inv.status === "PARTIALLY_PAID",
+  );
 
   if (checking) {
     return (

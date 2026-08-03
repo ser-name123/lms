@@ -140,6 +140,12 @@ export class StudentManagementController {
     return this.service.assignCoach(id, dto.coachId ?? null, actor(u));
   }
 
+  // Override the family's billing currency (coach/admin — the class @Roles covers both).
+  @Patch(':id/billing-currency')
+  setBillingCurrency(@Param('id') id: string, @Body() dto: { currency: string }, @CurrentUser() u: AuthUser) {
+    return this.service.setBillingCurrency(id, dto.currency, actor(u));
+  }
+
   // ── Transfer approval workflow ──────────────────────────────────────────────
   @Get(':id/transfers')
   transfers(@Param('id') id: string) {

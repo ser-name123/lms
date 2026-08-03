@@ -58,6 +58,9 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   SUBSCRIPTION_REQUEST_SUBMITTED: { category: Cat.ACADEMIC, priority: Pri.LOW, channels: IN_APP, label: 'Your request was submitted' },
   SUBSCRIPTION_DECIDED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Subscription request decided' },
   SUBSCRIPTION_APPLIED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Subscription change applied' },
+  // A 28-day cycle turned over: new schedule + invoice created. Goes to the
+  // student, their teacher and their coach.
+  CYCLE_RENEWED: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'New billing cycle' },
 
   // ── Attendance ────────────────────────────────────────────────────────────
   ATTENDANCE_RESULT: { category: Cat.ATTENDANCE, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Attendance recorded' },

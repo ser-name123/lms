@@ -299,6 +299,38 @@ export class LmsDataController {
     return this.service.deletePackage(id);
   }
 
+  // Subscription models — the pricing-model catalogue the plan form picks from.
+  // Read is public like packages (the admin form fetches it unauthenticated);
+  // writes are ADMIN + ACADEMIC_COACH like the rest of the catalogue.
+  @Get('subscription-models')
+  @Public()
+  @ApiOperation({ summary: 'Get all subscription models' })
+  getSubscriptionModels() {
+    return this.service.getSubscriptionModels();
+  }
+
+  @Post('subscription-models')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Create a subscription model' })
+  createSubscriptionModel(@Body() dto: any) {
+    return this.service.createSubscriptionModel(dto);
+  }
+
+  @Put('subscription-models/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
+  @ApiOperation({ summary: 'Update a subscription model' })
+  updateSubscriptionModel(@Param('id') id: string, @Body() dto: any) {
+    return this.service.updateSubscriptionModel(id, dto);
+  }
+
+  @Delete('subscription-models/:id')
+  @Roles(Role.ADMIN, Role.ACADEMIC_COACH)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a subscription model' })
+  deleteSubscriptionModel(@Param('id') id: string) {
+    return this.service.deleteSubscriptionModel(id);
+  }
+
   // Classes — the ACADEMIC_COACH panel manages these (its /classes page);
   // SUPERVISOR has no /classes page so stays ADMIN+COACH only.
   @Get('classes')

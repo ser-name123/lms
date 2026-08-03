@@ -46,6 +46,12 @@ export class StudentPortalController {
     return this.service.getClasses(user.id);
   }
 
+  @Get('sessions/upcoming')
+  @ApiOperation({ summary: 'Upcoming class sessions this student can reschedule' })
+  getUpcomingSessions(@CurrentUser() user: AuthUser) {
+    return this.service.getUpcomingSessions(user.id);
+  }
+
   @Post('classes/:classId/attend')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark student attendance for a class session' })

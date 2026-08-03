@@ -2518,7 +2518,7 @@ export interface TrialInfoForm {
    * Already resolved to their currency, and packages the academy has not
    * priced there are absent rather than shown at a figure that is not theirs.
    */
-  packages: { id: string; name: string; classesPerMonth: number; price: number | null }[];
+  packages: { id: string; name: string; classesPerMonth: number; price: number | null; weeklyClasses?: number | null }[];
   weekdays: string[];
 }
 
@@ -2553,8 +2553,38 @@ export const leadCoachDecision = (
     followUpAt?: string;
     preferredStartDate?: string;
     preferredTime?: string;
+    preferredDays?: string[];
+    currencyOverride?: Currency;
+    durationMinutes?: number;
+    weeklyClasses?: number;
+    teacherId?: string;
   },
 ) => api<Lead>(`/leads/${id}/decision`, { method: "POST", body: JSON.stringify(dto) });
+
+/** Teachers who can take a recurring weekly schedule — the enrollment assignment search. */
+export interface EnrollmentTeacher {
+  teacherId: string;
+  name: string;
+  gender: string | null;
+  subjects: string[];
+}
+export const fetchEnrollmentTeachers = (params: {
+  courseId?: string;
+  gender?: string;
+  days: string[];
+  time: string;
+  durationMinutes: number;
+}) => {
+  const q = new URLSearchParams();
+  if (params.courseId) q.set("courseId", params.courseId);
+  if (params.gender) q.set("gender", params.gender);
+  if (params.days.length) q.set("days", params.days.join(","));
+  if (params.time) q.set("time", params.time);
+  q.set("durationMinutes", String(params.durationMinutes));
+  return api<{ matching: EnrollmentTeacher[]; others: EnrollmentTeacher[] }>(
+    `/leads/enrollment-teachers?${q.toString()}`,
+  );
+};
 
 export const fetchLeadFunnel = () => api<LeadFunnel>("/leads/funnel");
 
@@ -3378,6 +3408,9 @@ export interface StudentBatchRow {
 }
 export interface StudentManagement {
   id: string; studentCode: string; status: string;
+  /* Current subscription status — e.g. PENDING_PAYMENT before the first invoice
+     is paid. Null when the student has no subscription. */
+  subscriptionStatus: string | null;
   /* What this family is billed in; `fees` is an amount in it. */
   billingCurrency: Currency;
   onHoldReason: string | null; onHoldAt: string | null;
@@ -3961,6 +3994,8 @@ export interface FinanceInvoice {
   id: string; number: string; studentId: string | null; currency: string;
   amount: number; subtotal: number | null; discountAmount: number; taxAmount: number;
   paidAmount: number; balance: number; status: FinanceInvoiceStatus;
+  /* Set when this invoice bills a subscription (enrolment or 28-day renewal). */
+  subscriptionId: string | null;
   periodLabel: string | null; issuedAt: string; dueAt: string | null; notes: string | null;
   student?: { id: string; studentCode: string; parentEmail: string | null;
     user: { id: string; firstName: string; lastName: string; email: string } | null } | null;
@@ -4083,7 +4118,7 @@ export const fetchTeacherFinance = () => api<any>("/finance/teacher/dashboard");
 // their subscription and raise a request; approval only writes what the next
 // cycle becomes.
 
-export type SubscriptionStatus = "ACTIVE" | "PAUSED" | "ENDED" | "NONE";
+export type SubscriptionStatus = "PENDING_PAYMENT" | "ACTIVE" | "PAUSED" | "ENDED" | "NONE";
 export type SubscriptionRequestType = "PACKAGE_CHANGE" | "SCHEDULE_CHANGE";
 export type SubscriptionRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "APPLIED";
 
@@ -4122,6 +4157,32 @@ export interface CurrentSubscription {
     time: string | null;
     startDate: string | null;
     batchId: string | null;
+  } | null;
+  /** The stored subscription record — model, tier, live counters, renewal.
+   *  Null for a legacy student until the backfill runs. */
+  record: {
+    id: string;
+    model: { key: string; name: string; pricingMode: "FIXED_MONTHLY" | "HOURLY" } | null;
+    pricingMode: "FIXED_MONTHLY" | "HOURLY";
+    tier: string | null;
+    currency: Currency;
+    billingCycle: string | null;
+    course: { id: string; title: string } | null;
+    preferredStartDate: string | null;
+    actualCycleStartDate: string | null;
+    monthlyPrice: number | null;
+    hourlyRate: number | null;
+    durationMinutes: number;
+    weeklyClasses: number;
+    monthlyHours: number;
+    renewalDate: string | null;
+    remainingClasses: number;
+    completedClasses: number;
+    rescheduleCounter: number;
+    rescheduleLimit: number;
+    reschedulesLeft: number;
+    familyDiscountPct: number;
+    status: string;
   } | null;
 }
 
@@ -4204,6 +4265,37 @@ export const requestScheduleChange = (dto: {
     method: "POST",
     body: JSON.stringify(dto),
   });
+
+export type UpcomingSession = { id: string; title: string; startsAt: string; endsAt: string; teacher: string | null };
+export const fetchMyUpcomingSessions = () => api<UpcomingSession[]>("/student-portal/sessions/upcoming");
+
+// Move one upcoming class within the plan's reschedule allowance.
+export const rescheduleClass = (dto: { sessionId: string; newStartsAt: string }) =>
+  api<{ sessionId: string; startsAt: string; endsAt: string; reschedulesLeft: number }>(
+    "/subscriptions/me/reschedule",
+    { method: "POST", body: JSON.stringify(dto) },
+  );
+
+// Staff: a student's current subscription (for the student hub / approval screen).
+export const fetchStudentSubscription = (studentId: string) =>
+  api<CurrentSubscription>(`/subscriptions/student/${studentId}`);
+
+// Staff: override a family's billing currency (coach/admin).
+export const setStudentBillingCurrency = (studentId: string, currency: Currency) =>
+  api<{ billingCurrency: Currency }>(`/student-management/${studentId}/billing-currency`, {
+    method: "PATCH",
+    body: JSON.stringify({ currency }),
+  });
+
+// Staff: migrate a student to another subscription model/plan, keeping history.
+export const migrateSubscription = (
+  studentId: string,
+  dto: { newPackageId: string; durationMinutes?: number; weeklyClasses?: number },
+) =>
+  api<{ subscriptionId: string; endedId: string | null; pricingMode: string; monthlyPrice: number | null }>(
+    `/subscriptions/student/${studentId}/migrate`,
+    { method: "POST", body: JSON.stringify(dto) },
+  );
 
 // Staff
 export const fetchSubscriptionRequests = (params: {

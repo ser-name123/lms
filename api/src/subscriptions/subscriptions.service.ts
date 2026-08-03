@@ -7,8 +7,14 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_CURRENCY, priceFor, type Currency } from '../common/currency';
+import {
+  monthlyHours as calcMonthlyHours,
+  monthlyClasses as calcMonthlyClasses,
+  monthlyTuition,
+  hourlyRateFor,
+} from '../common/tuition';
 import { NotificationsService } from '../notifications/notifications.service';
-import { cycleMonths, addMonths } from '../finance/finance.config';
+import { cycleMonths, addMonths, addDays, subscriptionCycleEnd } from '../finance/finance.config';
 import {
   Role,
   EnrollmentStatus,
@@ -86,8 +92,22 @@ export class SubscriptionsService {
     return this.currentFor(student.id);
   }
 
+  /*
+   * The one stored subscription row, if this student has one. New enrolments
+   * write it; legacy students do not have one until the backfill runs, which is
+   * why currentFor still assembles the three loose rows below and treats this
+   * record as an enrichment layer rather than the sole source.
+   */
+  async activeSubscriptionFor(studentId: string) {
+    return this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: { in: ['ACTIVE', 'PENDING', 'PENDING_PAYMENT', 'PAUSED'] } },
+      orderBy: { createdAt: 'desc' },
+      include: { model: { select: { key: true, name: true, pricingMode: true } } },
+    });
+  }
+
   async currentFor(studentId: string) {
-    const [profile, enrolment, batchLinks, assignment, queued] = await Promise.all([
+    const [profile, enrolment, batchLinks, assignment, queued, record] = await Promise.all([
       /*
        * The currency this family is billed in. Every amount below is read in
        * it, and a package the academy has not priced in that currency reports
@@ -134,6 +154,7 @@ export class SubscriptionsService {
           },
         },
       }),
+      this.activeSubscriptionFor(studentId),
     ]);
 
     const currency = (profile?.billingCurrency ?? DEFAULT_CURRENCY) as Currency;
@@ -178,7 +199,48 @@ export class SubscriptionsService {
         planName: assignment?.plan?.name ?? null,
         cycle: assignment?.plan?.cycle ?? null,
       },
-      status: this.statusOf(assignment),
+      /*
+       * The stored subscription record — the model, tier, chosen duration/weekly,
+       * live counters and renewal. Null for a legacy student until the backfill
+       * runs. Panels read the richer numbers from here; the loose fields above
+       * stay for backward compatibility and un-migrated students.
+       */
+      record: record
+        ? {
+            id: record.id,
+            model: record.model
+              ? { key: record.model.key, name: record.model.name, pricingMode: record.model.pricingMode }
+              : null,
+            pricingMode: record.pricingMode,
+            tier: record.tier,
+            // Spec requires the record to carry Course, Currency and Billing
+            // Cycle explicitly. Currency and billingCycle are the record's own
+            // snapshots; course rides along from the active enrolment.
+            currency: record.currency,
+            billingCycle: record.billingCycle,
+            course: enrolment?.course ?? null,
+            // Payment-gated dates: what the family asked for vs the official start
+            // set at payment. actualCycleStartDate is null while PENDING_PAYMENT.
+            preferredStartDate: record.preferredStartDate,
+            actualCycleStartDate: record.actualCycleStartDate,
+            monthlyPrice: record.monthlyPrice == null ? null : Number(record.monthlyPrice),
+            hourlyRate: record.hourlyRate == null ? null : Number(record.hourlyRate),
+            durationMinutes: record.durationMinutes,
+            weeklyClasses: record.weeklyClasses,
+            monthlyHours: record.monthlyHours,
+            renewalDate: record.renewalDate,
+            remainingClasses: record.remainingClasses,
+            completedClasses: record.completedClasses,
+            rescheduleCounter: record.rescheduleCounter,
+            rescheduleLimit: record.rescheduleLimit,
+            reschedulesLeft: Math.max(0, record.rescheduleLimit - record.rescheduleCounter),
+            familyDiscountPct: record.familyDiscountPct == null ? 0 : Number(record.familyDiscountPct),
+            status: record.status,
+          }
+        : null,
+      // The stored record's status wins when there is one — it carries PENDING
+      // and survives a paused/ended migration that the loose assignment cannot.
+      status: record ? record.status : this.statusOf(assignment),
       // What is already queued for next cycle, so the panel can say "changing
       // on 29 Dec" instead of looking like nothing happened.
       nextCycle: queued
@@ -198,6 +260,966 @@ export class SubscriptionsService {
           }
         : null,
     };
+  }
+
+  /*
+   * Create the stored subscription row for a student. Called when a lead is
+   * converted (Phase 3) and by the backfill for legacy students. Derives the
+   * hours/class counts from duration × weekly so a caller cannot store a
+   * monthlyHours that disagrees with the schedule it came from.
+   */
+  async createStudentSubscription(input: {
+    studentId: string;
+    enrollmentId?: string | null;
+    courseId?: string | null;
+    modelId: string;
+    pricingMode: 'FIXED_MONTHLY' | 'HOURLY';
+    planId?: string | null;
+    tier?: string | null;
+    currency: string;
+    monthlyPrice?: number | null;
+    hourlyRate?: number | null;
+    durationMinutes: number;
+    weeklyClasses: number;
+    billingCycle?: 'ONE_TIME' | 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY' | 'YEARLY' | 'CUSTOM';
+    startDate?: Date;
+    renewalDate?: Date | null;
+    remainingClasses?: number | null;
+    rescheduleLimit?: number | null;
+    familyDiscountPct?: number | null;
+    batchId?: string | null;
+    feeAssignmentId?: string | null;
+    status?: 'PENDING' | 'PENDING_PAYMENT' | 'ACTIVE' | 'PAUSED' | 'ENDED';
+    // Held while PENDING_PAYMENT so activation can build the schedule after payment.
+    pendingDays?: string[] | null;
+    pendingTime?: string | null;
+    pendingTeacherId?: string | null;
+    preferredStartDate?: Date | null;
+    preferredTeacherGender?: string | null;
+    adminStartOverride?: boolean;
+  }) {
+    const hours = calcMonthlyHours(input.durationMinutes, input.weeklyClasses);
+    const classes = calcMonthlyClasses(input.weeklyClasses);
+    return this.prisma.studentSubscription.create({
+      data: {
+        studentId: input.studentId,
+        enrollmentId: input.enrollmentId ?? null,
+        courseId: input.courseId ?? null,
+        modelId: input.modelId,
+        pricingMode: input.pricingMode,
+        planId: input.planId ?? null,
+        tier: input.tier ?? null,
+        currency: input.currency,
+        monthlyPrice: input.monthlyPrice ?? null,
+        hourlyRate: input.hourlyRate ?? null,
+        durationMinutes: input.durationMinutes,
+        weeklyClasses: input.weeklyClasses,
+        monthlyHours: Math.round(hours),
+        billingCycle: (input.billingCycle ?? 'MONTHLY') as any,
+        startDate: input.startDate ?? new Date(),
+        renewalDate: input.renewalDate ?? null,
+        remainingClasses: input.remainingClasses ?? classes,
+        completedClasses: 0,
+        rescheduleLimit: input.rescheduleLimit ?? 0,
+        familyDiscountPct: input.familyDiscountPct ?? 0,
+        batchId: input.batchId ?? null,
+        feeAssignmentId: input.feeAssignmentId ?? null,
+        pendingDays: input.pendingDays ?? [],
+        pendingTime: input.pendingTime ?? null,
+        pendingTeacherId: input.pendingTeacherId ?? null,
+        preferredStartDate: input.preferredStartDate ?? null,
+        preferredTeacherGender: input.preferredTeacherGender ?? null,
+        adminStartOverride: input.adminStartOverride ?? false,
+        status: (input.status ?? 'ACTIVE') as any,
+      },
+    });
+  }
+
+  /*
+   * A class has been finalised (its attendance was locked). Consume one class
+   * from each attending student's active subscription — remainingClasses down,
+   * completedClasses up. Only a class that actually took place counts: an
+   * EXCUSED / approved-leave attendee, and a CANCELLED session, never burn a
+   * class. Called exactly once per class, at the lock transition, so it cannot
+   * double-count. Floors remainingClasses at zero.
+   */
+  async consumeClassForSubscription(classId: string): Promise<void> {
+    const cls = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: {
+        status: true,
+        batchId: true,
+        attendees: { select: { studentId: true, status: true } },
+      },
+    });
+    if (!cls || cls.status !== 'COMPLETED') return;
+    // A held class uses a slot whether the student showed up or not; only an
+    // excused absence or approved leave is forgiven.
+    const CONSUMING = new Set(['PRESENT', 'LATE', 'ABSENT', 'NO_SHOW']);
+    for (const a of cls.attendees) {
+      if (!a.status || !CONSUMING.has(a.status)) continue;
+      // Prefer the subscription tied to this batch; fall back to the student's
+      // active one for legacy rows that predate batch tracking.
+      const sub =
+        (cls.batchId
+          ? await this.prisma.studentSubscription.findFirst({
+              where: { studentId: a.studentId, status: 'ACTIVE', batchId: cls.batchId },
+              orderBy: { createdAt: 'desc' },
+            })
+          : null) ??
+        (await this.prisma.studentSubscription.findFirst({
+          where: { studentId: a.studentId, status: 'ACTIVE' },
+          orderBy: { createdAt: 'desc' },
+        }));
+      if (!sub) continue;
+      await this.prisma.studentSubscription.update({
+        where: { id: sub.id },
+        data: {
+          remainingClasses: Math.max(0, sub.remainingClasses - 1),
+          completedClasses: { increment: 1 },
+        },
+      });
+    }
+  }
+
+  /*
+   * A new billing cycle has begun for this student — refill the class allowance
+   * (remainingClasses back to the monthly count, completedClasses to zero) and
+   * roll renewalDate to the next billing date. Called from the billing sweep
+   * after a renewal invoice is actually raised, so it runs on every real cycle
+   * turn regardless of whether a plan change was queued.
+   */
+  async refillCycle(studentId: string): Promise<void> {
+    const sub = await this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!sub) return;
+    const monthly = calcMonthlyClasses(sub.weeklyClasses);
+    // Subscriptions renew on a fixed 28-day cadence. Anchor to the cycle
+    // boundary (the old renewal date), not the sweep time, so cycles don't drift;
+    // step forward until the new renewal is in the future (catches a late sweep).
+    const nowTs = new Date();
+    let renewal = sub.renewalDate ? new Date(sub.renewalDate) : nowTs;
+    while (renewal <= nowTs) renewal = subscriptionCycleEnd(renewal);
+    await this.prisma.studentSubscription.update({
+      where: { id: sub.id },
+      data: {
+        remainingClasses: monthly,
+        completedClasses: 0,
+        minutesUsed: 0,
+        // The reschedule allowance is per-cycle — the flow's "Reset Cycle
+        // Counters: Hours, Classes, Reschedules Used" box. Reset it here too,
+        // because this advances renewalDate into the future and so disarms the
+        // lazy reset in requestReschedule; without this the counter would carry
+        // over and a renewed student would lose their reschedules permanently.
+        rescheduleCounter: 0,
+        renewalDate: renewal,
+      },
+    });
+    if (sub.feeAssignmentId) {
+      await this.prisma.studentFeeAssignment
+        .update({ where: { id: sub.feeAssignmentId }, data: { nextRunAt: renewal } })
+        .catch(() => undefined);
+    }
+  }
+
+  /*
+   * Cycle close: the classes of the cycle that just ended become immutable —
+   * their attendance is settled and they can no longer be rescheduled. Locks
+   * every not-yet-locked past session of the batch.
+   */
+  async lockClosedCycleClasses(batchId: string | null | undefined, before: Date): Promise<void> {
+    if (!batchId) return;
+    await this.prisma.classSession
+      .updateMany({
+        where: { batchId, cycleLocked: false, startsAt: { lt: before } },
+        data: { cycleLocked: true },
+      })
+      .catch(() => undefined);
+  }
+
+  /*
+   * Generate the next 28-day cycle's classes for a student's active batch, when
+   * no queued change already did so. Reuses the deduped cycle generator, so a
+   * double call is safe.
+   */
+  async generateNextCycleForSubscription(studentId: string): Promise<number> {
+    const sub = await this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      select: { batchId: true },
+    });
+    if (!sub?.batchId) return 0;
+    return this.generateCycleClasses(studentId, sub.batchId).catch(() => 0);
+  }
+
+  /* Notify the student, their teacher and their coach that a new cycle is live. */
+  async notifyCycleRenewed(studentId: string): Promise<void> {
+    const sub = await this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      select: { batchId: true, renewalDate: true },
+    });
+    let teacherProfileId: string | null = null;
+    if (sub?.batchId) {
+      const batch = await this.prisma.batch.findUnique({ where: { id: sub.batchId }, select: { teacherId: true } });
+      teacherProfileId = batch?.teacherId ?? null;
+    }
+    await this.notifyScheduleReady(studentId, teacherProfileId, sub?.renewalDate ?? new Date(), 'CYCLE_RENEWED');
+  }
+
+  /*
+   * Next sequential batch code (BATCH-0001…). Read-max-then-insert like the rest
+   * of the codebase, but wrapped in a retry so a concurrent enrolment losing the
+   * unique race retries the next number instead of failing the whole conversion.
+   */
+  private async nextBatchCode(): Promise<string> {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const count = await this.prisma.batch.count();
+      const candidate = `BATCH-${String(count + 1 + attempt).padStart(4, '0')}`;
+      const clash = await this.prisma.batch.findUnique({ where: { code: candidate }, select: { id: true } });
+      if (!clash) return candidate;
+    }
+    // Fallback: a suffix that cannot collide, rather than giving up.
+    return `BATCH-${Date.now().toString().slice(-8)}`;
+  }
+
+  private addMinutesToTime(time: string, minutes: number): string {
+    const [h, m] = time.split(':').map(Number);
+    const total = (h * 60 + m + minutes) % (24 * 60);
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  private async generateSessionsForBatch(batchId: string, from: Date, to: Date): Promise<number> {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+      select: {
+        id: true, name: true, courseId: true, teacherId: true,
+        daysOfWeek: true, startTime: true, endTime: true,
+        students: { select: { studentId: true } },
+      },
+    });
+    if (!batch?.daysOfWeek?.length || !batch.startTime || !batch.endTime || !batch.teacherId) return 0;
+
+    // UTC throughout, matching generateCycleClasses and the availability maths.
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const [sh, sm] = batch.startTime.split(':').map(Number);
+    const [eh, em] = batch.endTime.split(':').map(Number);
+    // No backdated classes, ever — a session earlier than the window start or
+    // already in the past is skipped (the spec's late-payment rule).
+    const now = new Date();
+    let made = 0;
+    for (const d = new Date(from); d < to; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (!batch.daysOfWeek.includes(DAYS[d.getUTCDay()])) continue;
+      const startsAt = new Date(d);
+      startsAt.setUTCHours(sh, sm, 0, 0);
+      if (startsAt < from || startsAt < now) continue;
+      const endsAt = new Date(d);
+      endsAt.setUTCHours(eh, em, 0, 0);
+      const session = await this.prisma.classSession.create({
+        data: {
+          courseId: batch.courseId,
+          teacherId: batch.teacherId,
+          batchId: batch.id,
+          title: `${batch.name} — Class`,
+          startsAt,
+          endsAt,
+          status: 'SCHEDULED',
+        },
+      });
+      if (batch.students.length) {
+        await this.prisma.classAttendee.createMany({
+          data: batch.students.map((s) => ({ classId: session.id, studentId: s.studentId })),
+          skipDuplicates: true,
+        });
+      }
+      made += 1;
+    }
+    return made;
+  }
+
+  /*
+   * Turn an accepted enrolment into a full subscription: a Batch for the chosen
+   * schedule, its recurring class sessions, a recurring fee assignment, and the
+   * stored StudentSubscription that ties them together. Every step is guarded —
+   * a missing teacher or unscheduled day builds what it can (at minimum the
+   * subscription record) rather than failing the conversion. Returns what it made.
+   */
+  /*
+   * Resolve a package into the concrete shape a subscription needs: its model +
+   * pricing mode, the class duration/weekly count (honouring an hourly plan's
+   * family-chosen overrides), and the priced monthly amount. Pure resolution —
+   * no rows written — so both the conversion-time invoice and the stored
+   * subscription can be priced without building a batch.
+   */
+  private async resolvePlanShape(
+    pkg: any,
+    currency: Currency,
+    durationOverride?: number | null,
+    weeklyOverride?: number | null,
+    fallbackDurationMinutes?: number | null,
+    days?: string[],
+  ): Promise<{
+    modelId: string | null;
+    pricingMode: 'FIXED_MONTHLY' | 'HOURLY';
+    durationMinutes: number;
+    weeklyClasses: number;
+    monthlyPrice: number | null;
+    hourlyRate: number | null;
+  }> {
+    let modelId: string | null = pkg?.modelId ?? null;
+    let pricingMode: 'FIXED_MONTHLY' | 'HOURLY' = 'FIXED_MONTHLY';
+    if (modelId) {
+      const m = await this.prisma.subscriptionModel.findUnique({
+        where: { id: modelId },
+        select: { pricingMode: true },
+      });
+      pricingMode = (m?.pricingMode as 'FIXED_MONTHLY' | 'HOURLY') ?? 'FIXED_MONTHLY';
+    } else {
+      const monthly = await this.prisma.subscriptionModel.findUnique({
+        where: { key: 'MONTHLY' },
+        select: { id: true },
+      });
+      modelId = monthly?.id ?? null;
+    }
+    const dayCount = (days ?? []).filter(Boolean).length;
+    const durationMinutes =
+      pricingMode === 'HOURLY' && durationOverride
+        ? Number(durationOverride)
+        : Number(pkg?.durationMinutes) || fallbackDurationMinutes || 60;
+    const weeklyClasses =
+      pricingMode === 'HOURLY' && weeklyOverride
+        ? Number(weeklyOverride)
+        : Number(pkg?.weeklyClasses) || dayCount || 2;
+    const monthlyPrice =
+      pricingMode === 'HOURLY'
+        ? monthlyTuition({ pricingMode, currency, hourlyRate: hourlyRateFor(pkg, currency), durationMinutes, weeklyClasses })
+        : priceFor(pkg, currency);
+    const hourlyRate = pricingMode === 'HOURLY' ? hourlyRateFor(pkg, currency) : null;
+    return { modelId, pricingMode, durationMinutes, weeklyClasses, monthlyPrice, hourlyRate };
+  }
+
+  /*
+   * Payment-gated enrollment, phase 1: record the *intent*. Creates a
+   * PENDING_PAYMENT subscription carrying the agreed price and the schedule the
+   * family chose, but builds NO batch, NO class sessions and NO fee assignment —
+   * so nothing is scheduled and the teacher's calendar is not blocked until the
+   * first payment lands. The invoice is raised by the caller from the returned
+   * monthlyPrice. `activateSubscription` completes the rest on payment.
+   */
+  async recordSubscriptionIntent(input: {
+    studentId: string;
+    enrollmentId?: string | null;
+    courseId?: string | null;
+    teacherId?: string | null;
+    pkg: any;
+    currency: Currency;
+    days?: string[];
+    time?: string | null;
+    preferredStartDate?: Date | null;
+    preferredTeacherGender?: string | null;
+    adminStartOverride?: boolean;
+    fallbackDurationMinutes?: number | null;
+    durationOverride?: number | null;
+    weeklyOverride?: number | null;
+  }): Promise<{
+    subscriptionId: string | null;
+    monthlyPrice: number | null;
+    pricingMode: 'FIXED_MONTHLY' | 'HOURLY';
+  }> {
+    const pkg = input.pkg ?? {};
+    const shape = await this.resolvePlanShape(
+      pkg,
+      input.currency,
+      input.durationOverride,
+      input.weeklyOverride,
+      input.fallbackDurationMinutes,
+      input.days,
+    );
+    if (!shape.modelId) {
+      return { subscriptionId: null, monthlyPrice: null, pricingMode: 'FIXED_MONTHLY' };
+    }
+    const days = (input.days ?? []).filter(Boolean);
+    let subscriptionId: string | null = null;
+    try {
+      const sub = await this.createStudentSubscription({
+        studentId: input.studentId,
+        enrollmentId: input.enrollmentId ?? null,
+        courseId: input.courseId ?? null,
+        modelId: shape.modelId,
+        pricingMode: shape.pricingMode,
+        planId: pkg.id ?? null,
+        tier: pkg.tier ?? null,
+        currency: input.currency,
+        monthlyPrice: shape.monthlyPrice,
+        hourlyRate: shape.hourlyRate,
+        durationMinutes: shape.durationMinutes,
+        weeklyClasses: shape.weeklyClasses,
+        // No cycle yet — startDate/renewalDate/remainingClasses are set on payment.
+        remainingClasses: 0,
+        rescheduleLimit: Number(pkg.rescheduleLimit) || 0,
+        familyDiscountPct: Number(pkg.familyDiscountPct) || 0,
+        pendingDays: days,
+        pendingTime: input.time ?? null,
+        pendingTeacherId: input.teacherId ?? null,
+        preferredStartDate: input.preferredStartDate ?? null,
+        preferredTeacherGender: input.preferredTeacherGender ?? null,
+        adminStartOverride: input.adminStartOverride ?? false,
+        status: 'PENDING_PAYMENT',
+      });
+      subscriptionId = sub.id;
+    } catch {
+      subscriptionId = null;
+    }
+    return { subscriptionId, monthlyPrice: shape.monthlyPrice, pricingMode: shape.pricingMode };
+  }
+
+  /*
+   * The official cycle start, decided only once payment lands. The spec's rules:
+   *  - Admin override → start as soon as possible (first preferred weekday on/after
+   *    payment), ignoring the preferred-date floor.
+   *  - Paid on/before the preferred date (on-time or early) → start exactly on the
+   *    preferred date. Never earlier.
+   *  - Paid after the preferred date (late) → the first preferred class day on/after
+   *    the payment date. No backdating.
+   */
+  private computeActualCycleStart(
+    preferred: Date | null | undefined,
+    paymentDate: Date,
+    days: string[],
+    adminOverride: boolean,
+  ): Date {
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const nextPreferredDay = (from: Date): Date => {
+      if (!days.length) return from;
+      for (let i = 0; i < 14; i++) {
+        const d = addDays(from, i);
+        if (days.includes(DAYS[d.getUTCDay()])) return d;
+      }
+      return from;
+    };
+    const pref = preferred ? new Date(preferred) : null;
+    if (adminOverride) return nextPreferredDay(paymentDate);
+    if (pref && paymentDate <= pref) return pref;
+    return nextPreferredDay(pref && pref > paymentDate ? pref : paymentDate);
+  }
+
+  /*
+   * Payment-gated enrollment, phase 2: activate. Called when the first invoice is
+   * fully paid. Computes the actual cycle-start date (never backdated), builds the
+   * Batch (which is the teacher-calendar reservation), generates the 28-day class
+   * schedule, creates the recurring fee assignment, flips the subscription and its
+   * enrolment to ACTIVE, and notifies the student, teacher and coach. Idempotent:
+   * a subscription already ACTIVE is skipped.
+   */
+  async activateSubscription(
+    studentId: string,
+    paymentDate?: Date,
+  ): Promise<{ activated: boolean; subscriptionId?: string; batchId?: string | null; sessionsCreated?: number; actualStart?: Date; cycleEnd?: Date }> {
+    const sub = await this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: 'PENDING_PAYMENT' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!sub) return { activated: false };
+
+    const payDate = paymentDate ?? new Date();
+    const days = (sub.pendingDays ?? []).filter(Boolean);
+    const actualStart = this.computeActualCycleStart(sub.preferredStartDate, payDate, days, sub.adminStartOverride);
+    const cycleEnd = subscriptionCycleEnd(actualStart);
+
+    // Build the batch — this IS the permanent teacher-calendar reservation.
+    let batchId: string | null = null;
+    if (sub.pendingTeacherId && sub.courseId && days.length && sub.pendingTime) {
+      try {
+        const code = await this.nextBatchCode();
+        const batch = await this.prisma.batch.create({
+          data: {
+            code,
+            name: `${sub.tier ?? 'Subscription'} — ${studentId.slice(0, 6)}`,
+            courseId: sub.courseId,
+            teacherId: sub.pendingTeacherId,
+            daysOfWeek: days,
+            startTime: sub.pendingTime,
+            endTime: this.addMinutesToTime(sub.pendingTime, sub.durationMinutes),
+            startDate: actualStart,
+            status: 'ACTIVE',
+          },
+        });
+        batchId = batch.id;
+        await this.prisma.batchStudent.create({ data: { batchId: batch.id, studentId } });
+      } catch {
+        batchId = null;
+      }
+    }
+
+    // Recurring fee assignment (28-day) when the package is billed by a fee plan.
+    let feeAssignmentId: string | null = null;
+    const pkg = sub.planId
+      ? await this.prisma.package.findUnique({ where: { id: sub.planId }, select: { feePlanId: true } })
+      : null;
+    if (pkg?.feePlanId) {
+      try {
+        const fa = await this.prisma.studentFeeAssignment.create({
+          data: {
+            studentId,
+            planId: pkg.feePlanId,
+            startDate: actualStart,
+            nextRunAt: cycleEnd,
+            active: true,
+            autoGenerate: true,
+          },
+        });
+        feeAssignmentId = fa.id;
+      } catch {
+        feeAssignmentId = null;
+      }
+    }
+
+    // The first 28-day cycle's class sessions (no backdating — see generator).
+    let sessionsCreated = 0;
+    if (batchId) {
+      sessionsCreated = await this.generateSessionsForBatch(batchId, actualStart, cycleEnd).catch(() => 0);
+    }
+
+    const monthly = calcMonthlyClasses(sub.weeklyClasses);
+    await this.prisma.studentSubscription.update({
+      where: { id: sub.id },
+      data: {
+        status: 'ACTIVE',
+        actualCycleStartDate: actualStart,
+        startDate: actualStart,
+        renewalDate: cycleEnd,
+        batchId,
+        feeAssignmentId,
+        remainingClasses: monthly,
+        completedClasses: 0,
+        minutesUsed: 0,
+      },
+    });
+
+    // The enrolment goes live too, dated from the actual cycle start.
+    if (sub.enrollmentId) {
+      await this.prisma.enrollment
+        .update({
+          where: { id: sub.enrollmentId },
+          data: {
+            status: EnrollmentStatus.ACTIVE,
+            startedAt: actualStart,
+            ...(sub.pendingTeacherId ? { teacherId: sub.pendingTeacherId } : {}),
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    await this.notifyScheduleReady(studentId, sub.pendingTeacherId, actualStart).catch(() => undefined);
+
+    return { activated: true, subscriptionId: sub.id, batchId, sessionsCreated, actualStart, cycleEnd };
+  }
+
+  /*
+   * Tell the student, their teacher and their coach that a schedule is live — on
+   * first activation and on each cycle renewal. Resolves the three recipients'
+   * user ids and fires the notification to each; entirely best-effort.
+   */
+  private async notifyScheduleReady(
+    studentId: string,
+    teacherProfileId: string | null | undefined,
+    startDate: Date,
+    kind: 'CLASS_SCHEDULED' | 'CYCLE_RENEWED' = 'CLASS_SCHEDULED',
+  ): Promise<void> {
+    const student = await this.prisma.studentProfile.findUnique({
+      where: { id: studentId },
+      select: {
+        userId: true,
+        coachId: true,
+        studentCode: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+    });
+    const teacher = teacherProfileId
+      ? await this.prisma.teacherProfile.findUnique({ where: { id: teacherProfileId }, select: { userId: true } })
+      : null;
+    const when = startDate.toISOString().slice(0, 10);
+    const studentName = student?.user
+      ? `${student.user.firstName} ${student.user.lastName}`.trim()
+      : 'the student';
+    const renewed = kind === 'CYCLE_RENEWED';
+
+    /*
+     * Each recipient gets a message written for their role — the spec's renewal
+     * notification list: the student hears about their new schedule (their new
+     * invoice comes separately from billing.notifyIssued), the teacher about a
+     * new schedule to teach, the coach a confirmation the cycle turned over.
+     */
+    const messages: { userId: string; title: string; body: string; link: string }[] = [];
+    if (student?.userId) {
+      messages.push({
+        userId: student.userId,
+        title: renewed ? 'New schedule available' : 'Your class schedule is ready',
+        body: renewed
+          ? `Your new billing cycle's classes are scheduled from ${when}.`
+          : `Your classes are scheduled to begin on ${when}.`,
+        link: '/student/subscription',
+      });
+    }
+    if (teacher?.userId) {
+      messages.push({
+        userId: teacher.userId,
+        title: 'New schedule generated',
+        body: renewed
+          ? `A new 28-day schedule for ${studentName} starts ${when}.`
+          : `A new schedule for ${studentName} begins ${when}.`,
+        link: '/teacher/classes',
+      });
+    }
+    if (student?.coachId) {
+      messages.push({
+        userId: student.coachId,
+        title: 'Schedule generated successfully',
+        body: renewed
+          ? `${studentName}'s new cycle schedule is live from ${when}.`
+          : `${studentName}'s schedule is live from ${when}.`,
+        link: `/students/${studentId}`,
+      });
+    }
+    await Promise.all(
+      messages.map((m) =>
+        this.notifications
+          .createFor(m.userId, { type: kind, title: m.title, body: m.body, link: m.link })
+          .catch(() => undefined),
+      ),
+    );
+  }
+
+  /*
+   * A student reschedules one upcoming class, within the rules the spec lays
+   * down: the plan's reschedule allowance (a counter that resets each cycle), at
+   * least four hours' notice, the new time free for the teacher, and still
+   * inside the current billing cycle. Every rule is a guard here rather than a
+   * hope on the client, because the client cannot be trusted with any of them.
+   */
+  private static readonly RESCHEDULE_MIN_NOTICE_HOURS = 4;
+
+  /** "HH:mm" → minutes from midnight, or null on anything malformed. */
+  private hhmmToMinutes(v: unknown): number | null {
+    if (typeof v !== 'string') return null;
+    const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
+    if (!m) return null;
+    return Number(m[1]) * 60 + Number(m[2]);
+  }
+
+  /** An instant's weekday name and minutes-from-midnight in a given timezone. */
+  private localWeekdayAndMinutes(d: Date, tz: string): { weekday: string; minutes: number } {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
+    let hh = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+    const mm = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+    if (hh === 24) hh = 0; // some engines emit 24:00 for midnight under hour12:false
+    return { weekday, minutes: hh * 60 + mm };
+  }
+
+  /*
+   * Whether a class slot falls inside the teacher's published availability.
+   *
+   * Permissive by design, matching how trial slotting falls back to standard
+   * hours: a teacher who has published nothing for that weekday is treated as
+   * available (the academy fills the gap). Returns false ONLY when the teacher
+   * HAS published windows for that weekday and the slot sits outside all of them.
+   * Availability windows are stored in the teacher's own timezone, so the
+   * instant is converted to that timezone before comparing.
+   */
+  private async isWithinTeacherAvailability(teacherId: string, start: Date, end: Date): Promise<boolean> {
+    const t = await this.prisma.teacherProfile.findUnique({
+      where: { id: teacherId },
+      select: { availability: true, timeZone: true },
+    });
+    const availability = t?.availability;
+    if (!availability || typeof availability !== 'object') return true;
+    const tz = t?.timeZone || 'UTC';
+    const s = this.localWeekdayAndMinutes(start, tz);
+    const e = this.localWeekdayAndMinutes(end, tz);
+    const dayConfig = (availability as Record<string, unknown>)[s.weekday];
+    if (!Array.isArray(dayConfig) || dayConfig.length === 0) return true; // nothing published that day
+    // If the slot rolls past midnight into the next weekday, clamp its end to
+    // the end of the published day for this weekday's comparison.
+    const endMinutes = e.weekday === s.weekday ? e.minutes : 24 * 60;
+    for (const w of dayConfig) {
+      if (!w || typeof w !== 'object') continue;
+      const from = this.hhmmToMinutes((w as Record<string, unknown>).from);
+      const to = this.hhmmToMinutes((w as Record<string, unknown>).to);
+      if (from == null || to == null) continue;
+      if (s.minutes >= from && endMinutes <= to) return true;
+    }
+    return false;
+  }
+
+  /*
+   * Assert a recurring schedule (chosen weekdays + a start time) sits inside the
+   * assigned teacher's published availability, so the enrolment cannot book a
+   * teacher outside their hours — the spec's "schedule selection shall only
+   * display available teacher time slots", enforced server-side at conversion.
+   * Permissive when the teacher has published nothing for a given weekday.
+   * A no-op when there is no teacher or no schedule yet.
+   */
+  async assertScheduleWithinAvailability(
+    teacherId: string | null | undefined,
+    days: string[] | null | undefined,
+    time: string | null | undefined,
+    durationMinutes: number,
+  ): Promise<void> {
+    if (!teacherId || !days?.length || !time) return;
+    const startMins = this.hhmmToMinutes(time);
+    if (startMins == null) return;
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = new Date();
+    const base = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    for (const dayName of days) {
+      const idx = DAYS.indexOf(dayName);
+      if (idx < 0) continue;
+      // The next occurrence of this weekday (UTC), matching how sessions are
+      // stamped (HH:mm as UTC wall-clock).
+      const d = new Date(base);
+      const delta = ((idx - d.getUTCDay() + 7) % 7) || 7;
+      d.setUTCDate(d.getUTCDate() + delta);
+      const start = new Date(d);
+      start.setUTCHours(Math.floor(startMins / 60), startMins % 60, 0, 0);
+      const end = new Date(start.getTime() + durationMinutes * 60000);
+      const ok = await this.isWithinTeacherAvailability(teacherId, start, end);
+      if (!ok) {
+        throw new BadRequestException(`The chosen time is outside the teacher's available hours on ${dayName}.`);
+      }
+    }
+  }
+
+  async requestReschedule(userId: string, sessionId: string, newStartsAtIso: string) {
+    const student = await this.studentByUserId(userId);
+    const sub = await this.prisma.studentSubscription.findFirst({
+      where: { studentId: student.id, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!sub) throw new BadRequestException('No active subscription to reschedule against.');
+
+    // The allowance resets every billing cycle. Rather than depend on a sweep
+    // running exactly on the boundary, refill lazily: if we are past the renewal
+    // date, this is a new cycle — zero the counter and advance the stored renewal
+    // so it only refills once per cycle.
+    const nowTs = new Date();
+    if (sub.renewalDate && nowTs > new Date(sub.renewalDate)) {
+      let nextRenewal = new Date(sub.renewalDate);
+      while (nextRenewal <= nowTs) nextRenewal = subscriptionCycleEnd(nextRenewal);
+      await this.prisma.studentSubscription.update({
+        where: { id: sub.id },
+        data: { rescheduleCounter: 0, minutesUsed: 0, renewalDate: nextRenewal },
+      });
+      sub.rescheduleCounter = 0;
+      sub.renewalDate = nextRenewal;
+    }
+
+    if (sub.rescheduleCounter >= sub.rescheduleLimit) {
+      throw new BadRequestException(
+        sub.rescheduleLimit === 0
+          ? 'This plan does not allow rescheduling.'
+          : `You have used all ${sub.rescheduleLimit} reschedules for this cycle.`,
+      );
+    }
+
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, teacherId: true, batchId: true, startsAt: true, endsAt: true, status: true, cycleLocked: true },
+    });
+    if (!session) throw new NotFoundException('Class not found.');
+
+    // The class must be one of this student's, upcoming, and still scheduled.
+    const attends = await this.prisma.classAttendee.count({ where: { classId: sessionId, studentId: student.id } });
+    if (!attends) throw new ForbiddenException('That class is not yours to reschedule.');
+    if (session.status !== 'SCHEDULED') throw new BadRequestException('Only a scheduled class can be moved.');
+    // A class from a closed cycle is immutable — the cycle it belonged to has
+    // been billed and locked.
+    if (session.cycleLocked) throw new BadRequestException('That class belongs to a closed billing cycle and can no longer be moved.');
+    const now = new Date();
+    if (session.startsAt <= now) throw new BadRequestException('That class has already started or passed.');
+
+    const newStart = new Date(newStartsAtIso);
+    if (isNaN(newStart.getTime())) throw new BadRequestException('Invalid new time.');
+    const durationMs = new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime();
+    const newEnd = new Date(newStart.getTime() + durationMs);
+
+    // Rule: at least four hours' notice before the ORIGINAL class.
+    const noticeMs = SubscriptionsService.RESCHEDULE_MIN_NOTICE_HOURS * 60 * 60 * 1000;
+    if (new Date(session.startsAt).getTime() - now.getTime() < noticeMs) {
+      throw new BadRequestException(`Rescheduling needs at least ${SubscriptionsService.RESCHEDULE_MIN_NOTICE_HOURS} hours' notice.`);
+    }
+    // Rule: the new time must be in the future and still inside this cycle.
+    if (newStart.getTime() - now.getTime() < noticeMs) {
+      throw new BadRequestException(`Pick a time at least ${SubscriptionsService.RESCHEDULE_MIN_NOTICE_HOURS} hours from now.`);
+    }
+    if (sub.renewalDate && newEnd > new Date(sub.renewalDate)) {
+      throw new BadRequestException('The class must be rescheduled to before your current cycle ends.');
+    }
+
+    // Rule: the new time must fall inside the teacher's published availability
+    // (when they have published any for that weekday) — the spec's "teacher
+    // availability required", not merely "no clashing class".
+    const withinAvailability = await this.isWithinTeacherAvailability(session.teacherId, newStart, newEnd);
+    if (!withinAvailability) {
+      throw new BadRequestException("That time is outside the teacher's available hours.");
+    }
+
+    // Rule: the teacher must also be free — no other scheduled class overlapping.
+    const clash = await this.prisma.classSession.count({
+      where: {
+        teacherId: session.teacherId,
+        id: { not: sessionId },
+        status: 'SCHEDULED',
+        startsAt: { lt: newEnd },
+        endsAt: { gt: newStart },
+      },
+    });
+    if (clash) throw new BadRequestException('The teacher is not available at that time.');
+
+    await this.prisma.$transaction([
+      this.prisma.classSession.update({ where: { id: sessionId }, data: { startsAt: newStart, endsAt: newEnd } }),
+      this.prisma.studentSubscription.update({ where: { id: sub.id }, data: { rescheduleCounter: { increment: 1 } } }),
+    ]);
+
+    this.notifications
+      .createForRoles([Role.ADMIN, Role.ACADEMIC_COACH], {
+        type: 'CLASS_RESCHEDULED',
+        title: 'Class rescheduled',
+        body: `${student.studentCode} moved a class to ${newStart.toISOString().slice(0, 16).replace('T', ' ')}.`,
+        link: `/students/${student.id}`,
+      })
+      .catch(() => undefined);
+
+    return {
+      sessionId,
+      startsAt: newStart,
+      endsAt: newEnd,
+      reschedulesLeft: Math.max(0, sub.rescheduleLimit - (sub.rescheduleCounter + 1)),
+    };
+  }
+
+  /*
+   * Migrate a student from one subscription model to another (the spec's
+   * Monthly → Hourly move, but general). Deliberately does NOT touch history:
+   * past invoices, attendance and class sessions all reference their own rows
+   * and are left exactly as they are. The current subscription is ENDed and a
+   * fresh one created for the new plan, the enrolment is repointed at the new
+   * package, and the existing schedule (batch) is kept — a migration changes how
+   * a family is priced, not when their classes are. Admin-only.
+   */
+  async migrateModel(
+    studentId: string,
+    input: { newPackageId: string; durationMinutes?: number; weeklyClasses?: number },
+    actor: Actor,
+  ) {
+    const current = await this.prisma.studentSubscription.findFirst({
+      where: { studentId, status: { in: ['ACTIVE', 'PAUSED', 'PENDING'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const pkg = await this.prisma.package.findUnique({ where: { id: input.newPackageId } });
+    if (!pkg) throw new BadRequestException('That plan no longer exists.');
+
+    // Resolve the new plan's model + pricing mode.
+    let modelId = pkg.modelId ?? null;
+    let pricingMode: 'FIXED_MONTHLY' | 'HOURLY' = 'FIXED_MONTHLY';
+    if (modelId) {
+      const m = await this.prisma.subscriptionModel.findUnique({ where: { id: modelId }, select: { pricingMode: true } });
+      pricingMode = (m?.pricingMode as 'FIXED_MONTHLY' | 'HOURLY') ?? 'FIXED_MONTHLY';
+    } else {
+      const monthly = await this.prisma.subscriptionModel.findUnique({ where: { key: 'MONTHLY' }, select: { id: true } });
+      modelId = monthly?.id ?? null;
+    }
+    if (!modelId) throw new BadRequestException('No subscription model to migrate to.');
+
+    const profile = await this.prisma.studentProfile.findUnique({
+      where: { id: studentId },
+      select: { billingCurrency: true },
+    });
+    const currency = (profile?.billingCurrency ?? DEFAULT_CURRENCY) as Currency;
+
+    const durationMinutes = input.durationMinutes ?? (Number(pkg.durationMinutes) || current?.durationMinutes || 60);
+    const weeklyClasses = input.weeklyClasses ?? (Number(pkg.weeklyClasses) || current?.weeklyClasses || 2);
+    const monthlyPrice =
+      pricingMode === 'HOURLY'
+        ? monthlyTuition({ pricingMode, currency, hourlyRate: hourlyRateFor(pkg, currency), durationMinutes, weeklyClasses })
+        : priceFor(pkg, currency);
+    const hourlyRate = pricingMode === 'HOURLY' ? hourlyRateFor(pkg, currency) : null;
+
+    // Repoint the active enrolment at the new package (keeps the same course).
+    const enrolment = await this.prisma.enrollment.findFirst({
+      where: { studentId, status: EnrollmentStatus.ACTIVE },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true, courseId: true },
+    });
+    if (enrolment) {
+      await this.prisma.enrollment.update({ where: { id: enrolment.id }, data: { packageId: pkg.id } });
+    }
+
+    // End the old subscription, keep it as history.
+    if (current) {
+      await this.prisma.studentSubscription.update({ where: { id: current.id }, data: { status: 'ENDED' } });
+    }
+
+    // Create the new one, keeping the existing schedule/fee links.
+    const created = await this.createStudentSubscription({
+      studentId,
+      enrollmentId: enrolment?.id ?? current?.enrollmentId ?? null,
+      courseId: enrolment?.courseId ?? current?.courseId ?? null,
+      modelId,
+      pricingMode,
+      planId: pkg.id,
+      tier: pkg.tier ?? null,
+      currency,
+      monthlyPrice,
+      hourlyRate,
+      durationMinutes,
+      weeklyClasses,
+      startDate: new Date(),
+      renewalDate: current?.renewalDate ?? null,
+      rescheduleLimit: Number(pkg.rescheduleLimit) || 0,
+      familyDiscountPct: Number(pkg.familyDiscountPct) || 0,
+      batchId: current?.batchId ?? null,
+      feeAssignmentId: current?.feeAssignmentId ?? null,
+      status: 'ACTIVE',
+    });
+
+    const student = await this.prisma.studentProfile.findUnique({ where: { id: studentId }, select: { userId: true } });
+    if (student) {
+      this.notifications
+        .createFor(student.userId, {
+          type: 'SUBSCRIPTION_MIGRATED',
+          title: 'Your plan has changed',
+          body: `You are now on ${pkg.name}. Your past invoices and classes are unchanged.`,
+          link: '/student/subscription',
+        })
+        .catch(() => undefined);
+    }
+    // Audit trail on the student record.
+    await this.prisma.studentActivity
+      .create({
+        data: {
+          studentId,
+          kind: 'AUDIT',
+          type: 'SUBSCRIPTION_MIGRATED',
+          title: `Migrated to ${pkg.name}`,
+          description: `${current?.pricingMode ?? 'none'} → ${pricingMode}. History preserved.`,
+          meta: { from: current?.id ?? null, to: created.id, packageId: pkg.id } as never,
+          actorId: actor?.id,
+          actorName: actor?.name,
+        },
+      })
+      .catch(() => undefined);
+
+    return { subscriptionId: created.id, endedId: current?.id ?? null, pricingMode, monthlyPrice };
   }
 
   /** Packages a student can move to — the catalogue, minus the one they are on. */
@@ -1053,6 +2075,12 @@ export class SubscriptionsService {
       data: { status: SubscriptionRequestStatus.APPLIED, appliedAt: new Date() },
     });
 
+    // A new cycle has begun — the reschedule allowance refills.
+    await this.prisma.studentSubscription.updateMany({
+      where: { studentId, status: 'ACTIVE' },
+      data: { rescheduleCounter: 0 },
+    });
+
     const student = await this.prisma.studentProfile.findUnique({
       where: { id: studentId },
       select: { userId: true },
@@ -1102,9 +2130,9 @@ export class SubscriptionsService {
       include: { plan: { select: { cycle: true } } },
     });
 
+    // Subscriptions schedule in fixed 28-day cycles from the cycle start.
     const from = assignment?.nextRunAt ?? new Date();
-    const months = assignment?.plan ? cycleMonths(assignment.plan.cycle) : 0;
-    const to = addMonths(from, months > 0 ? months : 1);
+    const to = subscriptionCycleEnd(from);
 
     const batch = await this.prisma.batch.findUnique({
       where: { id: batchId },
@@ -1162,12 +2190,15 @@ export class SubscriptionsService {
     const [sh, sm] = batch.startTime.split(':').map(Number);
     const [eh, em] = batch.endTime.split(':').map(Number);
 
+    const nowTs = new Date();
     let made = 0;
     for (const d = new Date(from); d < to; d.setUTCDate(d.getUTCDate() + 1)) {
       if (!batch.daysOfWeek.includes(DAYS[d.getUTCDay()])) continue;
 
       const startsAt = new Date(d);
       startsAt.setUTCHours(sh, sm, 0, 0);
+      // No backdated classes, ever.
+      if (startsAt < nowTs) continue;
       if (taken.has(slotOf(startsAt))) continue;
       const endsAt = new Date(d);
       endsAt.setUTCHours(eh, em, 0, 0);

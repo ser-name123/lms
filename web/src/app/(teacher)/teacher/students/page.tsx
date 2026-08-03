@@ -210,6 +210,17 @@ export default function TeacherStudents() {
                     <Calendar className="size-3.5 text-ink-3 shrink-0" />
                     <span>Enrolled: {new Date(s.joinedAt).toLocaleDateString()}</span>
                   </p>
+                  {s.subscription && (
+                    <div className="mt-1.5 rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[10.5px] text-ink-2">
+                      <p className="font-black text-accent">
+                        {s.subscription.model}{s.subscription.tier ? ` · ${s.subscription.tier}` : ""}
+                      </p>
+                      <p className="mt-0.5 text-ink-3">
+                        {s.subscription.durationMinutes}min · {s.subscription.weeklyClasses}×/wk · {s.subscription.monthlyHours}h/mo
+                        {" · "}{s.subscription.remainingClasses} left
+                      </p>
+                    </div>
+                  )}
                 </div>
               </Card>
             ))}

@@ -4,6 +4,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { isCurrency, SUPPORTED_CURRENCIES } from '../common/currency';
 import {
   EnrollmentStatus, Role, StudentAttendanceStatus, UserStatus,
 } from '../generated/prisma/enums';
@@ -133,7 +134,7 @@ export class StudentManagementService {
     const batchIds = s.batches.map((b) => b.batchId);
     const now = new Date();
 
-    const [attendees, submissions, dueInvoices, upcomingClasses] = await Promise.all([
+    const [attendees, submissions, dueInvoices, upcomingClasses, latestSub] = await Promise.all([
       this.prisma.classAttendee.findMany({ where: { studentId: id }, select: { status: true, attended: true } }),
       this.prisma.submission.findMany({
         where: { studentId: id },
@@ -143,6 +144,14 @@ export class StudentManagementService {
       batchIds.length
         ? this.prisma.classSession.count({ where: { batchId: { in: batchIds }, startsAt: { gt: now }, status: 'SCHEDULED' } })
         : Promise.resolve(0),
+      // The current subscription's status, so the hub can flag a payment-gated
+      // (PENDING_PAYMENT) subscription — awaiting the first invoice before any
+      // schedule exists.
+      this.prisma.studentSubscription.findFirst({
+        where: { studentId: id },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true },
+      }),
     ]);
 
     const att = this.attRate(attendees);
@@ -160,6 +169,7 @@ export class StudentManagementService {
       // country. `fees` below is an amount in it, and had no currency of its own.
       billingCurrency: s.billingCurrency,
       status: s.user.status,
+      subscriptionStatus: latestSub?.status ?? null,
       onHoldReason: s.onHoldReason,
       onHoldAt: s.onHoldAt,
       coachId: s.coachId,
@@ -460,6 +470,33 @@ export class StudentManagementService {
     await this.logChange(id, 'REACTIVATED', 'Student reactivated', 'Classes resumed.', {}, actor);
     await this.notifyParent(id, 'Classes resumed', "The student's classes have resumed.").catch(() => undefined);
     return { status: UserStatus.ACTIVE };
+  }
+
+  /*
+   * Override the family's billing currency. Normally fixed at account creation
+   * from the country, but the spec lets a coach/admin correct it — a family that
+   * relocated, or whose country was mis-recorded at booking. Audited like any
+   * other change; future invoices quote the new currency, invoices already
+   * issued keep their own.
+   */
+  async setBillingCurrency(id: string, currency: string, actor: Actor) {
+    const next = String(currency ?? '').trim().toUpperCase();
+    if (!isCurrency(next)) {
+      throw new BadRequestException(`Currency must be one of ${SUPPORTED_CURRENCIES.join(', ')}.`);
+    }
+    const s = await this.prisma.studentProfile.findUnique({ where: { id }, select: { billingCurrency: true } });
+    if (!s) throw new NotFoundException('Student not found.');
+    if (s.billingCurrency === next) return { billingCurrency: next };
+    await this.prisma.studentProfile.update({ where: { id }, data: { billingCurrency: next } });
+    await this.logChange(
+      id,
+      'CURRENCY_CHANGED',
+      `Billing currency set to ${next}`,
+      `${s.billingCurrency} → ${next}`,
+      { from: s.billingCurrency, to: next },
+      actor,
+    );
+    return { billingCurrency: next };
   }
 
   // ── Notes (private — admin + coach only) ────────────────────────────────────

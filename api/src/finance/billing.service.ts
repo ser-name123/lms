@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { amountFor, DEFAULT_CURRENCY, type Currency } from '../common/currency';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailsService } from '../emails/emails.service';
 import { FinanceSettingsService } from './finance-settings.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import {
   InvoiceStatus,
   ScholarshipStatus,
@@ -50,6 +52,10 @@ export class BillingService {
     private readonly notifications: NotificationsService,
     private readonly emails: EmailsService,
     private readonly settings: FinanceSettingsService,
+    // Paying the first invoice activates a payment-gated subscription
+    // (builds the schedule + reserves the teacher). No cycle: SubscriptionsService
+    // does not depend on finance.
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // ── Document numbering ──────────────────────────────────────────────────────
@@ -308,6 +314,14 @@ export class BillingService {
     // The family's billing currency. Falls back to the academy default only
     // when a caller has none to give — never converted from another.
     currency?: string;
+    // An automatic discount to apply before tax (e.g. the sibling/family
+    // discount). Recorded on the invoice's discountAmount and reflected in the
+    // total; omitted or 0 leaves the invoice exactly as before.
+    discountAmount?: number;
+    discountLabel?: string;
+    // The subscription this enrolment invoice bills, so finance can surface it
+    // as a subscription/renewal charge rather than a loose fee.
+    subscriptionId?: string | null;
   }) {
     if (!(input.amount > 0)) return null;
 
@@ -315,34 +329,49 @@ export class BillingService {
     const items: InvoiceItemInput[] = [
       { type: FeeComponentType.COURSE, label: input.label, amount: round2(input.amount) },
     ];
-    const totals = computeInvoiceTotals({
-      items,
-      taxEnabled: cfg.taxEnabled,
-      taxPct: cfg.taxPct,
-    });
+
+    // A single-line enrolment invoice, so we compute totals directly: the
+    // family discount comes off the subtotal before tax, exactly where a
+    // percentage discount belongs. With no discount this matches the previous
+    // computeInvoiceTotals result for one item.
+    const subtotal = round2(input.amount);
+    const discount = round2(Math.max(0, Math.min(input.discountAmount ?? 0, subtotal)));
+    const taxable = round2(subtotal - discount);
+    const taxAmount = cfg.taxEnabled ? round2((taxable * (cfg.taxPct ?? 0)) / 100) : 0;
+    const total = round2(taxable + taxAmount);
 
     const dueAt = new Date();
     dueAt.setDate(dueAt.getDate() + (input.dueInDays ?? 7));
 
-    const number = await this.nextNumber('INV');
-    const invoice = await this.prisma.invoice.create({
-      data: {
-        number,
-        studentId: input.studentId,
-        amount: totals.total,
-        subtotal: totals.subtotal,
-        discountAmount: totals.discountAmount,
-        taxAmount: totals.taxAmount,
-        currency: input.currency ?? cfg.currency,
-        // SENT, not DRAFT: the family is told about it in the welcome email,
-        // so it has to be a real bill they can see in their portal.
-        status: InvoiceStatus.SENT,
-        issuedAt: new Date(),
-        dueAt,
-        notes: 'First invoice on enrolment',
-        items: { create: items.map((it) => ({ type: it.type, label: it.label, amount: it.amount })) },
-      },
-      select: { id: true, number: true, amount: true, currency: true, dueAt: true },
+    // Invoice numbers are minted read-max-then-insert, so two enrolments
+    // landing together can compute the same number and one dies on the unique
+    // index (M8). Recompute and retry the create on exactly that clash —
+    // conversions run concurrently, so this is the site that actually races.
+    const invoice = await retryOnUniqueClash('number', async () => {
+      const number = await this.nextNumber('INV');
+      return this.prisma.invoice.create({
+        data: {
+          number,
+          studentId: input.studentId,
+          subscriptionId: input.subscriptionId ?? undefined,
+          amount: total,
+          subtotal,
+          discountAmount: discount,
+          taxAmount,
+          currency: input.currency ?? cfg.currency,
+          // SENT, not DRAFT: the family is told about it in the welcome email,
+          // so it has to be a real bill they can see in their portal.
+          status: InvoiceStatus.SENT,
+          issuedAt: new Date(),
+          dueAt,
+          notes:
+            discount > 0
+              ? `First invoice on enrolment · ${input.discountLabel ?? 'discount applied'}`
+              : 'First invoice on enrolment',
+          items: { create: items.map((it) => ({ type: it.type, label: it.label, amount: it.amount })) },
+        },
+        select: { id: true, number: true, amount: true, currency: true, dueAt: true },
+      });
     });
 
     return {
@@ -393,15 +422,15 @@ export class BillingService {
     }
 
     const periodStart = new Date(forDate);
-    // Skip if we already billed this assignment for this period.
+    // Skip if we already billed this assignment for this period. Deduped on the
+    // period-start DAY, not the calendar month: 28-day subscription cycles can
+    // both fall in one month, and a month-bucket would wrongly collapse them into
+    // a single invoice. Two distinct cycles never start on the same day, so a
+    // same-day match is a genuine re-run (e.g. sweep + manual trigger).
+    const dayStart = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth(), periodStart.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
     const existing = await this.prisma.invoice.findFirst({
-      where: {
-        assignmentId,
-        periodStart: {
-          gte: new Date(periodStart.getFullYear(), periodStart.getMonth(), 1),
-          lt: new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 1),
-        },
-      },
+      where: { assignmentId, periodStart: { gte: dayStart, lt: dayEnd } },
       select: { id: true, number: true },
     });
     if (existing) return existing;
@@ -429,11 +458,19 @@ export class BillingService {
       taxPct: cfg.taxPct,
     });
 
+    // If a subscription drives this fee assignment, tag the invoice with it so
+    // finance can surface it as a subscription/renewal charge.
+    const linkedSub = await this.prisma.studentSubscription.findFirst({
+      where: { feeAssignmentId: assignment.id },
+      select: { id: true },
+    });
+
     const number = await this.nextNumber('INV');
     const invoice = await this.prisma.invoice.create({
       data: {
         number,
         studentId: assignment.studentId,
+        subscriptionId: linkedSub?.id ?? undefined,
         amount: totals.total,
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
@@ -478,6 +515,9 @@ export class BillingService {
 
   // ── Payments ────────────────────────────────────────────────────────────────
   async recordPayment(invoiceId: string, dto: RecordPaymentDto, actor: FinanceActor) {
+    // Fetched only for the student relation (notify + activation below). The
+    // authoritative paidAmount/balance is re-read UNDER A ROW LOCK inside the
+    // transaction — never trust this copy for the money math.
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { student: { select: STUDENT_SELECT } },
@@ -490,16 +530,55 @@ export class BillingService {
       throw new BadRequestException('This invoice is not payable.');
     }
 
-    const balance = round2(Number(invoice.amount) - Number(invoice.paidAmount));
     const amount = round2(dto.amount);
     if (amount <= 0) throw new BadRequestException('Amount must be positive.');
-    if (amount > balance + 0.001) {
-      throw new BadRequestException(
-        `Payment exceeds the outstanding balance (${invoice.currency} ${balance}).`,
-      );
-    }
 
+    /*
+     * The whole settlement runs inside one transaction that first takes a row
+     * lock on the invoice (SELECT … FOR UPDATE). This serialises concurrent
+     * payments on the same invoice, which fixes two race conditions at once:
+     *  - C2: the paidAmount read-modify-write is now atomic — the balance is
+     *    read under the lock, so two payments can't both read a stale total and
+     *    lose one update.
+     *  - C1: double-settlement of a Stripe intent — the second settler blocks on
+     *    the lock, then finds the reference already booked and no-ops.
+     */
     const result = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<
+        { id: string; amount: string; paidAmount: string; currency: string; status: string; studentId: string | null }[]
+      >`SELECT id, amount, "paidAmount", currency, status, "studentId" FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`;
+      const inv = locked[0];
+      if (!inv) throw new NotFoundException('Invoice not found');
+      if (inv.status === InvoiceStatus.CANCELLED || inv.status === InvoiceStatus.VOID) {
+        throw new BadRequestException('This invoice is not payable.');
+      }
+
+      // Idempotency: a referenced payment (e.g. a Stripe PaymentIntent) already
+      // booked SUCCEEDED means this money is already on the invoice — return it
+      // rather than booking a second Payment/Receipt.
+      if (dto.reference) {
+        const existing = await tx.payment.findFirst({
+          where: { reference: dto.reference, status: 'SUCCEEDED' },
+          include: { receipt: true },
+        });
+        if (existing) {
+          return {
+            duplicate: true as const,
+            payment: existing,
+            receipt: existing.receipt,
+            newPaid: round2(Number(inv.paidAmount)),
+            fullyPaid: inv.status === InvoiceStatus.PAID,
+          };
+        }
+      }
+
+      const balance = round2(Number(inv.amount) - Number(inv.paidAmount));
+      if (amount > balance + 0.001) {
+        throw new BadRequestException(
+          `Payment exceeds the outstanding balance (${inv.currency} ${balance}).`,
+        );
+      }
+
       const payment = await tx.payment.create({
         data: {
           invoiceId,
@@ -514,8 +593,8 @@ export class BillingService {
         },
       });
 
-      const newPaid = round2(Number(invoice.paidAmount) + amount);
-      const fullyPaid = newPaid >= Number(invoice.amount) - 0.001;
+      const newPaid = round2(Number(inv.paidAmount) + amount);
+      const fullyPaid = newPaid >= Number(inv.amount) - 0.001;
       await tx.invoice.update({
         where: { id: invoiceId },
         data: {
@@ -527,21 +606,39 @@ export class BillingService {
         },
       });
 
+      // Receipt numbers are minted read-max-then-insert; two payments settling
+      // at once could compute the same number and one would die on the unique
+      // index, failing the whole settlement (M8). A transaction-scoped advisory
+      // lock on the receipt series serialises numbering across concurrent
+      // payments — released automatically when this transaction ends.
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('receipt-number'))`);
       const receiptNo = await this.nextNumber('RCPT', tx);
       const receipt = await tx.receipt.create({
         data: {
           number: receiptNo,
           invoiceId,
           paymentId: payment.id,
-          studentId: invoice.studentId,
+          studentId: inv.studentId,
           amount,
-          currency: invoice.currency,
+          currency: inv.currency,
           method: dto.method,
         },
       });
 
-      return { payment, receipt, newPaid, fullyPaid };
+      return { duplicate: false as const, payment, receipt, newPaid, fullyPaid };
     });
+
+    // A duplicate settlement books nothing new and must not re-notify or
+    // re-activate — return the already-recorded payment idempotently.
+    if (result.duplicate) {
+      return {
+        payment: result.payment,
+        receipt: result.receipt,
+        paidAmount: result.newPaid,
+        balance: round2(Number(invoice.amount) - result.newPaid),
+        duplicate: true,
+      };
+    }
 
     // Update student's payment dates for the fee profile.
     if (invoice.studentId) {
@@ -554,6 +651,26 @@ export class BillingService {
     }
 
     await this.notifyPaid(invoice, result.receipt.number, amount, result.fullyPaid);
+
+    /*
+     * Payment gate: once the first invoice is fully paid, activate the student's
+     * PENDING_PAYMENT subscription — compute the actual cycle-start date, build
+     * the 28-day schedule and reserve the teacher. Best-effort and idempotent
+     * (a subscription already ACTIVE is skipped), so a manual re-record or a
+     * duplicate Stripe event cannot double-provision. Covers both the manual
+     * admin route and the Stripe webhook, which both funnel through here.
+     */
+    if (result.fullyPaid && invoice.studentId) {
+      const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
+      await this.subscriptions
+        .activateSubscription(invoice.studentId, paidAt)
+        .catch((e) =>
+          this.logger.warn(
+            `Subscription activation after payment failed for student ${invoice.studentId}: ${(e as Error).message}`,
+          ),
+        );
+    }
+
     return {
       payment: result.payment,
       receipt: result.receipt,

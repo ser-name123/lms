@@ -53,6 +53,13 @@ export class SubscriptionsController {
     return this.service.myRequests(user.id);
   }
 
+  @Post('me/reschedule')
+  @Roles(Role.STUDENT)
+  @ApiOperation({ summary: 'Move one upcoming class within the plan’s reschedule allowance' })
+  reschedule(@CurrentUser() user: AuthUser, @Body() dto: { sessionId: string; newStartsAt: string }) {
+    return this.service.requestReschedule(user.id, dto.sessionId, dto.newStartsAt);
+  }
+
   @Post('me/requests/package')
   @Roles(Role.STUDENT)
   @ApiOperation({ summary: 'Ask to change package from the next billing cycle' })
@@ -119,6 +126,19 @@ export class SubscriptionsController {
   @ApiOperation({ summary: 'A student’s current subscription' })
   forStudent(@Param('studentId') studentId: string) {
     return this.service.currentFor(studentId);
+  }
+
+  // Migrate a student to another subscription model/plan (e.g. Monthly → Hourly),
+  // preserving all history. Admin-only, per the spec.
+  @Post('student/:studentId/migrate')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Migrate a student to another model/plan, keeping history' })
+  migrate(
+    @Param('studentId') studentId: string,
+    @Body() dto: { newPackageId: string; durationMinutes?: number; weeklyClasses?: number },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.migrateModel(studentId, dto, { id: user.id, name: user.email, role: user.role });
   }
 
   /*

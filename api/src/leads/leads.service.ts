@@ -10,7 +10,9 @@ import { createHash, randomBytes } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { courseForCode } from '../common/catalogue-course';
-import { currencyForCountry, priceFor } from '../common/currency';
+import { currencyForCountry, isCurrency, priceFor, type Currency } from '../common/currency';
+import { familyDiscountAmount } from '../common/tuition';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -24,6 +26,7 @@ import {
 import { LeadAvailabilityService } from './availability.service';
 import { ZoomService } from './zoom.service';
 import { BillingService } from '../finance/billing.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import {
   AssignTeacherLeadDto,
   CoachDecisionDto,
@@ -61,6 +64,7 @@ export class LeadsService implements OnModuleInit {
     private readonly availability: LeadAvailabilityService,
     private readonly zoom: ZoomService,
     private readonly billing: BillingService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // ── Reminder sweep ──────────────────────────────────────────────────────────
@@ -171,17 +175,32 @@ export class LeadsService implements OnModuleInit {
      */
     const teacherId = recommendedTeacherId;
 
-    const trial = await this.prisma.leadTrial.create({
-      data: {
-        leadId: lead.id,
-        teacherId,
-        scheduledAt: startAt,
-        durationMins: 30,
-        timeZone: offered.timeZone,
-        meetingProvider: 'Zoom',
-        status: 'SCHEDULED',
-      },
-    });
+    /*
+     * The offered-slots check above is TOCTOU: two visitors can pass it for the
+     * same teacher + instant and both try to book (H3). A partial unique index
+     * on (teacherId, scheduledAt) makes the second create fail; rather than lose
+     * the visitor's booking or double-book the teacher, we record the trial
+     * unassigned (teacherId null) for a coach to pick a teacher — the same state
+     * a website booking with no recommended teacher already starts in.
+     */
+    const trialData = {
+      leadId: lead.id,
+      scheduledAt: startAt,
+      durationMins: 30,
+      timeZone: offered.timeZone,
+      meetingProvider: 'Zoom',
+      status: 'SCHEDULED' as const,
+    };
+    let trial;
+    try {
+      trial = await this.prisma.leadTrial.create({ data: { ...trialData, teacherId } });
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'P2002') {
+        trial = await this.prisma.leadTrial.create({ data: { ...trialData, teacherId: null } });
+      } else {
+        throw e;
+      }
+    }
 
 
     const zoom = await this.zoom.createTrialMeeting({
@@ -260,19 +279,29 @@ export class LeadsService implements OnModuleInit {
     });
     if (!coaches.length) return null;
 
-    const pointer = await this.prisma.systemSetting.findUnique({
-      where: { key: COACH_ROTATION_KEY },
-    });
-    const lastIndex = coaches.findIndex((c) => c.id === pointer?.value);
-    // -1 (no pointer, or that coach is gone) lands on 0 — the first coach.
-    const next = coaches[(lastIndex + 1) % coaches.length];
+    /*
+     * Read-compute-write on a shared pointer (M6): two bookings landing together
+     * both read the same pointer, pick the same "next" coach, and the rotation
+     * hands one coach two leads while skipping another. Serialise the whole
+     * read-and-advance with a transaction-scoped advisory lock so each booking
+     * sees the previous one's committed pointer.
+     */
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext('coach-rotation'))`);
+      const pointer = await tx.systemSetting.findUnique({
+        where: { key: COACH_ROTATION_KEY },
+      });
+      const lastIndex = coaches.findIndex((c) => c.id === pointer?.value);
+      // -1 (no pointer, or that coach is gone) lands on 0 — the first coach.
+      const next = coaches[(lastIndex + 1) % coaches.length];
 
-    await this.prisma.systemSetting.upsert({
-      where: { key: COACH_ROTATION_KEY },
-      create: { key: COACH_ROTATION_KEY, value: next.id },
-      update: { value: next.id },
+      await tx.systemSetting.upsert({
+        where: { key: COACH_ROTATION_KEY },
+        create: { key: COACH_ROTATION_KEY, value: next.id },
+        update: { value: next.id },
+      });
+      return next.id;
     });
-    return next.id;
   }
 
   private async sendBookingAcknowledgement(
@@ -449,6 +478,10 @@ export class LeadsService implements OnModuleInit {
             ? {
                 status: { in: [LeadStatus.TEACHER_ASSIGNED, LeadStatus.TRIAL_SCHEDULED] },
                 assignedTeacherId: { not: null },
+              }
+          : status === 'TRIAL_COMPLETED'
+            ? {
+                status: { in: [LeadStatus.TRIAL_COMPLETED, LeadStatus.WAITING_PARENT_DECISION] },
               }
           : status === 'FOLLOW_UP_ALL'
             ? {
@@ -670,7 +703,7 @@ export class LeadsService implements OnModuleInit {
       this.prisma.lead.count({
         where: {
           ...scope,
-          status: LeadStatus.TRIAL_COMPLETED,
+          status: { in: [LeadStatus.TRIAL_COMPLETED, LeadStatus.WAITING_PARENT_DECISION] },
         },
       }),
       this.prisma.lead.count({
@@ -1492,6 +1525,7 @@ export class LeadsService implements OnModuleInit {
         select: {
           id: true, name: true, classesPerMonth: true,
           priceUSD: true, priceAED: true, priceGBP: true,
+          weeklyClasses: true,
         },
         orderBy: { priceUSD: 'asc' },
       }),
@@ -1511,6 +1545,9 @@ export class LeadsService implements OnModuleInit {
           GBP: priceFor(p, 'GBP'),
         },
         classesPerMonth: p.classesPerMonth,
+        // How many class days a week this plan buys — the public info form caps
+        // the day picker to it, the same rule the coach's screen enforces.
+        weeklyClasses: p.weeklyClasses ?? null,
       })),
       levels: TRIAL_LEVEL_OPTIONS as unknown as string[],
       weekdays: WEEKDAY_OPTIONS as unknown as string[],
@@ -1894,6 +1931,21 @@ export class LeadsService implements OnModuleInit {
         : null;
     }
     if (dto.preferredDays !== undefined) data.preferredDays = dto.preferredDays;
+    // A monthly plan cannot be asked for more class days a week than it buys.
+    // Enforced here too, not just greyed out on the public form — the family
+    // holds the link, not a login, so the server is the only reliable guard.
+    if (dto.preferredDays?.length && (data.preferredPackage ?? trial.preferredPackage)) {
+      const plan = await this.prisma.package.findFirst({
+        where: { name: data.preferredPackage ?? trial.preferredPackage, active: true },
+        select: { weeklyClasses: true },
+      });
+      if (plan?.weeklyClasses && dto.preferredDays.length > plan.weeklyClasses) {
+        throw new BadRequestException(
+          `This plan allows ${plan.weeklyClasses} class day${plan.weeklyClasses > 1 ? 's' : ''} a week, ` +
+            `but ${dto.preferredDays.length} were selected.`,
+        );
+      }
+    }
     if (dto.preferredTime !== undefined) data.preferredTime = dto.preferredTime || null;
     if (dto.preferredStartDate !== undefined) {
       data.preferredStartDate = this.parseDate(dto.preferredStartDate, 'preferred start date');
@@ -2033,6 +2085,72 @@ export class LeadsService implements OnModuleInit {
     });
 
     if (dto.decision === 'ENROLL') {
+      /*
+       * The chosen schedule cannot ask for more class days than the plan allows.
+       * Enforced on the server, not just greyed out in a picker — the spec's "a
+       * student cannot select more class days than permitted under the subscribed
+       * package". The cap is resolved even when the coach leaves the package as
+       * "use family-chosen": we fall back to the package the trial captured, so
+       * the hole where an empty packageId skipped the check is closed.
+       *
+       * A monthly plan fixes the weekly count on the tier; an hourly plan takes it
+       * from what the coach chose (dto.weeklyClasses), falling back to the plan's.
+       */
+      if (dto.preferredDays?.length) {
+        const capPlan = dto.packageId
+          ? await this.prisma.package.findUnique({
+              where: { id: dto.packageId },
+              select: { weeklyClasses: true, modelId: true },
+            })
+          : await this.packageForConversion(lead.id).catch(() => null);
+        if (capPlan) {
+          let pricingMode: 'FIXED_MONTHLY' | 'HOURLY' = 'FIXED_MONTHLY';
+          if (capPlan.modelId) {
+            const m = await this.prisma.subscriptionModel.findUnique({
+              where: { id: capPlan.modelId },
+              select: { pricingMode: true },
+            });
+            pricingMode = (m?.pricingMode as 'FIXED_MONTHLY' | 'HOURLY') ?? 'FIXED_MONTHLY';
+          }
+          const cap =
+            pricingMode === 'HOURLY'
+              ? (dto.weeklyClasses ?? capPlan.weeklyClasses ?? null)
+              : capPlan.weeklyClasses;
+          if (cap && dto.preferredDays.length > cap) {
+            throw new BadRequestException(
+              `This plan allows ${cap} class day${cap > 1 ? 's' : ''} a week, ` +
+                `but ${dto.preferredDays.length} were selected.`,
+            );
+          }
+
+          // The chosen recurring time must sit inside the assigned teacher's
+          // published availability (permissive when they've published none) —
+          // the spec's "schedule selection shall only display available teacher
+          // time slots", enforced on the server at conversion.
+          if (dto.preferredTime) {
+            const trialTeacher = await this.prisma.leadTrial.findFirst({
+              where: { leadId },
+              orderBy: { createdAt: 'desc' },
+              select: { teacherId: true, durationMins: true },
+            });
+            const planDuration = dto.packageId
+              ? (await this.prisma.package.findUnique({
+                  where: { id: dto.packageId },
+                  select: { durationMinutes: true },
+                }))?.durationMinutes
+              : (capPlan as { durationMinutes?: number | null }).durationMinutes;
+            const duration =
+              dto.durationMinutes || planDuration || trialTeacher?.durationMins || 60;
+            await this.subscriptions.assertScheduleWithinAvailability(
+              trialTeacher?.teacherId ?? null,
+              dto.preferredDays,
+              dto.preferredTime,
+              duration,
+            );
+          }
+        }
+      }
+
       const latestTrial = await this.prisma.leadTrial.findFirst({
         where: { leadId },
         orderBy: { createdAt: 'desc' },
@@ -2055,7 +2173,12 @@ export class LeadsService implements OnModuleInit {
           },
         });
       }
-      return this.convert(lead, dto.courseCode, actor, dto.packageId);
+      return this.convert(lead, dto.courseCode, actor, dto.packageId, {
+        currencyOverride: dto.currencyOverride ?? null,
+        durationMinutes: dto.durationMinutes ?? null,
+        weeklyClasses: dto.weeklyClasses ?? null,
+        teacherId: dto.teacherId ?? null,
+      });
     }
 
     const status = dto.decision === 'REJECT' ? LeadStatus.REJECTED : LeadStatus.WAITING_PARENT_DECISION;
@@ -2149,6 +2272,12 @@ export class LeadsService implements OnModuleInit {
     courseCode: string | undefined,
     actor: Actor,
     packageId?: string,
+    opts?: {
+      currencyOverride?: string | null;
+      durationMinutes?: number | null;
+      weeklyClasses?: number | null;
+      teacherId?: string | null;
+    },
   ) {
     const siblings: any[] = Array.isArray(lead.siblings)
       ? lead.siblings
@@ -2191,7 +2320,6 @@ export class LeadsService implements OnModuleInit {
     }
 
     const now = new Date();
-    const codes = await this.nextStudentCodes(children.length);
 
     /*
      * Everything the trial learned about this family, carried onto the student
@@ -2225,11 +2353,34 @@ export class LeadsService implements OnModuleInit {
      * enrolment said they had none: their own subscription page showed
      * nothing and no package change could be raised against it.
      */
-    const leadCurrency = currencyForCountry(lead.country);
+    // The family's billing currency: derived from their country, but the coach
+    // or admin may override it (spec allows this during trial registration).
+    const leadCurrency: Currency =
+      opts?.currencyOverride && isCurrency(opts.currencyOverride)
+        ? opts.currencyOverride
+        : currencyForCountry(lead.country);
     const pkg = await this.packageForConversion(lead.id, packageId).catch(() => null);
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const profiles: { id: string; code: string; name: string; email: string }[] = [];
+    /*
+     * Student codes are minted read-max-then-insert, so two conversions landing
+     * together can compute the same code and one dies on the unique index —
+     * which used to 500 the whole conversion (H2). Recompute the codes and
+     * re-run the transaction on that exact clash: the retry sees the row the
+     * other conversion committed and takes the next number. Scoped to the
+     * studentCode field, so any other unique clash (e.g. a User email) still
+     * surfaces unchanged.
+     */
+    const created = await retryOnUniqueClash('studentCode', async () => {
+      const codes = await this.nextStudentCodes(children.length);
+      return this.prisma.$transaction(async (tx) => {
+        const profiles: {
+          id: string;
+          code: string;
+          name: string;
+          email: string;
+          enrolmentId: string | null;
+          courseId: string | null;
+        }[] = [];
 
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
@@ -2299,21 +2450,31 @@ export class LeadsService implements OnModuleInit {
           ? report?.recommendedCourseId
           : (siblings[i - 1]?.recommendedCourseId || report?.recommendedCourseId || null);
 
+        // Track the enrolment created for this child, so Phase-3 provisioning
+        // (batch, schedule, subscription) below knows which course to build on.
+        let enrolledCourseId: string | null = null;
+        let enrolmentId: string | null = null;
+
         if (!courseCode && siblingRecCourseId) {
           const exists = await tx.course.findUnique({
             where: { id: siblingRecCourseId },
             select: { id: true },
           });
           if (exists) {
-            await tx.enrollment.create({
+            const enr = await tx.enrollment.create({
               data: {
                 studentId: profile.id,
                 courseId: exists.id,
                 packageId: pkg?.id ?? null,
-                status: EnrollmentStatus.ACTIVE,
+                // Payment-gated: the enrolment is PENDING until the first
+                // invoice is paid, at which point activation flips it ACTIVE.
+                status: EnrollmentStatus.PENDING,
                 startedAt: report?.preferredStartDate ?? latestTrial?.preferredStartDate ?? now,
               },
+              select: { id: true, courseId: true },
             });
+            enrolmentId = enr.id;
+            enrolledCourseId = enr.courseId;
           }
         }
 
@@ -2321,15 +2482,18 @@ export class LeadsService implements OnModuleInit {
         if (courseCode) {
           const course = await courseForCode(tx, courseCode);
           if (course) {
-            await tx.enrollment.create({
+            const enr = await tx.enrollment.create({
               data: {
                 studentId: profile.id,
                 courseId: course.id,
                 packageId: pkg?.id ?? null,
-                status: EnrollmentStatus.ACTIVE,
+                status: EnrollmentStatus.PENDING,
                 startedAt: now,
               },
+              select: { id: true, courseId: true },
             });
+            enrolmentId = enr.id;
+            enrolledCourseId = enr.courseId;
           }
         }
 
@@ -2341,6 +2505,8 @@ export class LeadsService implements OnModuleInit {
           // the first name, so rebuilding it from the full name would print a
           // login in the welcome email that does not exist.
           email: child.email,
+          enrolmentId,
+          courseId: enrolledCourseId,
         });
       }
 
@@ -2357,7 +2523,8 @@ export class LeadsService implements OnModuleInit {
         });
       }
 
-      return profiles;
+        return profiles;
+      });
     });
 
     /*
@@ -2370,40 +2537,101 @@ export class LeadsService implements OnModuleInit {
      * click, whereas rolling the accounts back over a billing hiccup is not.
      */
     const invoices: { studentName: string; number: string; amount: number; currency: string; dueAt: Date | null }[] = [];
+
     /*
-     * A family in Dubai is billed in dirhams, one in London in pounds, and
-     * everyone else in dollars — taken from the country on the lead, which the
-     * booking form already collects. If the academy has not priced this
-     * package in that currency there is nothing honest to invoice, so no
-     * invoice is raised and the coach is told, exactly as when no package was
-     * chosen at all.
+     * Provision each child's subscription first — a batch for the schedule the
+     * family chose, its recurring class sessions, a recurring fee assignment and
+     * the stored StudentSubscription — then bill the exact monthly amount that
+     * provisioning computed. Done in this order because an hourly plan has no
+     * fixed price: its monthly figure is rate × hours, and only provisioning
+     * knows the duration and weekly classes it was worked out from. Billing off
+     * `priceFor` instead would raise nothing for every hourly family. Tolerant of
+     * failure like before — a billing or scheduling hiccup leaves the accounts
+     * intact and is fixable in a click, never rolled back.
      */
-    const amount = pkg ? priceFor(pkg, leadCurrency) : null;
-    if (pkg && amount != null) {
+    if (pkg) {
+      const schedDays =
+        (report?.preferredDays?.length ? report.preferredDays : latestTrial?.preferredDays) ?? [];
+      const schedTime = report?.preferredTime ?? latestTrial?.preferredTime ?? null;
+      const schedStart = report?.preferredStartDate ?? latestTrial?.preferredStartDate ?? now;
       for (const student of created) {
-        const invoice = await this.billing
-          .createEnrolmentInvoice({
+        /*
+         * Payment-gated: record the subscription *intent* only — a
+         * PENDING_PAYMENT subscription carrying the price and the chosen
+         * schedule, with NO batch, NO classes and NO teacher block. The
+         * schedule and teacher reservation are built by `activateSubscription`
+         * once this first invoice is paid.
+         */
+        const result = await this.subscriptions
+          .recordSubscriptionIntent({
             studentId: student.id,
-            label: `${pkg.name} — first month`,
-            amount,
+            enrollmentId: student.enrolmentId,
+            courseId: student.courseId,
+            teacherId: opts?.teacherId ?? latestTrial?.teacherId ?? null,
+            pkg,
             currency: leadCurrency,
+            days: schedDays,
+            time: schedTime,
+            preferredStartDate: schedStart,
+            preferredTeacherGender: (lead as any).preferredTeacherGender ?? null,
+            fallbackDurationMinutes: latestTrial?.durationMins ?? null,
+            durationOverride: opts?.durationMinutes ?? null,
+            weeklyOverride: opts?.weeklyClasses ?? null,
           })
           .catch(() => null);
-        if (invoice) invoices.push({ studentName: student.name, ...invoice });
+
+        // Bill the monthly amount the intent computed (fixed price for a monthly
+        // plan, rate × hours for an hourly one). Null only when the plan is not
+        // priced in this family's currency — then no invoice.
+        const billAmount = result?.monthlyPrice ?? null;
+        if (billAmount != null && billAmount > 0) {
+          /*
+           * Family discount — applied automatically when the family has more
+           * than two children enrolling together, at the percentage the plan's
+           * tier carries (0 for Simple/Essential, 5% Premium, 10% Elite).
+           */
+          const familyDisc =
+            children.length > 2
+              ? familyDiscountAmount(billAmount, Number(pkg.familyDiscountPct) || 0, children.length)
+              : 0;
+          const invoice = await this.billing
+            .createEnrolmentInvoice({
+              studentId: student.id,
+              label: `${pkg.name} — first cycle`,
+              amount: billAmount,
+              currency: leadCurrency,
+              subscriptionId: result?.subscriptionId ?? null,
+              discountAmount: familyDisc,
+              discountLabel: familyDisc > 0 ? `Family discount ${Number(pkg.familyDiscountPct) || 0}%` : undefined,
+            })
+            .catch(() => null);
+          if (invoice) {
+            invoices.push({ studentName: student.name, ...invoice });
+            await this.prisma.studentProfile.update({
+              where: { id: student.id },
+              data: { fees: billAmount, nextPaymentDate: invoice.dueAt ?? null },
+            });
+          }
+        }
       }
-      /*
-       * The monthly fee on the student record, so Finance and the student's
-       * own Fees page agree with the package they were just sold.
-       */
-      await this.prisma.studentProfile.updateMany({
-        where: { id: { in: created.map((c) => c.id) } },
-        data: { fees: amount, nextPaymentDate: invoices[0]?.dueAt ?? null },
-      });
+      await this.addActivity(
+        lead.id,
+        'ENROLLED',
+        `Enrolled on ${pkg.name} — awaiting first payment. Classes and the teacher's schedule are reserved on payment.`,
+        actor,
+      );
       if (invoices.length) {
         await this.addActivity(
           lead.id,
           'INVOICED',
           `First invoice raised for ${pkg.name} — ${invoices.map((i) => i.number).join(', ')}.`,
+          actor,
+        );
+      } else {
+        await this.addActivity(
+          lead.id,
+          'INVOICE_PENDING',
+          `"${pkg.name}" is not priced in ${leadCurrency}, so no first invoice was raised. Price it or raise one from Finance.`,
           actor,
         );
       }

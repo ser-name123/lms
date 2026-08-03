@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { money, type Currency } from "@/lib/currency";
 import {
   ArrowLeft,
   Loader2,
@@ -48,6 +49,8 @@ import {
   fetchTrialOptions,
   fetchTeacherAvailability,
   leadCoachDecision,
+  fetchEnrollmentTeachers,
+  type EnrollmentTeacher,
   type Lead,
   type LeadActivity,
   type LeadTrial,
@@ -1580,6 +1583,19 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
   const [enrollTime, setEnrollTime] = useState("");
   const [chosenDays, setChosenDays] = useState<string[]>([]);
   const [dayTimes, setDayTimes] = useState<Record<string, string>>({});
+  // Currency override (null → use the country-derived currency). Hourly plans
+  // also let the coach pick class duration and weekly classes independently.
+  const [currencyOverride, setCurrencyOverride] = useState<Currency | null>(null);
+  const [hourlyDuration, setHourlyDuration] = useState<number>(60);
+  const [hourlyWeekly, setHourlyWeekly] = useState<number>(2);
+  // Teacher assignment: the coach searches for teachers who can take the chosen
+  // recurring schedule, then picks one (or assigns a non-matching one manually).
+  const [teacherId, setTeacherId] = useState<string>("");
+  // The course the trial teacher recommended — used to narrow the teacher search
+  // to teachers who actually teach this course (backend filters on it).
+  const [enrollCourseId, setEnrollCourseId] = useState<string | null>(null);
+  const [teacherResults, setTeacherResults] = useState<{ matching: EnrollmentTeacher[]; others: EnrollmentTeacher[] } | null>(null);
+  const [teacherSearching, setTeacherSearching] = useState(false);
 
   const handleDayToggle = (day: string) => {
     setChosenDays((prev) => {
@@ -1642,6 +1658,8 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
 
       // Initialize enrollDate & weekly schedule from the latest trial or lead preferences
       const latestTrial = trialsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      // Carry the recommended course through to the teacher search.
+      setEnrollCourseId(latestTrial?.recommendedCourseId ?? null);
       if (latestTrial) {
         if (latestTrial.preferredStartDate) {
           const dtStr = new Date(latestTrial.preferredStartDate).toISOString().slice(0, 10);
@@ -1664,6 +1682,81 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
     }).catch(() => undefined);
   }, [lead.id, converted]);
 
+  /*
+   * The full plan catalogue + models, so this screen can show the subscription
+   * model, class structure and an estimated monthly tuition before enrolling,
+   * and cap the day picker to what a monthly plan allows — the spec's trial
+   * package/schedule selection. Same ids as the trial-options packages above.
+   */
+  const [richPackages, setRichPackages] = useState<any[]>([]);
+  const [subModels, setSubModels] = useState<any[]>([]);
+  useEffect(() => {
+    if (converted) return;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api";
+    fetch(`${apiBase}/lms-data/packages`).then((r) => r.json()).then((d) => setRichPackages(Array.isArray(d) ? d : [])).catch(() => undefined);
+    fetch(`${apiBase}/lms-data/subscription-models`).then((r) => r.json()).then((d) => setSubModels(Array.isArray(d) ? d : [])).catch(() => undefined);
+  }, [converted]);
+
+  const leadCurrency: Currency = useMemo(() => {
+    const c = String((lead as any).country ?? "").trim().toUpperCase();
+    if (["AE", "UAE", "UNITED ARAB EMIRATES"].includes(c)) return "AED";
+    if (["GB", "UK", "UNITED KINGDOM", "GREAT BRITAIN"].includes(c)) return "GBP";
+    return "USD";
+  }, [lead]);
+
+  const plan = useMemo(() => {
+    const byName = richPackages.find((p) => (p.title ?? "").toLowerCase() === (familyPackageName ?? "").toLowerCase());
+    const id = packageId || byName?.id || "";
+    return richPackages.find((p) => p.id === id) ?? null;
+  }, [richPackages, packageId, familyPackageName]);
+
+  const isHourly = useMemo(
+    () => subModels.find((m) => m.id === plan?.modelId)?.pricingMode === "HOURLY",
+    [subModels, plan],
+  );
+  // The currency actually billed: the coach's override, else country-derived.
+  const effectiveCurrency: Currency = currencyOverride ?? leadCurrency;
+  // Hourly plans let the coach choose duration + weekly classes; monthly plans
+  // take both from the tier. The day picker is capped to whichever weekly count
+  // applies (the chosen one for hourly, the plan's for monthly).
+  const planDuration: number = isHourly ? hourlyDuration : (plan?.durationMinutes ?? 60);
+  const planWeekly = isHourly ? hourlyWeekly : (plan?.weeklyClasses ?? chosenDays.length);
+  const dayCap: number | null = isHourly ? hourlyWeekly : (plan?.weeklyClasses ?? null);
+  const planMonthlyHours = planDuration && planWeekly ? (planDuration / 60) * planWeekly * 4 : 0;
+  const estTuition: number | null = useMemo(() => {
+    if (!plan) return null;
+    const pick = (usd: any, aed: any, gbp: any) => (effectiveCurrency === "AED" ? aed : effectiveCurrency === "GBP" ? gbp : usd);
+    if (isHourly) {
+      const rate = pick(plan.hourlyRateUSD, plan.hourlyRateAED, plan.hourlyRateGBP);
+      return rate != null && planMonthlyHours > 0 ? Math.round(Number(rate) * planMonthlyHours * 100) / 100 : null;
+    }
+    const price = pick(plan.priceUSD, plan.priceAED, plan.priceGBP);
+    return price != null ? Number(price) : null;
+  }, [plan, isHourly, effectiveCurrency, planMonthlyHours]);
+
+  const searchTeachers = async () => {
+    const time = dayTimes[chosenDays[0]] || Object.values(dayTimes)[0] || "";
+    if (!chosenDays.length || !time) {
+      Swal.fire({ title: "Pick days & time first", text: "Choose the class days and a time before searching for a teacher.", icon: "warning", background: swalBg() });
+      return;
+    }
+    setTeacherSearching(true);
+    try {
+      const res = await fetchEnrollmentTeachers({
+        courseId: enrollCourseId || undefined,
+        gender: (lead as any).preferredTeacherGender || undefined,
+        days: chosenDays,
+        time,
+        durationMinutes: isHourly ? hourlyDuration : planDuration,
+      });
+      setTeacherResults(res);
+    } catch {
+      setTeacherResults({ matching: [], others: [] });
+    } finally {
+      setTeacherSearching(false);
+    }
+  };
+
   const decide = async (selectedDecision: "ENROLL" | "REJECT" | "FOLLOW_UP") => {
     if ((selectedDecision === "REJECT" || selectedDecision === "FOLLOW_UP") && !notes.trim()) {
       Swal.fire({ title: "Required", text: "Notes are compulsory for this decision.", icon: "warning", background: swalBg() });
@@ -1675,7 +1768,7 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
     }
 
     if (selectedDecision === "ENROLL") {
-      let warningText = "This creates an active student account, raises the first invoice, and emails the family their login, package and invoice.";
+      let warningText = "This creates the student account and raises the first invoice. Classes and the teacher's schedule are reserved once that invoice is paid.";
       if (!packageId) {
         if (familyPackageName) {
           warningText += ` No package selected — the family chosen package "${familyPackageName}" will be used.`;
@@ -1699,6 +1792,9 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
         ...(selectedDecision === "ENROLL" && enrollDate ? { preferredStartDate: new Date(enrollDate).toISOString() } : {}),
         ...(selectedDecision === "ENROLL" && enrollTime ? { preferredTime: enrollTime } : {}),
         ...(selectedDecision === "ENROLL" && chosenDays?.length ? { preferredDays: chosenDays } : {}),
+        ...(selectedDecision === "ENROLL" && currencyOverride ? { currencyOverride } : {}),
+        ...(selectedDecision === "ENROLL" && isHourly ? { durationMinutes: hourlyDuration, weeklyClasses: hourlyWeekly } : {}),
+        ...(selectedDecision === "ENROLL" && teacherId ? { teacherId } : {}),
         ...(selectedDecision === "FOLLOW_UP" && followUpAt ? { followUpAt: new Date(followUpAt).toISOString() } : {}),
       });
       Swal.fire({ toast: true, position: "top-end", icon: "success", title: selectedDecision === "ENROLL" ? "Converted to student 🎉" : "Decision recorded", showConfirmButton: false, timer: 2200 });
@@ -1812,13 +1908,19 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {WEEKDAYS.map((d) => {
                     const on = chosenDays.includes(d);
+                    const blocked = !on && dayCap != null && chosenDays.length >= dayCap;
                     return (
                       <button
                         key={d}
                         type="button"
+                        disabled={blocked}
                         onClick={() => handleDayToggle(d)}
-                        className={`h-9 rounded-lg border px-3 text-[11.5px] font-bold transition cursor-pointer ${
-                          on ? "border-accent bg-accent/10 text-accent" : "border-hairline bg-surface text-ink-3 hover:bg-surface-2"
+                        className={`h-9 rounded-lg border px-3 text-[11.5px] font-bold transition ${
+                          on
+                            ? "border-accent bg-accent/10 text-accent cursor-pointer"
+                            : blocked
+                            ? "border-hairline bg-surface-2 text-ink-3/40 cursor-not-allowed"
+                            : "border-hairline bg-surface text-ink-3 hover:bg-surface-2 cursor-pointer"
                         }`}
                       >
                         {d.slice(0, 3)}
@@ -1826,6 +1928,11 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
                     );
                   })}
                 </div>
+                {dayCap != null && (
+                  <p className="mb-1 text-[10.5px] font-semibold text-ink-3">
+                    This plan allows {dayCap} class day{dayCap > 1 ? "s" : ""} a week — {chosenDays.length}/{dayCap} selected.
+                  </p>
+                )}
                 {chosenDays.length > 0 && (
                   <div className="grid gap-2 sm:grid-cols-2 mt-2">
                     {chosenDays.map((day) => (
@@ -1847,6 +1954,58 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
               </div>
             </div>
 
+            {/* Billing currency (auto from country, override if needed) and —
+                for hourly plans — the class duration and weekly-class count the
+                family chooses, which drive the tuition estimate below. */}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Billing currency</label>
+                <select
+                  value={effectiveCurrency}
+                  onChange={(e) => setCurrencyOverride(e.target.value as Currency)}
+                  className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                >
+                  {(["USD", "AED", "GBP"] as Currency[]).map((c) => (
+                    <option key={c} value={c}>
+                      {c}{c === leadCurrency ? " (auto)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {currencyOverride && currencyOverride !== leadCurrency && (
+                  <button type="button" onClick={() => setCurrencyOverride(null)}
+                    className="mt-1 text-[10.5px] font-semibold text-accent hover:underline">
+                    Reset to auto ({leadCurrency})
+                  </button>
+                )}
+              </div>
+              {isHourly && (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Class duration</label>
+                    <select
+                      value={hourlyDuration}
+                      onChange={(e) => setHourlyDuration(Number(e.target.value))}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                    >
+                      <option value={30}>30 minutes</option>
+                      <option value={60}>60 minutes</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Weekly classes</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={7}
+                      value={hourlyWeekly}
+                      onChange={(e) => setHourlyWeekly(Math.max(1, Math.min(7, Number(e.target.value) || 1)))}
+                      className="h-11 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
             <div>
               <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Package to bill</label>
               <select value={packageId} onChange={(e) => setPackageId(e.target.value)}
@@ -1866,6 +2025,80 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
                 The first invoice is raised from this, one per child, and goes out with the welcome
                 email. With no package on record none is raised and the timeline says so.
               </p>
+
+              {/* Plan summary + estimated monthly tuition, in the family's currency. */}
+              {plan && (
+                <div className="mt-3 rounded-xl border border-hairline bg-surface-2/50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-black text-ink">
+                      {isHourly ? "Hourly Subscription" : "Monthly Package"}
+                      {plan.tier ? ` · ${plan.tier}` : ""}
+                    </span>
+                    <span className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-black text-emerald-600">
+                      {money(estTuition, effectiveCurrency, { emptyText: "Not priced" })} / month
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-ink-2 sm:grid-cols-4">
+                    <span>Duration: <b>{planDuration} min</b></span>
+                    <span>Weekly: <b>{planWeekly || "—"}×</b></span>
+                    <span>Monthly hours: <b>{planMonthlyHours ? Math.round(planMonthlyHours) : "—"}</b></span>
+                    {isHourly ? (
+                      <span>Rate × hours × 4 wks</span>
+                    ) : (
+                      <span>Reschedules: <b>{plan.rescheduleLimit ?? 0}</b></span>
+                    )}
+                  </div>
+                  {isHourly && (
+                    <p className="mt-1.5 text-[10.5px] text-ink-3">
+                      Tuition = rate × ({planDuration}÷60) × {planWeekly} × 4 weeks. Pick the days above to match {hourlyWeekly} weekly {hourlyWeekly === 1 ? "class" : "classes"}.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Teacher assignment — search for teachers free on the chosen recurring
+                schedule; the coach may also assign a non-matching teacher. */}
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-3">Assign teacher</label>
+                <button type="button" onClick={searchTeachers} disabled={teacherSearching}
+                  className="text-[11px] font-bold text-accent hover:underline disabled:opacity-50">
+                  {teacherSearching ? "Searching…" : "Find available teachers"}
+                </button>
+              </div>
+              {teacherResults && (
+                <div className="mt-2 space-y-2 rounded-xl border border-hairline bg-surface-2/40 p-3">
+                  {teacherResults.matching.length === 0 && teacherResults.others.length === 0 && (
+                    <p className="text-[11px] text-ink-3">No teachers found — check the days and time.</p>
+                  )}
+                  {teacherResults.matching.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">Available for this schedule</p>
+                      {teacherResults.matching.map((t) => (
+                        <label key={t.teacherId} className="flex items-center gap-2 text-xs text-ink-2">
+                          <input type="radio" name="enrollTeacher" checked={teacherId === t.teacherId} onChange={() => setTeacherId(t.teacherId)} />
+                          {t.name}{t.gender ? ` · ${t.gender}` : ""}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {teacherResults.others.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-[10px] font-extrabold uppercase tracking-wider text-ink-3">Other teachers (assign manually)</summary>
+                      <div className="mt-1 space-y-1">
+                        {teacherResults.others.map((t) => (
+                          <label key={t.teacherId} className="flex items-center gap-2 text-xs text-ink-2">
+                            <input type="radio" name="enrollTeacher" checked={teacherId === t.teacherId} onChange={() => setTeacherId(t.teacherId)} />
+                            {t.name}{t.gender ? ` · ${t.gender}` : ""}
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+              <p className="mt-1 text-[10.5px] text-ink-3">Leave unselected to keep the trial teacher.</p>
             </div>
           </div>
         )}

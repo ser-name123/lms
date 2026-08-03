@@ -39,7 +39,16 @@ const path = require('path');
    * is the correct outcome: a restored copy should not silently be able to
    * charge cards.
    */
-  const SECRET_SETTINGS = new Set(['STRIPE_CONFIG', 'SMTP_CONFIG', 'GMAIL_API_CONFIG']);
+  const SECRET_SETTINGS = new Set([
+    'STRIPE_CONFIG',
+    'SMTP_CONFIG',
+    'GMAIL_API_CONFIG',
+    // These were leaking into backups in the clear (H1): the Zoom app secret and
+    // the Web-Push VAPID private key. The Zoom client/account ids and the VAPID
+    // public key/subject are not secrets and stay so a restore keeps working.
+    'ZOOM_CLIENT_SECRET',
+    'PUSH_VAPID_PRIVATE_KEY',
+  ]);
   const REDACTED = '__REDACTED_ON_EXPORT__';
 
   const tables = {};

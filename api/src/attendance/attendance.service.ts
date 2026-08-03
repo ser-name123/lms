@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { Role, ClassStatus, StudentAttendanceStatus } from '../generated/prisma/enums';
 import {
   AssignStudentsDto,
@@ -46,6 +47,7 @@ export class AttendanceService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly emails: EmailsService,
     private readonly notifications: NotificationsService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   // Sweeps: reminders (24h/1h/15m) + auto-lock. Lightweight in-process interval,
@@ -1004,6 +1006,9 @@ export class AttendanceService implements OnModuleInit {
         await this.prisma.classSession.update({ where: { id: cls.id }, data: { teacherStatus: 'ABSENT' as any } });
       }
       await this.prisma.classSession.update({ where: { id: cls.id }, data: { attendanceLocked: true, lockedAt: new Date() } });
+      // The class is now final — consume it from each attendee's subscription.
+      // Locking happens once per class, so this cannot double-count.
+      await this.subscriptions.consumeClassForSubscription(cls.id).catch(() => undefined);
     }
 
     // Also lock classes that were never ended but are long past their end time.
@@ -1029,6 +1034,8 @@ export class AttendanceService implements OnModuleInit {
           lockedAt: new Date(),
         },
       });
+      // Final and locked — consume it from each attendee's subscription (once).
+      await this.subscriptions.consumeClassForSubscription(cls.id).catch(() => undefined);
     }
   }
 

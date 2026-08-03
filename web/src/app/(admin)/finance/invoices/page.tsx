@@ -38,6 +38,7 @@ import { amountIn, DEFAULT_CURRENCY, SUPPORTED_CURRENCIES, type Currency } from 
 import {
   fetchFinanceInvoices,
   fetchFinanceInvoice,
+  verifyPaymentIntent,
   generateInvoice,
   recordInvoicePayment,
   sendInvoice,
@@ -274,17 +275,46 @@ export default function FinanceInvoicesPage() {
   }, [currentPage, pageSize, searchQuery, statusFilter, sortBy]);
 
   useEffect(() => {
-    // Check for redirection param
+    // Back from Stripe. Do NOT trust the return_url flag alone (M3): anyone can
+    // append ?payment_success=true, and even a genuine redirect can arrive
+    // before the webhook has settled the invoice. Verify the actual PaymentIntent
+    // with the server and only claim success when it truly succeeded.
     const params = new URLSearchParams(window.location.search);
     if (params.get("payment_success") === "true") {
-      Swal.fire({
-        title: "Test Payment Succeeded!",
-        text: "The invoice has been paid successfully using Stripe.",
-        icon: "success",
-        confirmButtonColor: "#386FA4",
-      });
+      const pi = params.get("payment_intent");
       window.history.replaceState({}, document.title, window.location.pathname);
-      loadInvoices();
+      if (pi) {
+        verifyPaymentIntent(pi)
+          .then((res) => {
+            if (res.status === "succeeded") {
+              Swal.fire({
+                title: "Payment Succeeded",
+                text: "The payment was verified and the invoice has been settled.",
+                icon: "success",
+                confirmButtonColor: "#386FA4",
+              });
+            } else {
+              Swal.fire({
+                title: "Payment not yet confirmed",
+                text: `Stripe reports status: ${res.status}. The invoice will update automatically once the payment clears.`,
+                icon: "info",
+                confirmButtonColor: "#386FA4",
+              });
+            }
+          })
+          .catch(() =>
+            Swal.fire({
+              title: "Could not verify payment",
+              text: "We could not confirm this payment. Please check the invoice status before retrying.",
+              icon: "warning",
+              confirmButtonColor: "#386FA4",
+            }),
+          )
+          .finally(() => loadInvoices());
+      } else {
+        // No intent id to verify — refresh, but do not claim success.
+        loadInvoices();
+      }
     }
 
     fetchStudents({ page: 1, limit: 200 })
@@ -777,7 +807,12 @@ export default function FinanceInvoicesPage() {
                     const canCancel = !["PAID", "CANCELLED", "VOID"].includes(inv.status);
                     return (
                       <tr key={inv.id} className="hover:bg-surface-2/30 transition-colors">
-                        <td className="px-6 py-4 font-mono font-bold text-xs text-ink">{inv.number}</td>
+                        <td className="px-6 py-4 font-mono font-bold text-xs text-ink">
+                          <div className="flex items-center gap-1.5">
+                            {inv.number}
+                            {inv.subscriptionId && <Badge tone="accent" className="text-[8px] px-1.5 py-0">Subscription</Badge>}
+                          </div>
+                        </td>
                         <td className="px-6 py-4">
                           <div className="font-semibold text-ink text-xs">{fullName(inv)}</div>
                           <div className="text-[10px] text-ink-3 mt-0.5">{inv.student?.user?.email || ""}</div>

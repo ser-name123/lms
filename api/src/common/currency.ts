@@ -34,15 +34,72 @@ export function isCurrency(value: unknown): value is Currency {
  * The currency a country is billed in. Matches ISO codes and the country
  * names this database stores, because both reach it — the public booking form
  * saves a name, other paths save a code.
+ *
+ * Per the billing spec: Gulf countries bill in AED, the UK & Europe in GBP,
+ * and the USA & everywhere else falls through to the USD default. Both the
+ * ISO alpha-2 code and the stored country name are keyed so either path
+ * resolves.
  */
 const BY_COUNTRY: Record<string, Currency> = {
+  // ── Gulf → AED ──────────────────────────────────────────────
   AE: 'AED',
   UAE: 'AED',
   'UNITED ARAB EMIRATES': 'AED',
+  SA: 'AED',
+  KSA: 'AED',
+  'SAUDI ARABIA': 'AED',
+  KW: 'AED',
+  KUWAIT: 'AED',
+  QA: 'AED',
+  QATAR: 'AED',
+  OM: 'AED',
+  OMAN: 'AED',
+  BH: 'AED',
+  BAHRAIN: 'AED',
+
+  // ── United Kingdom & Europe → GBP ───────────────────────────
   GB: 'GBP',
   UK: 'GBP',
   'UNITED KINGDOM': 'GBP',
   'GREAT BRITAIN': 'GBP',
+  IE: 'GBP',
+  IRELAND: 'GBP',
+  FR: 'GBP',
+  FRANCE: 'GBP',
+  DE: 'GBP',
+  GERMANY: 'GBP',
+  ES: 'GBP',
+  SPAIN: 'GBP',
+  IT: 'GBP',
+  ITALY: 'GBP',
+  NL: 'GBP',
+  NETHERLANDS: 'GBP',
+  BE: 'GBP',
+  BELGIUM: 'GBP',
+  PT: 'GBP',
+  PORTUGAL: 'GBP',
+  SE: 'GBP',
+  SWEDEN: 'GBP',
+  NO: 'GBP',
+  NORWAY: 'GBP',
+  DK: 'GBP',
+  DENMARK: 'GBP',
+  FI: 'GBP',
+  FINLAND: 'GBP',
+  PL: 'GBP',
+  POLAND: 'GBP',
+  AT: 'GBP',
+  AUSTRIA: 'GBP',
+  CH: 'GBP',
+  SWITZERLAND: 'GBP',
+  GR: 'GBP',
+  GREECE: 'GBP',
+  CZ: 'GBP',
+  'CZECH REPUBLIC': 'GBP',
+  RO: 'GBP',
+  ROMANIA: 'GBP',
+  HU: 'GBP',
+  HUNGARY: 'GBP',
 };
 
 export function currencyForCountry(country?: string | null): Currency {

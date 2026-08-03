@@ -215,6 +215,22 @@ export class NotificationBroadcastService {
     if (b.status === St.SENT) return b;
     if (b.cancelledAt) throw new BadRequestException('This broadcast was cancelled');
 
+    /*
+     * Atomically claim the broadcast before dispatching (M5). The status check
+     * above is not enough: the daily sweep can race a manual "send now", both
+     * see a non-SENT status, and both dispatch — every recipient gets the
+     * announcement twice. Flip to SENT in one conditional updateMany; only the
+     * caller that actually changed a row (count === 1) goes on to dispatch, the
+     * other returns the already-claimed broadcast.
+     */
+    const claim = await this.prisma.notificationBroadcast.updateMany({
+      where: { id, status: { in: [St.QUEUED, St.SCHEDULED] }, cancelledAt: null },
+      data: { status: St.SENT, sentAt: new Date() },
+    });
+    if (claim.count === 0) {
+      return this.prisma.notificationBroadcast.findUnique({ where: { id } });
+    }
+
     const recipients = await this.resolveRecipients({
       audience: b.audience,
       roles: b.roles,

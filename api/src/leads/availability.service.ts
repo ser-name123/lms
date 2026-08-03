@@ -332,6 +332,15 @@ export class LeadAvailabilityService {
       }
     }
 
+    // Enrolled students' recurring classes reserve their teacher's time too — an
+    // ACTIVE batch of an ACTIVE subscription blocks its weekly slots, so a
+    // reserved slot no longer shows as free for a new student.
+    const batchBusy = await this.activeBatchBusyForDate(date);
+    for (const [teacherId, slots] of batchBusy) {
+      if (!busy.has(teacherId)) busy.set(teacherId, new Set());
+      for (const s of slots) busy.get(teacherId)!.add(s);
+    }
+
     return {
       date: rawDate,
       timeZone: 'UTC',
@@ -352,6 +361,124 @@ export class LeadAvailabilityService {
         })
         .sort((a, b) => b.freeSlots.length - a.freeSlots.length),
     };
+  }
+
+  /*
+   * The slots reserved by enrolled students on a given date: every ACTIVE batch
+   * of an ACTIVE subscription blocks its weekly start→end time for its teacher.
+   * Keyed by teacherId. Gating on the ACTIVE subscription means release is
+   * automatic — pausing/ending a subscription (or its batch) frees the slots on
+   * the next query, with no separate reservation table to keep in sync.
+   */
+  private async activeBatchBusyForDate(date: Date): Promise<Map<string, Set<string>>> {
+    const weekday = WEEKDAYS[date.getUTCDay()];
+    const activeSubs = await this.prisma.studentSubscription.findMany({
+      where: { status: 'ACTIVE', batchId: { not: null } },
+      select: { batchId: true },
+    });
+    const ids = [...new Set(activeSubs.map((s) => s.batchId!).filter(Boolean))];
+    const busy = new Map<string, Set<string>>();
+    if (!ids.length) return busy;
+    const batches = await this.prisma.batch.findMany({
+      where: { id: { in: ids }, status: 'ACTIVE', daysOfWeek: { has: weekday } },
+      select: { teacherId: true, startTime: true, endTime: true },
+    });
+    for (const b of batches) {
+      if (!b.teacherId || !b.startTime || !b.endTime) continue;
+      const [sh, sm] = b.startTime.split(':').map(Number);
+      const [eh, em] = b.endTime.split(':').map(Number);
+      const start = sh * 60 + sm;
+      const end = eh * 60 + em;
+      if (!busy.has(b.teacherId)) busy.set(b.teacherId, new Set());
+      for (let m = start; m < end; m += SLOT_MINUTES) busy.get(b.teacherId)!.add(this.toHHmm(m));
+    }
+    return busy;
+  }
+
+  /** A near-future UTC date whose weekday matches `weekday` (for recurring checks). */
+  private nextDateForWeekday(weekday: string): Date {
+    const idx = WEEKDAYS.indexOf(weekday as (typeof WEEKDAYS)[number]);
+    const today = new Date();
+    const base = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    if (idx < 0) return base;
+    const delta = ((idx - base.getUTCDay() + 7) % 7) || 7;
+    base.setUTCDate(base.getUTCDate() + delta);
+    return base;
+  }
+
+  /*
+   * Teacher-assignment search for enrollment (distinct from single-date trial
+   * slotting): find teachers who can take a *recurring* weekly schedule. A match
+   * must be an active, approved teacher (optionally of the requested gender and
+   * course) who is free at the chosen time+duration on EVERY requested weekday,
+   * counting both their published availability and slots already reserved by
+   * enrolled students. Returns matching teachers and the rest (so a coach can
+   * still assign a non-matching teacher manually).
+   */
+  async searchTeachersForEnrollment(opts: {
+    courseId?: string | null;
+    gender?: string | null; // Male / Female / Either
+    days: string[];
+    time: string; // HH:mm
+    durationMinutes: number;
+  }): Promise<{
+    matching: { teacherId: string; name: string; gender: string | null; subjects: string[] }[];
+    others: { teacherId: string; name: string; gender: string | null; subjects: string[] }[];
+  }> {
+    const days = (opts.days ?? []).filter(Boolean);
+    const spans = Math.max(1, Math.ceil((opts.durationMinutes || 60) / SLOT_MINUTES));
+    const [sh, sm] = (opts.time || '00:00').split(':').map(Number);
+    const startMin = sh * 60 + sm;
+    const needed = Array.from({ length: spans }, (_, i) => this.toHHmm(startMin + i * SLOT_MINUTES));
+
+    const where: any = { availabilityApproved: true, archived: false, user: { status: 'ACTIVE' } };
+    if (opts.gender && opts.gender !== 'Either') where.gender = opts.gender;
+    // Course is a MATCHING criterion, not a hard exclusion: a teacher of another
+    // course is still offered in the manual "others" list (the spec's
+    // "non-available teacher list" the coach may assign from). Only gender stays
+    // a hard filter here.
+    const teachers = await this.prisma.teacherProfile.findMany({
+      where,
+      select: {
+        id: true,
+        availability: true,
+        timeZone: true,
+        gender: true,
+        subjects: true,
+        courseId: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    // One representative date + reserved-slot map per requested weekday.
+    const dayDates = days.map((d) => this.nextDateForWeekday(d));
+    const busyByDate = new Map<number, Map<string, Set<string>>>();
+    for (const date of dayDates) busyByDate.set(date.getTime(), await this.activeBatchBusyForDate(date));
+
+    const matching: { teacherId: string; name: string; gender: string | null; subjects: string[] }[] = [];
+    const others: typeof matching = [];
+    for (const t of teachers) {
+      let freeOnAll = days.length > 0;
+      for (const date of dayDates) {
+        const free = new Set(this.toSlots(this.merge(this.readUtcWindowsForDate(t.availability, t.timeZone, date))));
+        const reserved = busyByDate.get(date.getTime())?.get(t.id) ?? new Set<string>();
+        if (!needed.every((s) => free.has(s) && !reserved.has(s))) {
+          freeOnAll = false;
+          break;
+        }
+      }
+      // A teacher matches only if free on every requested slot AND (when a course
+      // was given) they teach it. Everyone else drops to the manual "others" list.
+      const courseOk = !opts.courseId || t.courseId === opts.courseId;
+      const row = {
+        teacherId: t.id,
+        name: `${t.user.firstName} ${t.user.lastName}`.trim(),
+        gender: t.gender,
+        subjects: t.subjects,
+      };
+      (freeOnAll && courseOk ? matching : others).push(row);
+    }
+    return { matching, others };
   }
 
   /**

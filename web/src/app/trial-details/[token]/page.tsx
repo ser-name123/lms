@@ -81,6 +81,12 @@ export default function TrialDetailsPage() {
 
   const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 
+  // The chosen plan caps how many class days a week can be picked — the same
+  // rule the coach's screen enforces, so a family cannot ask for more than the
+  // package buys. Null (no cap) until a plan with a weekly count is selected.
+  const selectedPkg = form?.packages.find((p) => p.name === pkg) ?? null;
+  const dayCap: number | null = selectedPkg?.weeklyClasses ?? null;
+
   return (
     <main className="grid min-h-dvh place-items-center bg-surface-2 p-4 sm:p-8">
       <div className="w-full max-w-lg rounded-2xl border border-hairline bg-surface p-6 shadow-sm sm:p-8">
@@ -142,16 +148,20 @@ export default function TrialDetailsPage() {
                 <div className="flex flex-wrap gap-1.5">
                   {form.weekdays.map((d) => {
                     const on = days.includes(d);
+                    const blocked = !on && dayCap != null && days.length >= dayCap;
                     return (
                       <button
                         key={d}
                         type="button"
+                        disabled={blocked}
                         onClick={() =>
                           setDays(on ? days.filter((x) => x !== d) : [...days, d])
                         }
                         className={`h-9 rounded-lg border px-3 text-xs font-bold transition-colors ${
                           on
                             ? "border-accent bg-accent/10 text-accent"
+                            : blocked
+                            ? "cursor-not-allowed border-hairline text-ink-3/40"
                             : "border-hairline text-ink-3 hover:text-ink-2"
                         }`}
                       >
@@ -160,6 +170,11 @@ export default function TrialDetailsPage() {
                     );
                   })}
                 </div>
+                {dayCap != null && (
+                  <p className="mt-1.5 text-[11px] font-semibold text-ink-3">
+                    This plan allows {dayCap} class day{dayCap > 1 ? "s" : ""} a week — {days.length}/{dayCap} selected.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">

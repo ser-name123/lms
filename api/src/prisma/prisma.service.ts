@@ -41,6 +41,39 @@ export class PrismaService
 
   async onModuleInit() {
     await this.$connect();
+    await this.ensureConstraints();
+  }
+
+  /*
+   * Constraints that Prisma's schema cannot express (partial unique indexes),
+   * created idempotently on boot. `prisma db push` never adds these, so they
+   * live here.
+   */
+  private async ensureConstraints() {
+    try {
+      // Double-settlement backstop (C1): two concurrent settlements of the same
+      // Stripe PaymentIntent (the client verify call racing the webhook) must
+      // not both book a SUCCEEDED payment. A partial unique index on the intent
+      // reference enforces it at the database. Scoped to Stripe intent ids
+      // ('pi_…') so manual/cash payments — which may repeat or omit a reference
+      // — are never constrained.
+      await this.$executeRawUnsafe(
+        `CREATE UNIQUE INDEX IF NOT EXISTS "Payment_stripe_intent_unique" ` +
+          `ON "Payment" (reference) WHERE status = 'SUCCEEDED' AND reference LIKE 'pi_%'`,
+      );
+      // Trial slot double-booking backstop (H3): a teacher cannot hold two active
+      // trials at the same instant. Scoped to a real teacher and the two statuses
+      // that occupy a slot — a CANCELLED/COMPLETED/NO_SHOW trial frees it for
+      // rebooking, and an unassigned (null teacher) website booking is exempt.
+      await this.$executeRawUnsafe(
+        `CREATE UNIQUE INDEX IF NOT EXISTS "LeadTrial_teacher_slot_unique" ` +
+          `ON "LeadTrial" ("teacherId", "scheduledAt") ` +
+          `WHERE "teacherId" IS NOT NULL AND status IN ('SCHEDULED', 'RESCHEDULED')`,
+      );
+    } catch {
+      // Non-fatal: recordPayment also enforces idempotency inside a row-locked
+      // transaction; this index is an additional guard, not the only one.
+    }
   }
 
   async onModuleDestroy() {

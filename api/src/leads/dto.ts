@@ -331,6 +331,17 @@ export class CoachDecisionDto {
   @IsOptional() @IsString() preferredTime?: string;
   @ApiPropertyOptional({ description: 'Preferred days of classes', type: [String] })
   @IsOptional() @IsArray() @IsString({ each: true }) preferredDays?: string[];
+  @ApiPropertyOptional({
+    enum: ['USD', 'AED', 'GBP'],
+    description: 'Override the billing currency (defaults to the one derived from the family country).',
+  })
+  @IsOptional() @IsIn(['USD', 'AED', 'GBP']) currencyOverride?: string;
+  @ApiPropertyOptional({ description: 'Class duration in minutes — for hourly plans where the family chooses it.' })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) durationMinutes?: number;
+  @ApiPropertyOptional({ description: 'Weekly classes — for hourly plans where the family chooses it.' })
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) weeklyClasses?: number;
+  @ApiPropertyOptional({ description: 'Assigned teacher (TeacherProfile id) chosen at enrollment. Falls back to the trial teacher.' })
+  @IsOptional() @IsString() teacherId?: string;
 }
 
 export class ListLeadsDto {

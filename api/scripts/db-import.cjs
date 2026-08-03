@@ -33,9 +33,31 @@ const path = require('path');
   const client = new Client({ connectionString: conn });
   await client.connect();
 
+  const REDACTED = '__REDACTED_ON_EXPORT__';
+
   await client.query('BEGIN');
   try {
     await client.query('SET LOCAL session_replication_role = replica');
+
+    /*
+     * The backup redacts credential settings (Stripe/SMTP/Gmail/Zoom/VAPID) — it
+     * never contains their real values. TRUNCATE below would then wipe the live
+     * secrets and the import would not restore them (M4): a working install
+     * would silently lose its ability to charge cards and send mail after a
+     * restore. So capture the current live values for exactly the keys the
+     * backup redacted BEFORE truncating, and re-insert them afterwards.
+     */
+    const redactedKeys = (tables.SystemSetting || [])
+      .filter((r) => r.value === REDACTED)
+      .map((r) => r.key);
+    let preservedSecrets = [];
+    if (redactedKeys.length) {
+      const res = await client.query(
+        `SELECT * FROM "SystemSetting" WHERE key = ANY($1)`,
+        [redactedKeys],
+      );
+      preservedSecrets = res.rows;
+    }
 
     const quoted = names.map((n) => `"${n}"`).join(', ');
     if (quoted) {
@@ -51,7 +73,6 @@ const path = require('path');
      * restored copy that cannot charge cards until someone deliberately gives
      * it a key is the safe default.
      */
-    const REDACTED = '__REDACTED_ON_EXPORT__';
     let droppedSecrets = 0;
 
     let inserted = 0;
@@ -70,9 +91,24 @@ const path = require('path');
       inserted += rows.length;
     }
 
+    // Restore the live secrets captured before the truncate, so a backup that
+    // redacted them does not blank out a working install's credentials (M4).
+    if (preservedSecrets.length) {
+      await client.query(
+        `INSERT INTO "SystemSetting" SELECT * FROM jsonb_populate_recordset(NULL::"SystemSetting", $1::jsonb) ` +
+          `ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [JSON.stringify(preservedSecrets)],
+      );
+    }
+
     if (droppedSecrets) {
       console.log(
-        `Skipped ${droppedSecrets} redacted credential setting(s) — re-enter them in Settings.`,
+        `Skipped ${droppedSecrets} redacted credential setting(s) — kept the live values already configured.`,
+      );
+    }
+    if (preservedSecrets.length) {
+      console.log(
+        `Preserved ${preservedSecrets.length} live credential setting(s) across the restore.`,
       );
     }
 

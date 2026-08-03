@@ -96,7 +96,9 @@ export class TeacherRegistrationsService {
     return {
       otpRequired: true,
       email,
-      otp, // shown for now; email is the eventual delivery channel
+      // SECURITY: echoed only in non-production; in production the code is
+      // delivered by email, never in the HTTP response.
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
       message: 'A verification code has been sent to your email. Enter it to finish.',
     };
   }

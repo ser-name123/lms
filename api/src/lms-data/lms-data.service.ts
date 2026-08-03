@@ -16,6 +16,25 @@ export class LmsDataService implements OnModuleInit {
 
   async onModuleInit() {
     try {
+      // Seed the two built-in subscription models. Idempotent by unique key —
+      // updating name/order on an existing one, never rewriting its pricingMode.
+      const builtinModels: Array<{
+        key: string;
+        name: string;
+        pricingMode: 'FIXED_MONTHLY' | 'HOURLY';
+        displayOrder: number;
+      }> = [
+        { key: 'MONTHLY', name: 'Monthly Package', pricingMode: 'FIXED_MONTHLY', displayOrder: 1 },
+        { key: 'HOURLY', name: 'Hourly Subscription', pricingMode: 'HOURLY', displayOrder: 2 },
+      ];
+      for (const m of builtinModels) {
+        await this.prisma.subscriptionModel.upsert({
+          where: { key: m.key },
+          update: { name: m.name, displayOrder: m.displayOrder },
+          create: m,
+        });
+      }
+
       const lmsPackages = await this.prisma.lmsPackage.findMany();
       for (const lp of lmsPackages) {
         const exists = await this.prisma.package.findUnique({ where: { id: lp.id } });
@@ -427,8 +446,68 @@ export class LmsDataService implements OnModuleInit {
   // 5. Packages
   async getPackages() {
     return this.prisma.lmsPackage.findMany({
-      orderBy: { title: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { title: 'asc' }],
     });
+  }
+
+  // 5b. Subscription models (admin-configurable; the two built-ins are seeded on
+  // boot). New models let the academy add Corporate/Promotional/Summer/Family
+  // plans without code — only the pricingMode (fixed vs hourly) is read by code.
+  async getSubscriptionModels() {
+    return this.prisma.subscriptionModel.findMany({
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async createSubscriptionModel(dto: any) {
+    const key = String(dto.key ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, '_');
+    if (!key) throw new BadRequestException('A model key is required.');
+    if (dto.pricingMode !== 'FIXED_MONTHLY' && dto.pricingMode !== 'HOURLY') {
+      throw new BadRequestException('Pricing mode must be FIXED_MONTHLY or HOURLY.');
+    }
+    const exists = await this.prisma.subscriptionModel.findUnique({ where: { key } });
+    if (exists) throw new BadRequestException(`A model with key "${key}" already exists.`);
+    return this.prisma.subscriptionModel.create({
+      data: {
+        key,
+        name: String(dto.name ?? '').trim() || key,
+        pricingMode: dto.pricingMode,
+        active: dto.active ?? true,
+        displayOrder: Math.max(0, Math.round(Number(dto.displayOrder) || 0)),
+      },
+    });
+  }
+
+  async updateSubscriptionModel(id: string, dto: any) {
+    const model = await this.prisma.subscriptionModel.findUnique({ where: { id } });
+    if (!model) throw new NotFoundException('Subscription model not found.');
+    const data: any = {};
+    if (dto.name != null) data.name = String(dto.name).trim() || model.name;
+    if (dto.active != null) data.active = !!dto.active;
+    if (dto.displayOrder != null)
+      data.displayOrder = Math.max(0, Math.round(Number(dto.displayOrder) || 0));
+    // pricingMode of a model in use is deliberately NOT editable — it would
+    // silently change how every plan and subscription under it is priced.
+    return this.prisma.subscriptionModel.update({ where: { id }, data });
+  }
+
+  async deleteSubscriptionModel(id: string) {
+    const model = await this.prisma.subscriptionModel.findUnique({ where: { id } });
+    if (!model) throw new NotFoundException('Subscription model not found.');
+    const [plans, subs] = await Promise.all([
+      this.prisma.package.count({ where: { modelId: id } }),
+      this.prisma.studentSubscription.count({ where: { modelId: id } }),
+    ]);
+    if (plans > 0 || subs > 0) {
+      throw new BadRequestException(
+        `"${model.name}" is used by ${plans} plan(s) and ${subs} subscription(s). ` +
+          'Reassign or remove those first.',
+      );
+    }
+    return this.prisma.subscriptionModel.delete({ where: { id } });
   }
   /**
    * A package price can never be negative, and a currency the academy has not
@@ -437,17 +516,83 @@ export class LmsDataService implements OnModuleInit {
    */
   private normalisePackage(data: any) {
     const out = { ...data };
-    if (out.priceUSD != null) out.priceUSD = Math.max(0, Number(out.priceUSD) || 0);
+    // priceUSD is required on both tables. An hourly plan has no fixed monthly
+    // price (it is computed per-subscription), so a missing value becomes 0
+    // rather than blocking the write — the hourly rate below carries its price.
+    out.priceUSD =
+      out.priceUSD == null || out.priceUSD === '' ? 0 : Math.max(0, Number(out.priceUSD) || 0);
     for (const key of ['priceAED', 'priceGBP'] as const) {
+      if (out[key] === '' || out[key] === null) out[key] = null;
+      else if (out[key] != null) out[key] = Math.max(0, Number(out[key]) || 0);
+    }
+    // Per-currency hourly rates — same "priced or null, never substituted" rule.
+    for (const key of ['hourlyRateUSD', 'hourlyRateAED', 'hourlyRateGBP'] as const) {
       if (out[key] === '' || out[key] === null) out[key] = null;
       else if (out[key] != null) out[key] = Math.max(0, Number(out[key]) || 0);
     }
     if (out.classesPerMonth != null && out.classesPerMonth !== '') {
       out.classesPerMonth = Math.max(1, Math.round(Number(out.classesPerMonth) || 0));
     }
-    // An empty select means "no fee plan", which is a null column, not "".
-    if (out.feePlanId === '') out.feePlanId = null;
+    // Subscription structure — non-negative whole numbers, or null when not set.
+    for (const key of [
+      'durationMinutes',
+      'weeklyClasses',
+      'monthlyHours',
+      'rescheduleLimit',
+      'displayOrder',
+    ] as const) {
+      if (out[key] === '' || out[key] === null) out[key] = null;
+      else if (out[key] != null) out[key] = Math.max(0, Math.round(Number(out[key]) || 0));
+    }
+    if (out.familyDiscountPct === '' || out.familyDiscountPct === null)
+      out.familyDiscountPct = null;
+    else if (out.familyDiscountPct != null)
+      out.familyDiscountPct = Math.min(100, Math.max(0, Number(out.familyDiscountPct) || 0));
+    // Empty selects/inputs mean "unset", which is a null column, not "".
+    for (const key of ['feePlanId', 'modelId', 'tier', 'badge'] as const) {
+      if (out[key] === '') out[key] = null;
+    }
+    // eSyllabus is a queryable mirror of the feature matrix's flag.
+    if (out.featureMatrix && typeof out.featureMatrix === 'object') {
+      out.eSyllabus = !!out.featureMatrix.eSyllabus;
+    }
     return out;
+  }
+
+  /** The pricing mode of a plan's subscription model, or null if unlinked. */
+  private async pricingModeFor(
+    modelId?: string | null,
+  ): Promise<'FIXED_MONTHLY' | 'HOURLY' | null> {
+    if (!modelId) return null;
+    const model = await this.prisma.subscriptionModel.findUnique({
+      where: { id: modelId },
+      select: { pricingMode: true },
+    });
+    return (model?.pricingMode as 'FIXED_MONTHLY' | 'HOURLY') ?? null;
+  }
+
+  /**
+   * A monthly plan's hours a month follow from its fixed duration × weekly
+   * classes × 4 — so we compute it rather than trusting a separately-typed value
+   * that could disagree with the two numbers it is derived from. Hourly plans
+   * carry no fixed duration/weekly (the student picks them), so nothing is
+   * derived there.
+   */
+  private deriveMonthlyHours(
+    data: any,
+    pricingMode: 'FIXED_MONTHLY' | 'HOURLY' | null,
+  ) {
+    if (pricingMode === 'HOURLY') return;
+    const dur = Number(data.durationMinutes) || 0;
+    const weekly = Number(data.weeklyClasses) || 0;
+    if (weekly > 0) {
+      // Classes a month follow from the weekly count, so we compute them rather
+      // than trusting a separately-typed classesPerMonth that could disagree.
+      data.classesPerMonth = weekly * 4;
+    }
+    if (dur > 0 && weekly > 0) {
+      data.monthlyHours = Math.round((dur / 60) * weekly * 4);
+    }
   }
 
   /**
@@ -458,8 +603,18 @@ export class LmsDataService implements OnModuleInit {
    * would still say "billing linked" while every recurring invoice for a Dubai
    * family silently failed to generate.
    */
-  private async assertFeePlan(feePlanId: string | null | undefined, pkg: any) {
+  private async assertFeePlan(
+    feePlanId: string | null | undefined,
+    pkg: any,
+    pricingMode?: 'FIXED_MONTHLY' | 'HOURLY' | null,
+  ) {
     if (!feePlanId) return;
+    // An hourly subscription's monthly amount is computed from its rate and the
+    // student's chosen hours, not billed from a fee plan's fixed components — so
+    // there is no fixed per-currency price to check billability against. A fee
+    // plan may still be linked for one-time components, so we allow it but skip
+    // the currency-coverage check that only makes sense for a flat monthly price.
+    if (pricingMode === 'HOURLY') return;
     const plan = await this.prisma.feePlan.findUnique({
       where: { id: feePlanId },
       select: { id: true, name: true, components: { select: { label: true, amountUSD: true, amountAED: true, amountGBP: true } } },
@@ -491,8 +646,22 @@ export class LmsDataService implements OnModuleInit {
     classesPerMonth?: number | null;
     features?: string[];
     feePlanId?: string | null;
+    modelId?: string | null;
+    tier?: string | null;
+    durationMinutes?: number | null;
+    weeklyClasses?: number | null;
+    monthlyHours?: number | null;
+    hourlyRateUSD?: number | null;
+    hourlyRateAED?: number | null;
+    hourlyRateGBP?: number | null;
+    rescheduleLimit?: number | null;
+    familyDiscountPct?: number | null;
+    featureMatrix?: any;
+    eSyllabus?: boolean | null;
+    displayOrder?: number | null;
+    badge?: string | null;
   }) {
-    return {
+    const fields: any = {
       name: lmsPkg.title,
       description: lmsPkg.description,
       priceUSD: lmsPkg.priceUSD,
@@ -501,12 +670,43 @@ export class LmsDataService implements OnModuleInit {
       classesPerMonth: classesFor(lmsPkg),
       active: lmsPkg.status === 'Active',
       feePlanId: lmsPkg.feePlanId ?? null,
+      // Subscription-model attributes mirrored onto the relational Package.
+      modelId: lmsPkg.modelId ?? null,
+      tier: lmsPkg.tier ?? null,
+      durationMinutes: lmsPkg.durationMinutes ?? null,
+      weeklyClasses: lmsPkg.weeklyClasses ?? null,
+      monthlyHours: lmsPkg.monthlyHours ?? null,
+      hourlyRateUSD: lmsPkg.hourlyRateUSD ?? null,
+      hourlyRateAED: lmsPkg.hourlyRateAED ?? null,
+      hourlyRateGBP: lmsPkg.hourlyRateGBP ?? null,
+      rescheduleLimit: lmsPkg.rescheduleLimit ?? 0,
+      familyDiscountPct: lmsPkg.familyDiscountPct ?? 0,
+      eSyllabus: lmsPkg.eSyllabus ?? false,
+      displayOrder: lmsPkg.displayOrder ?? 0,
+      badge: lmsPkg.badge ?? null,
     };
+    // Only touch the Json column when a matrix was supplied — omitting it keeps
+    // the stored value on update rather than needing Prisma's JsonNull dance.
+    if (lmsPkg.featureMatrix && typeof lmsPkg.featureMatrix === 'object') {
+      fields.featureMatrix = lmsPkg.featureMatrix;
+    }
+    return fields;
   }
 
   async createPackage(dto: any) {
     const data = this.normalisePackage(dto);
-    await this.assertFeePlan(data.feePlanId, data);
+    const pricingMode = await this.pricingModeFor(data.modelId);
+    this.deriveMonthlyHours(data, pricingMode);
+    await this.assertFeePlan(data.feePlanId, data, pricingMode);
+    // LmsPackage requires these — default them on create so a partial payload
+    // (e.g. an API caller sending only the new subscription fields) does not 500.
+    // Only on create: applying the same defaults during update would clobber a
+    // stored value whenever a patch omitted the field.
+    data.billing = data.billing || 'Monthly';
+    data.level = data.level || 'All';
+    data.courses = Array.isArray(data.courses) ? data.courses : [];
+    data.features = Array.isArray(data.features) ? data.features : [];
+    data.description = data.description ?? '';
     const id: string = data.id ?? randomUUID();
 
     /*
@@ -531,7 +731,13 @@ export class LmsDataService implements OnModuleInit {
     // Checked against the merged row, not the patch: a request that changes
     // only the fee plan still has to be judged on every price the package has.
     const merged = { ...existing, ...data };
-    await this.assertFeePlan(merged.feePlanId, merged);
+    const pricingMode = await this.pricingModeFor(merged.modelId);
+    this.deriveMonthlyHours(merged, pricingMode);
+    // Keep the flat catalogue row in step with the derived values the relational
+    // row gets, so the two never report different hours or class counts.
+    data.monthlyHours = merged.monthlyHours ?? null;
+    if (merged.classesPerMonth != null) data.classesPerMonth = merged.classesPerMonth;
+    await this.assertFeePlan(merged.feePlanId, merged, pricingMode);
     const fields = this.packageFields(merged);
 
     const [lmsPkg] = await this.prisma.$transaction([

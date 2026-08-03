@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Loader2, User, GraduationCap, Users2, CalendarDays, TrendingUp,
   FileText, MessageSquare, ClipboardList, History, ShieldCheck, StickyNote,
-  BookOpen, Snowflake, Play, Send, Plus, Save, ArrowLeftRight, Award, Upload, Check, X, Star,
+  BookOpen, Snowflake, Play, Send, Plus, Save, ArrowLeftRight, Award, Upload, Check, X, Star, Wallet,
 } from "lucide-react";
+import { SubscriptionTab } from "./subscription-tab";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -73,7 +74,7 @@ async function issueCert(studentId: string, enrollmentId: string) {
   } catch (e) { fail(e); }
 }
 
-const statusTone = (s: string) => s === "ACTIVE" ? "good" : s === "PAUSED" ? "warning" : s === "TRIAL" ? "accent" : s === "PENDING" ? "warning" : "critical";
+const statusTone = (s: string) => s === "ACTIVE" ? "good" : s === "PAUSED" ? "warning" : s === "TRIAL" ? "accent" : s === "PENDING" || s === "PENDING_PAYMENT" ? "warning" : "critical";
 const STATUS_OPTIONS = ["ACTIVE", "TRIAL", "PAUSED", "PENDING", "INACTIVE"];
 
 const TABS = [
@@ -82,6 +83,7 @@ const TABS = [
   { key: "academic", label: "Academic", icon: BookOpen },
   { key: "parent", label: "Parent", icon: Users2 },
   { key: "assignment", label: "Course / Batch / Teacher", icon: GraduationCap },
+  { key: "subscription", label: "Subscription", icon: Wallet },
   { key: "transfers", label: "Transfers", icon: ArrowLeftRight },
   { key: "attendance", label: "Attendance", icon: CalendarDays },
   { key: "assignments", label: "Assignments", icon: ClipboardList },
@@ -139,6 +141,7 @@ export default function StudentHubPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-black text-ink">{name}</h2>
                   <Badge tone={statusTone(s.status)}>{s.status}</Badge>
+                  {s.subscriptionStatus === "PENDING_PAYMENT" && <Badge tone="warning">Awaiting payment</Badge>}
                   {s.onHoldReason && <Badge tone="warning">On hold: {s.onHoldReason}</Badge>}
                 </div>
                 <p className="mt-0.5 text-xs text-ink-3">{s.user.email} · {s.user.country || "—"} · {s.activeCourse?.title || "No active course"}</p>
@@ -175,6 +178,7 @@ export default function StudentHubPage() {
         {tab === "academic" && <AcademicTab s={s} onSaved={reload} />}
         {tab === "parent" && <ParentTab s={s} onSaved={reload} />}
         {tab === "assignment" && <AssignmentTab s={s} onSaved={reload} />}
+        {tab === "subscription" && <SubscriptionTab studentId={id} />}
         {tab === "transfers" && <TransfersTab studentId={id} />}
         {tab === "attendance" && <AttendanceTab studentId={id} />}
         {tab === "assignments" && <AssignmentsTab studentId={id} />}

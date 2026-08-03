@@ -16,6 +16,7 @@ import {
   ClipboardList,
   CheckCircle2,
   XCircle,
+  Lock,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -408,9 +409,17 @@ export default function TeacherClasses() {
 
                           {/* 6. Status Badge */}
                           <td className="p-4">
-                            <Badge tone={cls.isTrial ? (done ? "neutral" : "accent") : (isUpcoming ? "accent" : "good")} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
-                              {cls.isTrial ? cls.status.replace(/_/g, " ") : cls.status}
-                            </Badge>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge tone={cls.isTrial ? (done ? "neutral" : "accent") : (isUpcoming ? "accent" : "good")} className="text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
+                                {cls.isTrial ? cls.status.replace(/_/g, " ") : cls.status}
+                              </Badge>
+                              {/* A class from a billed & closed 28-day cycle — read-only, no reschedule. */}
+                              {cls.cycleLocked && (
+                                <Badge tone="neutral" className="inline-flex items-center gap-1 text-[9px] font-black tracking-wider uppercase select-none px-2 py-0.5">
+                                  <Lock className="size-2.5" /> Closed cycle
+                                </Badge>
+                              )}
+                            </div>
                           </td>
 
                           {/* 7. Action buttons */}

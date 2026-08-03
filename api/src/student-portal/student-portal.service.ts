@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { courseForCode } from '../common/catalogue-course';
@@ -250,7 +250,12 @@ export class StudentPortalService {
     const student = await this.prisma.studentProfile.findUnique({
       where: { userId },
       include: {
+        // Only ACTIVE enrolments surface a course's classes. A PENDING /
+        // PENDING_PAYMENT enrolment (created at conversion, before the first
+        // invoice is paid) must not leak the course catalogue's classes — the
+        // spec's "student cannot join regular classes while PENDING_PAYMENT".
         enrollments: {
+          where: { status: EnrollmentStatus.ACTIVE },
           include: {
             course: true,
           },
@@ -262,30 +267,133 @@ export class StudentPortalService {
       e.course.slug.toUpperCase(),
     );
 
+    // Attendance flags (shared by both class sources below).
+    const attendance = await this.prisma.classAttendee.findMany({
+      where: { studentId: student.id },
+    });
+    const attendanceByClassId = new Map(
+      attendance.map((a) => [a.classId, a.attended]),
+    );
+
+    // 1) Legacy flat catalogue rows for the enrolled courses.
     const classes = await this.prisma.lmsClass.findMany({
       where: {
         courseCode: { in: courseSlugs },
       },
       orderBy: { timeStart: 'desc' },
     });
-
-    // Check attendance status
-    const attendance = await this.prisma.classAttendee.findMany({
-      where: { studentId: student.id },
-    });
-
-    const attendanceByClassId = new Map(
-      attendance.map((a) => [a.classId, a.attended]),
-    );
-
-    return classes.map((c) => ({
+    const legacy = classes.map((c) => ({
       ...c,
       attended: attendanceByClassId.get(c.id) || false,
     }));
+
+    // 2) The student's REAL generated schedule: ClassSession rows they attend
+    // (the 28-day cycle classes). Without merging these, the student's classes
+    // page would show only the flat catalogue and never their own scheduled
+    // sessions. Mapped into the same shape the client renders.
+    const sessionAttendee = await this.prisma.classAttendee.findMany({
+      where: { studentId: student.id },
+      select: {
+        attended: true,
+        class: {
+          select: {
+            id: true,
+            title: true,
+            startsAt: true,
+            endsAt: true,
+            status: true,
+            meetingUrl: true,
+            cycleLocked: true,
+            course: { select: { title: true, slug: true } },
+            teacher: { select: { user: { select: { firstName: true, lastName: true } } } },
+          },
+        },
+      },
+      take: 500,
+    });
+    const sessions = sessionAttendee
+      .filter((a) => a.class)
+      .map((a) => ({
+        id: a.class!.id,
+        topic: a.class!.title,
+        courseCode: a.class!.course?.slug?.toUpperCase() ?? '',
+        courseTitle: a.class!.course?.title ?? '',
+        teacher: a.class!.teacher
+          ? `${a.class!.teacher.user.firstName} ${a.class!.teacher.user.lastName}`
+          : null,
+        timeStart: a.class!.startsAt.toISOString(),
+        timeEnd: a.class!.endsAt.toISOString(),
+        status: a.class!.status,
+        link: a.class!.meetingUrl ?? null,
+        cycleLocked: a.class!.cycleLocked,
+        attended: a.attended || false,
+        kind: 'SESSION' as const,
+      }));
+
+    return [...sessions, ...legacy].sort(
+      (a, b) => new Date(b.timeStart as any).getTime() - new Date(a.timeStart as any).getTime(),
+    );
+  }
+
+  /*
+   * The student's upcoming real class sessions (ClassSession, not the flat
+   * LmsClass catalogue above), which the reschedule feature acts on. Only their
+   * own, only scheduled, only future — the list a student picks a class to move
+   * from.
+   */
+  async getUpcomingSessions(userId: string) {
+    const student = await this.prisma.studentProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!student) throw new NotFoundException('Student not found');
+    const attendee = await this.prisma.classAttendee.findMany({
+      where: {
+        studentId: student.id,
+        class: { status: 'SCHEDULED', startsAt: { gt: new Date() } },
+      },
+      select: {
+        class: {
+          select: {
+            id: true,
+            title: true,
+            startsAt: true,
+            endsAt: true,
+            teacher: { select: { user: { select: { firstName: true, lastName: true } } } },
+          },
+        },
+      },
+      orderBy: { class: { startsAt: 'asc' } },
+      take: 60,
+    });
+    return attendee
+      .map((a) => a.class)
+      .filter(Boolean)
+      .map((c) => ({
+        id: c!.id,
+        title: c!.title,
+        startsAt: c!.startsAt,
+        endsAt: c!.endsAt,
+        teacher: c!.teacher ? `${c!.teacher.user.firstName} ${c!.teacher.user.lastName}` : null,
+      }));
   }
 
   async attendClass(userId: string, classId: string) {
     const student = await this.getStudentProfileByUserId(userId);
+
+    // SECURITY (C4): the payment wall is a client overlay and can be bypassed —
+    // enforce it on the server too. A student with an OVERDUE invoice cannot
+    // join a class until it is settled. (SENT/PENDING invoices that are not yet
+    // due do not block, so a just-issued next-cycle invoice never locks a
+    // paid-up student out.)
+    const overdue = await this.prisma.invoice.count({
+      where: { studentId: student.id, status: InvoiceStatus.OVERDUE },
+    });
+    if (overdue > 0) {
+      throw new ForbiddenException(
+        'An overdue invoice must be settled before you can join classes.',
+      );
+    }
 
     // Verify the class exists
     const lmsClass = await this.prisma.lmsClass.findUnique({
@@ -311,6 +419,25 @@ export class StudentPortalService {
           price: 0,
         },
       }));
+
+    /*
+     * Authorisation (M9): this endpoint upserts a ClassSession from a
+     * client-supplied id and marks attendance, so it must first prove the
+     * student is actually enrolled in this class's course — otherwise any
+     * student could POST any class id, create session rows, and mark themselves
+     * present in courses they never took.
+     */
+    const enrolled = await this.prisma.enrollment.findFirst({
+      where: {
+        studentId: student.id,
+        courseId: course.id,
+        status: EnrollmentStatus.ACTIVE,
+      },
+      select: { id: true },
+    });
+    if (!enrolled) {
+      throw new ForbiddenException('You are not enrolled in this class\'s course.');
+    }
 
     // Fetch or create teacher to keep relation happy
     let teacher = await this.prisma.teacherProfile.findFirst();
@@ -446,6 +573,23 @@ export class StudentPortalService {
           price: 0,
         },
       }));
+
+    /*
+     * Authorisation (M9): as with attendClass, prove the student is enrolled in
+     * this assignment's course before upserting an Assignment row from a
+     * client-supplied id and recording a submission against it.
+     */
+    const enrolledForSubmit = await this.prisma.enrollment.findFirst({
+      where: {
+        studentId: student.id,
+        courseId: course.id,
+        status: EnrollmentStatus.ACTIVE,
+      },
+      select: { id: true },
+    });
+    if (!enrolledForSubmit) {
+      throw new ForbiddenException('You are not enrolled in this assignment\'s course.');
+    }
 
     await this.prisma.assignment.upsert({
       where: { id: assignmentId },

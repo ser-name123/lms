@@ -151,7 +151,15 @@ export class AuthService {
         );
       });
 
-    return { otpRequired: true, email: user.email, otp };
+    // SECURITY: never return the OTP in the response in production — that would
+    // defeat 2FA entirely (anyone posting the password gets the code back). The
+    // code reaches the user by email; it is echoed only in non-production for
+    // local/automated testing, where it is also logged above.
+    return {
+      otpRequired: true,
+      email: user.email,
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
   }
 
   /**

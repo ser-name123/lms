@@ -127,7 +127,13 @@ export class PaymentsController {
   @Roles(Role.STUDENT, Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify Stripe payment intent and mark invoice paid if succeeded' })
-  verifyIntent(@Body() dto: VerifyPaymentIntentDto) {
-    return this.payments.verifyIntent(dto.paymentIntentId);
+  verifyIntent(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: VerifyPaymentIntentDto,
+  ) {
+    return this.payments.verifyIntent(dto.paymentIntentId, {
+      id: user.id,
+      role: user.role,
+    });
   }
 }

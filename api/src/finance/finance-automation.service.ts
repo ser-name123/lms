@@ -117,47 +117,84 @@ export class FinanceAutomationService implements OnModuleInit {
     });
   }
 
-  /** Mint invoices for recurring fee assignments whose next run is due. */
+  /** Mint invoices for anything due: subscription cycle renewals + generic fees. */
   private async generateDueRecurring() {
     const now = new Date();
+    await this.renewSubscriptionCycles(now);
+    await this.generateGenericRecurring(now);
+  }
+
+  /*
+   * The 28-day subscription cycle-close + renewal (the spec's daily cron).
+   *
+   * Fires for every ACTIVE subscription whose cycle has ended (renewalDate passed)
+   * OR whose class allowance has run out ("every 28 days OR when hours completed").
+   * For each, in order: lock the closed cycle's classes, apply any queued
+   * package/schedule change, generate the next 28-day schedule, raise the cycle
+   * invoice, refill the counters and roll the renewal date + fee run 28 days on,
+   * then notify the student, teacher and coach. Each student is isolated so one
+   * failure never stops the rest.
+   */
+  private async renewSubscriptionCycles(now: Date) {
+    const due = await this.prisma.studentSubscription.findMany({
+      where: {
+        status: 'ACTIVE',
+        feeAssignmentId: { not: null },
+        OR: [{ renewalDate: { not: null, lte: now } }, { remainingClasses: { lte: 0 } }],
+      },
+      select: { id: true, studentId: true, batchId: true, feeAssignmentId: true },
+      take: 500,
+    });
+    let count = 0;
+    for (const sub of due) {
+      try {
+        // 1. Close the old cycle — its classes become immutable.
+        await this.subscriptions.lockClosedCycleClasses(sub.batchId, now);
+        // 2. Apply any queued package/schedule change (takes effect this cycle).
+        const applied = await this.subscriptions.applyNextCycleFor(sub.studentId).catch(() => null);
+        if (applied?.applied?.length) {
+          this.logger.log(`Applied queued change for student ${sub.studentId}: ${applied.applied.join('; ')}`);
+        }
+        // 3. Generate the next 28-day schedule (no-op if the queued change already did).
+        await this.subscriptions.generateNextCycleForSubscription(sub.studentId);
+        // 4. Raise the cycle invoice.
+        const created = await this.billing.generateForAssignment(sub.feeAssignmentId!, now).catch(() => null);
+        if (created) count++;
+        // 5. Refill counters + roll renewalDate & fee nextRunAt 28 days forward.
+        await this.subscriptions.refillCycle(sub.studentId);
+        // 6. Notify student + teacher + coach.
+        await this.subscriptions.notifyCycleRenewed(sub.studentId);
+      } catch (e) {
+        this.logger.warn(`Subscription cycle renewal failed for student ${sub.studentId}: ${(e as Error).message}`);
+      }
+    }
+    if (count) this.logger.log(`Renewed ${count} subscription cycle(s).`);
+  }
+
+  /*
+   * Generic recurring fee billing (non-subscription assignments) — the original
+   * calendar-month path, left untouched. Subscription-linked assignments are
+   * excluded; they renew on their own 28-day cadence above.
+   */
+  private async generateGenericRecurring(now: Date) {
+    const subLinked = await this.prisma.studentSubscription.findMany({
+      where: { status: 'ACTIVE', feeAssignmentId: { not: null } },
+      select: { feeAssignmentId: true },
+    });
+    const excluded = subLinked.map((s) => s.feeAssignmentId!).filter(Boolean);
     const assignments = await this.prisma.studentFeeAssignment.findMany({
       where: {
         active: true,
         autoGenerate: true,
         nextRunAt: { not: null, lte: now },
+        id: { notIn: excluded },
       },
-      select: { id: true, studentId: true, nextRunAt: true },
+      select: { id: true, nextRunAt: true },
       take: 500,
     });
     let count = 0;
     for (const a of assignments) {
-      /*
-       * A cycle turning is the moment an approved package or schedule change
-       * takes effect, so apply it here — before the invoice is raised, so the
-       * new package is what gets billed. The other way round would charge the
-       * family one more cycle of the package they asked to leave.
-       *
-       * Isolated per student: one student's queued change failing must not
-       * stop everybody else's invoices from being generated.
-       */
-      const applied = await this.subscriptions
-        .applyNextCycleFor(a.studentId)
-        .catch((e) => {
-          this.logger.error(
-            `Could not apply the queued subscription change for student ${a.studentId}: ${e?.message ?? e}`,
-          );
-          return null;
-        });
-      if (applied?.applied?.length) {
-        this.logger.log(
-          `Applied queued change for student ${a.studentId}: ${applied.applied.join('; ')}`,
-        );
-      }
-
-      const created = await this.billing.generateForAssignment(
-        a.id,
-        a.nextRunAt ?? now,
-      );
+      const created = await this.billing.generateForAssignment(a.id, a.nextRunAt ?? now).catch(() => null);
       if (created) count++;
     }
     if (count) this.logger.log(`Auto-generated ${count} recurring invoice(s).`);
