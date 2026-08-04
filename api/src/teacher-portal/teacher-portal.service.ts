@@ -177,7 +177,9 @@ export class TeacherPortalService {
     const studentIds = enrollments.map((e) => e.student.id);
     const subs = studentIds.length
       ? await this.prisma.studentSubscription.findMany({
-          where: { studentId: { in: studentIds }, status: 'ACTIVE' },
+          // ON_BREAK included so a paused student still shows on the roster with
+          // their break badge, rather than disappearing from the teacher's list.
+          where: { studentId: { in: studentIds }, status: { in: ['ACTIVE', 'ON_BREAK'] } },
           orderBy: { createdAt: 'desc' },
           select: {
             studentId: true,
@@ -188,6 +190,8 @@ export class TeacherPortalService {
             monthlyHours: true,
             remainingClasses: true,
             completedClasses: true,
+            status: true,
+            breakEndDate: true,
             model: { select: { name: true } },
           },
         })
@@ -217,6 +221,8 @@ export class TeacherPortalService {
               monthlyHours: sub.monthlyHours,
               remainingClasses: sub.remainingClasses,
               completedClasses: sub.completedClasses,
+              status: sub.status,
+              breakEndDate: sub.breakEndDate ? sub.breakEndDate.toISOString() : null,
             }
           : null,
       };

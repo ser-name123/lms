@@ -61,6 +61,23 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   // A 28-day cycle turned over: new schedule + invoice created. Goes to the
   // student, their teacher and their coach.
   CYCLE_RENEWED: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'New billing cycle' },
+  // ── Break / pause ────────────────────────────────────────────────────────
+  // A break was requested (staff alert), decided (to the student), and then the
+  // two lifecycle transitions the cron drives: the break starting and the
+  // subscription resuming. START/RESUMED reach student + teacher + coach +
+  // supervisor, per the spec's break-notification list.
+  BREAK_REQUESTED: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP, label: 'Break requested' },
+  BREAK_DECIDED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Break request decided' },
+  BREAK_STARTED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Break started' },
+  BREAK_RESUMED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Subscription resumed' },
+  // ── Class rescheduling ─────────────────────────────────────────────────────
+  // A class was moved (student self-service, or an approved teacher request);
+  // and the teacher-request lifecycle (submitted → decided). CLASS_RESCHEDULED
+  // was previously unregistered and fell back to in-app only — now it carries
+  // in-app + email so all parties actually hear about a moved class.
+  CLASS_RESCHEDULED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Class rescheduled' },
+  TEACHER_RESCHEDULE_REQUEST: { category: Cat.ACADEMIC, priority: Pri.MEDIUM, channels: IN_APP, label: 'Teacher reschedule requested' },
+  TEACHER_RESCHEDULE_DECIDED: { category: Cat.ACADEMIC, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Teacher reschedule decided' },
 
   // ── Attendance ────────────────────────────────────────────────────────────
   ATTENDANCE_RESULT: { category: Cat.ATTENDANCE, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Attendance recorded' },
@@ -94,6 +111,15 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   SCHOLARSHIP_REVIEWED: { category: Cat.FINANCE, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Scholarship reviewed' },
   PAYSLIP_ISSUED: { category: Cat.FINANCE, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Payslip issued' },
   PAYROLL_GENERATED: { category: Cat.FINANCE, priority: Pri.MEDIUM, channels: IN_APP, label: 'Payroll generated' },
+  // ── Teacher earnings & salary (Modules 6A/6B/6C) ──
+  // A teacher was absent: the coach must reschedule (student + supervisor told).
+  TEACHER_ABSENT: { category: Cat.ATTENDANCE, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Teacher absent' },
+  SALARY_APPROVED: { category: Cat.FINANCE, priority: Pri.MEDIUM, channels: IN_APP, label: 'Salary approved' },
+  SALARY_PAID: { category: Cat.FINANCE, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Salary paid' },
+  SALARY_PAYMENT_FAILED: { category: Cat.FINANCE, priority: Pri.CRITICAL, channels: ALL_THREE, label: 'Salary payment failed' },
+  // ── Monthly progress report (Module 6D) ──
+  MONTHLY_REPORT_SUBMITTED: { category: Cat.PROGRESS, priority: Pri.MEDIUM, channels: IN_APP, label: 'Monthly report submitted' },
+  MONTHLY_REPORT_DECIDED: { category: Cat.PROGRESS, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Monthly report reviewed' },
 
   // ── Progress ──────────────────────────────────────────────────────────────
   PROGRESS_FEEDBACK: { category: Cat.PROGRESS, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Teacher feedback' },

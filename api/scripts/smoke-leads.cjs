@@ -71,10 +71,51 @@ const nextSlot = (hhmm) => {
 const isoDay = (offsetDays) =>
   new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
 
+/*
+ * Sweep away fixtures a previous *interrupted* run left behind. The finally
+ * block keys its deletes off the id arrays this process built, so a run killed
+ * mid-flight (e.g. a 2-minute test timeout) strands marker rows that then
+ * collide with this run's INSERTs on User.email / Package.name. Clearing them
+ * by the marker pattern up front makes the smoke self-healing and re-runnable.
+ * Only ever touches rows carrying this smoke's marker — real data is untouched.
+ */
+async function precleanStrays(db) {
+  const like = `${MARKER}%`;
+  // Invoices first: Invoice.studentId is SetNull on delete, so drop a stranded
+  // run's invoices before their students vanish. Far-older orphans with a null
+  // studentId are left alone — the suite already tolerates those.
+  await db.query(
+    `DELETE FROM "Invoice" WHERE "studentId" IN (SELECT id FROM "User" WHERE email ILIKE $1)`,
+    [like],
+  );
+  // Notifications addressed to a stranded run's users, or pointing at its leads.
+  await db.query(
+    `DELETE FROM "Notification"
+       WHERE "userId" IN (SELECT id FROM "User" WHERE email ILIKE $1)
+          OR link IN (SELECT '/leads/' || id FROM "Lead" WHERE email ILIKE $1)`,
+    [like],
+  );
+  // Student profiles created by any earlier conversion.
+  await db.query(
+    `DELETE FROM "StudentProfile" WHERE "userId" IN (SELECT id FROM "User" WHERE email ILIKE $1)`,
+    [like],
+  );
+  // Leads cascade to their trials and activities.
+  await db.query(`DELETE FROM "Lead" WHERE email ILIKE $1`, [like]);
+  // Both throwaway coaches and any converted students share the marker email.
+  await db.query(`DELETE FROM "User" WHERE email ILIKE $1`, [like]);
+  // The named package the info form and the conversion both reuse.
+  await db.query(`DELETE FROM "Package" WHERE name ILIKE $1`, [like]);
+}
+
 (async () => {
   if (!SECRET) throw new Error('JWT_ACCESS_SECRET is not set');
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
+
+  // Self-heal: clear any leftover fixtures from a prior interrupted run before
+  // this run inserts its own (marker rows collide on User.email / Package.name).
+  await precleanStrays(db);
 
   const admin = (
     await db.query(

@@ -49,6 +49,11 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       // Coaches are the ones who decide these, so the guard has to let them in
       // as well as the sidebar showing the link.
       "/subscription-requests",
+      "/reschedule-requests",
+      // Teacher-absent classes the coach reschedules, and the monthly reports
+      // they can see for their students.
+      "/teacher-absences",
+      "/monthly-reports",
       "/evaluation",
       "/students",
       "/teachers",
@@ -88,6 +93,17 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       // TeachersWorkspace as /teachers (different locked tab), which they
       // already have, so this grants no data they could not already reach.
       "/recruitment",
+      // Read-only monitoring of subscription/break requests. Supervisors are
+      // notified of these (§8.4) and the notification links here; the API grants
+      // them list/detail but not review, so the page hides approve/reject.
+      "/subscription-requests",
+      // Same read-only monitoring for teacher reschedule requests — supervisors
+      // are notified and can view; approve/reject stays with coach/admin.
+      "/reschedule-requests",
+      // Supervisors review + approve monthly reports; they monitor salaries
+      // (approve/pay stays admin-only, enforced by @Roles on the API).
+      "/monthly-reports",
+      "/salary",
       "/meetings",
       "/finance",
       "/chat",

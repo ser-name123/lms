@@ -365,15 +365,17 @@ export class LeadAvailabilityService {
 
   /*
    * The slots reserved by enrolled students on a given date: every ACTIVE batch
-   * of an ACTIVE subscription blocks its weekly start→end time for its teacher.
-   * Keyed by teacherId. Gating on the ACTIVE subscription means release is
-   * automatic — pausing/ending a subscription (or its batch) frees the slots on
-   * the next query, with no separate reservation table to keep in sync.
+   * of an ACTIVE (or ON_BREAK) subscription blocks its weekly start→end time for
+   * its teacher. Keyed by teacherId. ON_BREAK is included deliberately — during a
+   * break the teacher reservation must stay put and the slot must NOT be offered
+   * to another student (spec §8.5); it frees only when the subscription actually
+   * ends or pauses (or its batch does), on the next query, with no separate
+   * reservation table to keep in sync.
    */
   private async activeBatchBusyForDate(date: Date): Promise<Map<string, Set<string>>> {
     const weekday = WEEKDAYS[date.getUTCDay()];
     const activeSubs = await this.prisma.studentSubscription.findMany({
-      where: { status: 'ACTIVE', batchId: { not: null } },
+      where: { status: { in: ['ACTIVE', 'ON_BREAK'] }, batchId: { not: null } },
       select: { batchId: true },
     });
     const ids = [...new Set(activeSubs.map((s) => s.batchId!).filter(Boolean))];

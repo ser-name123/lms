@@ -49,6 +49,10 @@ interface FinanceConfig {
   overdueReminders: boolean;
   autoInvoice: boolean;
   salaryDayOfMonth: number;
+  teacherEarningsEnabled: boolean;
+  earningsCurrency: string;
+  trialClassPayout: number;
+  trialEnrollBonus: number;
 }
 
 // Heuristics to prettify cell values
@@ -155,6 +159,10 @@ export default function FinanceReportsPage() {
       overdueReminders: config.overdueReminders,
       autoInvoice: config.autoInvoice,
       salaryDayOfMonth: Number(config.salaryDayOfMonth),
+      teacherEarningsEnabled: config.teacherEarningsEnabled,
+      earningsCurrency: config.earningsCurrency,
+      trialClassPayout: Number(config.trialClassPayout),
+      trialEnrollBonus: Number(config.trialEnrollBonus),
     })
       .then((res) => {
         setConfig(res as FinanceConfig);
@@ -404,6 +412,52 @@ export default function FinanceReportsPage() {
                     checked={!!config.autoInvoice}
                     onChange={(v) => setConfig({ ...config, autoInvoice: v })}
                   />
+                </div>
+
+                {/* Teacher earnings (Module 6A) */}
+                <div className="border-t border-hairline pt-4">
+                  <h4 className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-ink-3">Teacher Earnings</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Trial Class Payout</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={config.trialClassPayout ?? 0}
+                        onChange={(e) => setConfig({ ...config, trialClassPayout: Number(e.target.value) })}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Trial Enrolment Bonus</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={config.trialEnrollBonus ?? 0}
+                        onChange={(e) => setConfig({ ...config, trialEnrollBonus: Number(e.target.value) })}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-ink-3 uppercase mb-1">Earnings Currency</label>
+                      <input
+                        type="text"
+                        value={config.earningsCurrency ?? "USD"}
+                        onChange={(e) => setConfig({ ...config, earningsCurrency: e.target.value })}
+                        className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <ToggleRow
+                      label="Enable Teacher Earnings"
+                      description="Book per-class earnings when a class completes"
+                      checked={!!config.teacherEarningsEnabled}
+                      onChange={(v) => setConfig({ ...config, teacherEarningsEnabled: v })}
+                    />
+                  </div>
                 </div>
 
                 <div className="border-t border-hairline pt-4 flex justify-end">

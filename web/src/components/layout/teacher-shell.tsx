@@ -23,6 +23,9 @@ import {
   FileCheck2,
   Sparkles,
   TrendingUp,
+  Wallet,
+  Banknote,
+  FileText,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -42,6 +45,9 @@ const teacherNavItems = [
   { label: "Student Progress", href: "/teacher/progress", icon: TrendingUp },
   { label: "Assignments", href: "/teacher/assignments", icon: ClipboardList },
   { label: "Assessments", href: "/teacher/assessments", icon: FileCheck2 },
+  { label: "Monthly Reports", href: "/teacher/reports", icon: FileText },
+  { label: "My Earnings", href: "/teacher/earnings", icon: Wallet },
+  { label: "My Salary", href: "/teacher/salary", icon: Banknote },
   { label: "Payout History", href: "/teacher/payouts", icon: Receipt },
   { label: "My Payroll", href: "/teacher/payroll", icon: Receipt },
   { label: "Support Chat", href: "/teacher/chat", icon: MessageCircle },

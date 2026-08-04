@@ -513,4 +513,23 @@ export class UpdateFinanceConfigDto {
   @Min(1)
   @Max(28)
   salaryDayOfMonth?: number;
+
+  // ── Teacher earnings (Module 6A) ──
+  @IsOptional()
+  @IsBoolean()
+  teacherEarningsEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  earningsCurrency?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  trialClassPayout?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  trialEnrollBonus?: number;
 }

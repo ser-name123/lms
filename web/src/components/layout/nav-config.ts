@@ -74,6 +74,9 @@ export const navGroups: NavGroup[] = [
     items: [
       { label: "Trial Classes", href: "/leads", icon: Sparkles },
       { label: "Subscription Requests", href: "/subscription-requests", icon: ClipboardList },
+      { label: "Reschedule Requests", href: "/reschedule-requests", icon: ClipboardList },
+      { label: "Teacher Absences", href: "/teacher-absences", icon: CalendarOff },
+      { label: "Monthly Reports", href: "/monthly-reports", icon: FileText },
       {
         label: "Students",
         icon: Users,
@@ -137,6 +140,7 @@ export const navGroups: NavGroup[] = [
         label: "Payroll",
         icon: Wallet,
         children: [
+          { label: "Salary Management", href: "/salary", icon: Wallet },
           { label: "Salary and Wages", href: "/payouts", icon: Wallet },
           { label: "Payroll Config", href: "/finance/payroll", icon: SlidersHorizontal },
         ],

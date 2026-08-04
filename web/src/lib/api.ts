@@ -4118,8 +4118,8 @@ export const fetchTeacherFinance = () => api<any>("/finance/teacher/dashboard");
 // their subscription and raise a request; approval only writes what the next
 // cycle becomes.
 
-export type SubscriptionStatus = "PENDING_PAYMENT" | "ACTIVE" | "PAUSED" | "ENDED" | "NONE";
-export type SubscriptionRequestType = "PACKAGE_CHANGE" | "SCHEDULE_CHANGE";
+export type SubscriptionStatus = "PENDING_PAYMENT" | "ACTIVE" | "PAUSED" | "ON_BREAK" | "ENDED" | "NONE";
+export type SubscriptionRequestType = "PACKAGE_CHANGE" | "SCHEDULE_CHANGE" | "BREAK_REQUEST";
 export type SubscriptionRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "APPLIED";
 
 export interface SubscriptionPackage {
@@ -4183,6 +4183,9 @@ export interface CurrentSubscription {
     reschedulesLeft: number;
     familyDiscountPct: number;
     status: string;
+    /** The approved break window, when one is scheduled or running. */
+    breakStartDate: string | null;
+    breakEndDate: string | null;
   } | null;
 }
 
@@ -4206,6 +4209,8 @@ export interface StaffSubscriptionRequest extends MySubscriptionRequest {
   requestedDays: string[];
   requestedTime: string | null;
   requestedStartDate: string | null;
+  breakStartDate: string | null;
+  breakEndDate: string | null;
   batchId: string | null;
   targetBatchId: string | null;
 }
@@ -4228,6 +4233,9 @@ export interface SubscriptionRequestDetail extends StaffSubscriptionRequest {
     classesDifference: number;
     /** False when the new package names no fee plan — the bill cannot follow. */
     billingLinked: boolean;
+    /** Reschedule allowance the new package carries, vs the current one. */
+    reschedulesFrom: number;
+    reschedulesTo: number;
   } | null;
   schedule: {
     batch: { id: string; name: string; days: string[]; startTime: string | null; endTime: string | null };
@@ -4240,6 +4248,7 @@ export interface SubscriptionRequestDetail extends StaffSubscriptionRequest {
       perDay: { day: string; free: boolean }[];
     } | null;
     teacherClashes: { batchId: string; name: string; days: string[]; startTime: string | null }[];
+    studentClashes: { name: string; days: string[] }[];
     alternatives: { id: string; name: string; daysOfWeek: string[]; startTime: string | null; teacherId: string | null }[];
   } | null;
 }
@@ -4249,8 +4258,35 @@ export const fetchMySubscription = () => api<CurrentSubscription>("/subscription
 export const fetchMyPackageOptions = () => api<SubscriptionPackage[]>("/subscriptions/me/packages");
 export const fetchMySubscriptionRequests = () =>
   api<MySubscriptionRequest[]>("/subscriptions/me/requests");
-export const requestPackageChange = (dto: { packageId: string; reason?: string }) =>
+
+// The current teacher's availability, so the day/time pickers can offer only
+// the days and times that teacher can actually teach.
+export interface ScheduleAvailability {
+  batchId: string | null;
+  durationMinutes: number;
+  teacher: {
+    id: string;
+    name: string;
+    timeZone: string | null;
+    windows: Record<string, { from?: string; to?: string }[]>;
+  } | null;
+}
+export const fetchMyScheduleAvailability = () =>
+  api<ScheduleAvailability>("/subscriptions/me/schedule-availability");
+export const requestPackageChange = (dto: {
+  packageId: string;
+  days?: string[];
+  time?: string;
+  reason?: string;
+}) =>
   api<MySubscriptionRequest>("/subscriptions/me/requests/package", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+// Student: ask to pause the subscription for a fixed window.
+export const requestBreak = (dto: { startDate: string; endDate: string; reason?: string }) =>
+  api<MySubscriptionRequest>("/subscriptions/me/requests/break", {
     method: "POST",
     body: JSON.stringify(dto),
   });
@@ -4276,6 +4312,267 @@ export const rescheduleClass = (dto: { sessionId: string; newStartsAt: string })
     { method: "POST", body: JSON.stringify(dto) },
   );
 
+// ── Class rescheduling — available slots (shared shape), student + teacher ────
+export interface RescheduleSlot { startsAt: string; endsAt: string; label: string }
+export interface RescheduleSlots {
+  durationMinutes: number;
+  cycleEnd: string;
+  days: { date: string; slots: RescheduleSlot[] }[];
+}
+export const fetchMyRescheduleSlots = (sessionId: string) =>
+  api<RescheduleSlots>(`/subscriptions/me/reschedule-slots?sessionId=${encodeURIComponent(sessionId)}`);
+
+// ── Teacher-initiated reschedule (needs academic-coach approval) ─────────────
+export interface TeacherReschedulableClass {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  student: { id: string; code: string; name: string } | null;
+  used: number;
+  limit: number;
+  left: number;
+  pending: boolean;
+}
+export const fetchTeacherReschedulable = () =>
+  api<TeacherReschedulableClass[]>("/subscriptions/teacher/reschedulable");
+export const fetchTeacherRescheduleSlots = (sessionId: string) =>
+  api<RescheduleSlots>(`/subscriptions/teacher/reschedule-slots?sessionId=${encodeURIComponent(sessionId)}`);
+export const teacherRequestReschedule = (dto: { sessionId: string; newStartsAt: string; reason?: string }) =>
+  api<{ id: string; status: string }>("/subscriptions/teacher/reschedule", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+// ── Staff: teacher reschedule requests (list + review) ───────────────────────
+export type RescheduleRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+export interface StaffRescheduleRequest {
+  id: string;
+  status: RescheduleRequestStatus;
+  oldStartsAt: string;
+  newStartsAt: string;
+  reason: string | null;
+  reviewNotes: string | null;
+  reviewedByName: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  student: { id: string; code: string; name: string } | null;
+  teacher: { id: string; name: string } | null;
+}
+export const fetchRescheduleRequests = (params: { status?: string } = {}) => {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  return api<StaffRescheduleRequest[]>(`/subscriptions/reschedule-requests?${q.toString()}`);
+};
+export const reviewRescheduleRequest = (id: string, dto: { approve: boolean; notes?: string }) =>
+  api<StaffRescheduleRequest>(`/subscriptions/reschedule-requests/${id}/review`, {
+    method: "PATCH",
+    body: JSON.stringify(dto),
+  });
+
+// Student-initiated reschedules (auto-applied) — read-only audit feed for staff.
+export interface StudentRescheduleLogEntry {
+  id: string;
+  createdAt: string;
+  description: string | null;
+  oldStartsAt: string | null;
+  newStartsAt: string | null;
+  actorName: string | null;
+  student: { id: string; code: string; name: string } | null;
+}
+export const fetchStudentReschedules = () =>
+  api<StudentRescheduleLogEntry[]>(`/subscriptions/reschedule-log`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Teacher Earnings & Salary (Module 6A/6B/6C/6D)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EarningSummary {
+  currency: string;
+  today: number;
+  week: number;
+  month: number;
+  pending: number;
+  paid: number;
+  unpaidClasses: number;
+}
+export interface EarningRow {
+  id: string;
+  date: string;
+  student: string | null;
+  course: string | null;
+  classType: "REGULAR" | "TRIAL" | "TRIAL_ENROLL_BONUS";
+  scheduledMinutes: number;
+  hourlyRate: number;
+  amount: number;
+  currency: string;
+  outcome: string;
+  paid: boolean;
+  settled: boolean;
+}
+export const fetchMyEarningsSummary = () => api<EarningSummary>(`/earnings/me/summary`);
+export const fetchMyEarnings = (limit = 100) => api<EarningRow[]>(`/earnings/me?limit=${limit}`);
+export const fetchTeacherEarnings = (teacherId: string) => api<EarningRow[]>(`/earnings/teacher/${teacherId}`);
+export const fetchTeacherEarningsSummary = (teacherId: string) => api<EarningSummary>(`/earnings/teacher/${teacherId}/summary`);
+
+// ── Teacher-absent reschedule tasks (6A scenario 3) ──
+export interface AbsenceTask {
+  id: string;
+  status: "PENDING" | "RESCHEDULED" | "DISMISSED";
+  classSessionId: string;
+  originalStartsAt: string;
+  rescheduledSessionId: string | null;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  teacher: { id: string; name: string } | null;
+  student: { id: string; code: string; name: string } | null;
+  course: string | null;
+}
+export const fetchAbsenceTasks = (status?: string) =>
+  api<AbsenceTask[]>(`/teacher-absences${status ? `?status=${status}` : ""}`);
+export const rescheduleAbsence = (id: string, newStartsAt: string) =>
+  api<unknown>(`/teacher-absences/${id}/reschedule`, { method: "POST", body: JSON.stringify({ newStartsAt }) });
+export const dismissAbsence = (id: string) =>
+  api<unknown>(`/teacher-absences/${id}/dismiss`, { method: "POST" });
+
+// ── Salary Management (6B) + Wise payment (6C) ──
+export type SalaryStatus = "CALCULATED" | "UNDER_REVIEW" | "ADJUSTMENT_APPLIED" | "APPROVED" | "PAID" | "FAILED";
+export interface SalaryRow {
+  id: string;
+  teacher: { id: string; code: string; name: string } | null;
+  monthLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  totalClasses: number;
+  regularEarnings: number;
+  trialEarnings: number;
+  bonusEarnings: number;
+  grossAmount: number;
+  adjustmentsTotal: number;
+  netAmount: number;
+  currency: string;
+  status: SalaryStatus;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  paidAt: string | null;
+  wiseReference: string | null;
+}
+export interface SalaryDetail extends SalaryRow {
+  recipient: { name: string | null; country: string | null; bank: string | null; iban: string | null; swift: string | null; wiseRecipientId: string | null; currency: string | null } | null;
+  failureReason: string | null;
+  adjustments: { id: string; type: "EXTRA_PAY" | "DEDUCTION"; amount: number; reason: string; by: string | null; at: string }[];
+  earnings: { id: string; date: string; classType: string; amount: number; outcome: string; paid: boolean }[];
+}
+export interface SalaryPaymentRow {
+  id: string;
+  amount: number;
+  currency: string;
+  reference: string | null;
+  status: "SUCCESS" | "FAILED";
+  failureReason: string | null;
+  by: string | null;
+  at: string;
+}
+export const calculateSalaries = (periodStart: string, periodEnd: string) =>
+  api<{ period: string; salariesCalculated: number }>(`/salary/calculate`, { method: "POST", body: JSON.stringify({ periodStart, periodEnd }) });
+export const fetchSalaries = (periodStart?: string) =>
+  api<SalaryRow[]>(`/salary${periodStart ? `?periodStart=${encodeURIComponent(periodStart)}` : ""}`);
+export const fetchSalaryDetail = (id: string) => api<SalaryDetail>(`/salary/${id}`);
+export const fetchSalaryPayments = (id: string) => api<SalaryPaymentRow[]>(`/salary/${id}/payments`);
+export const addSalaryAdjustment = (id: string, dto: { type: "EXTRA_PAY" | "DEDUCTION"; amount: number; reason: string }) =>
+  api<unknown>(`/salary/${id}/adjust`, { method: "POST", body: JSON.stringify(dto) });
+export const reviewSalary = (id: string) => api<unknown>(`/salary/${id}/review`, { method: "POST" });
+export const approveSalary = (id: string) => api<unknown>(`/salary/${id}/approve`, { method: "POST" });
+export const paySalary = (id: string) => api<{ status: string; reference?: string; failureReason?: string }>(`/salary/${id}/pay`, { method: "POST" });
+export interface PayoutDetails {
+  recipientName: string | null; payoutCountry: string | null; payoutBankName: string | null;
+  iban: string | null; swift: string | null; wiseRecipientId: string | null; payoutCurrency: string | null;
+  complete: boolean; missing: string[];
+}
+export const fetchPayoutDetails = (teacherId: string) => api<PayoutDetails>(`/salary/teacher/${teacherId}/payout-details`);
+export const updatePayoutDetails = (teacherId: string, dto: Partial<Omit<PayoutDetails, "complete" | "missing">>) =>
+  api<PayoutDetails>(`/salary/teacher/${teacherId}/payout-details`, { method: "PATCH", body: JSON.stringify(dto) });
+
+// ── Teacher-facing: my own Module-6 salary records (6C visibility) ──
+export interface MySalaryRow {
+  id: string;
+  monthLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  totalClasses: number;
+  regularEarnings: number;
+  trialEarnings: number;
+  bonusEarnings: number;
+  grossAmount: number;
+  adjustmentsTotal: number;
+  netAmount: number;
+  currency: string;
+  status: SalaryStatus;
+  approvedAt: string | null;
+  paidAt: string | null;
+  wiseReference: string | null;
+  failureReason: string | null;
+  adjustments: { id: string; type: "EXTRA_PAY" | "DEDUCTION"; amount: number; reason: string; at: string }[];
+  payments: { id: string; amount: number; currency: string; reference: string | null; status: "SUCCESS" | "FAILED"; at: string }[];
+}
+export const fetchMySalaries = () => api<MySalaryRow[]>(`/salary/me`);
+
+// ── Monthly reports (6D) + attendance analytics ──
+export type MonthlyReportStatus = "DRAFT" | "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED";
+export interface MonthlyReport {
+  id: string;
+  studentId: string;
+  student: { id: string; code: string; name: string } | null;
+  teacher: { id: string; name: string } | null;
+  monthLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  summary: string | null;
+  strengths: string | null;
+  areasToImprove: string | null;
+  recommendation: string | null;
+  attendanceNote: string | null;
+  status: MonthlyReportStatus;
+  submittedAt: string | null;
+  supervisorReviewedByName: string | null;
+  adminReviewedByName: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  reviewNotes: string | null;
+}
+export const fetchMyReports = (periodStart?: string) =>
+  api<MonthlyReport[]>(`/monthly-reports/me${periodStart ? `?periodStart=${encodeURIComponent(periodStart)}` : ""}`);
+export const saveMyReport = (dto: { studentId: string; periodStart: string; periodEnd: string; summary?: string; strengths?: string; areasToImprove?: string; recommendation?: string; attendanceNote?: string }) =>
+  api<MonthlyReport>(`/monthly-reports/me`, { method: "POST", body: JSON.stringify(dto) });
+export const submitMyReport = (id: string) => api<MonthlyReport>(`/monthly-reports/me/${id}/submit`, { method: "POST" });
+export const fetchStaffReports = (status?: string) =>
+  api<MonthlyReport[]>(`/monthly-reports${status ? `?status=${status}` : ""}`);
+export const supervisorReviewReport = (id: string) => api<unknown>(`/monthly-reports/${id}/supervisor-review`, { method: "POST" });
+export const adminReviewReport = (id: string) => api<unknown>(`/monthly-reports/${id}/admin-review`, { method: "POST" });
+export const approveReport = (id: string) => api<unknown>(`/monthly-reports/${id}/approve`, { method: "POST" });
+export const rejectReport = (id: string, notes?: string) => api<unknown>(`/monthly-reports/${id}/reject`, { method: "POST", body: JSON.stringify({ notes }) });
+export interface TeacherAttendanceAnalyticsRow {
+  teacher: { id: string; code?: string; name?: string };
+  totalClasses: number;
+  present: number;
+  late: number;
+  absent: number;
+  avgLateMinutes: number;
+  punctualityPct: number;
+  attendanceRatePct: number;
+}
+export interface ReportsGate { pending: number; approved: number; clear: boolean }
+export const fetchReportsGate = (teacherId: string, periodStart: string) =>
+  api<ReportsGate>(`/monthly-reports/gate/${teacherId}?periodStart=${encodeURIComponent(periodStart)}`);
+export const fetchTeacherAttendanceAnalytics = (periodStart?: string, periodEnd?: string) => {
+  const q = new URLSearchParams();
+  if (periodStart) q.set("periodStart", periodStart);
+  if (periodEnd) q.set("periodEnd", periodEnd);
+  return api<TeacherAttendanceAnalyticsRow[]>(`/monthly-reports/attendance-analytics?${q.toString()}`);
+};
+
 // Staff: a student's current subscription (for the student hub / approval screen).
 export const fetchStudentSubscription = (studentId: string) =>
   api<CurrentSubscription>(`/subscriptions/student/${studentId}`);
@@ -4285,6 +4582,55 @@ export const setStudentBillingCurrency = (studentId: string, currency: Currency)
   api<{ billingCurrency: Currency }>(`/student-management/${studentId}/billing-currency`, {
     method: "PATCH",
     body: JSON.stringify({ currency }),
+  });
+
+// Staff: raise a break on a student's behalf (phone / WhatsApp / chat).
+export const requestBreakForStudent = (
+  studentId: string,
+  dto: { startDate: string; endDate: string; reason?: string },
+) =>
+  api<StaffSubscriptionRequest>(`/subscriptions/student/${studentId}/break`, {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+
+// ── AC "Modify Schedule" with an explicit scope ─────────────────────────────
+export type ModifyScheduleScope = "CURRENT_REMAINING" | "CURRENT_AND_NEXT" | "NEXT_ONLY";
+export interface ModifyScheduleInput {
+  scope: ModifyScheduleScope;
+  days?: string[];
+  time?: string;
+  teacherId?: string;
+  reason?: string;
+}
+export interface ModifySchedulePreview {
+  scope: ModifyScheduleScope;
+  batch: { id: string; name: string; days: string[]; startTime: string | null; teacherId: string | null };
+  newDays: string[];
+  newTime: string;
+  newTeacherId: string | null;
+  teacherChanged: boolean;
+  otherStudentsInBatch: number;
+  affectedCount: number;
+  availabilityWarnings: string[];
+  teacherClashes: { name: string; days: string[] }[];
+  studentClashes: { name: string; days: string[] }[];
+}
+export interface ModifyScheduleResult {
+  scope: ModifyScheduleScope;
+  cancelled: number;
+  created: number;
+  applied: string[];
+}
+export const previewModifySchedule = (studentId: string, dto: ModifyScheduleInput) =>
+  api<ModifySchedulePreview>(`/subscriptions/student/${studentId}/modify-schedule/preview`, {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
+export const modifyStudentSchedule = (studentId: string, dto: ModifyScheduleInput) =>
+  api<ModifyScheduleResult>(`/subscriptions/student/${studentId}/modify-schedule`, {
+    method: "POST",
+    body: JSON.stringify(dto),
   });
 
 // Staff: migrate a student to another subscription model/plan, keeping history.

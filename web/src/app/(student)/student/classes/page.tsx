@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Calendar,
+  CalendarClock,
   CheckCircle2,
   Clock,
   ExternalLink,
@@ -22,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { fetchStudentClasses, attendStudentClass } from "@/lib/api";
 
 export default function StudentClasses() {
+  const router = useRouter();
   const [classes, setClasses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
@@ -195,15 +198,25 @@ export default function StudentClasses() {
                       </div>
                     </div>
 
-                    {/* Join button */}
+                    {/* Join + reschedule buttons */}
                     {!isPast && (
-                      <div className="pt-2">
+                      <div className="pt-2 flex flex-wrap items-center gap-2">
                         <Button
                           onClick={() => handleJoinClass(item.id, item.link)}
                           className="bg-accent hover:bg-accent-hover text-white text-xs font-extrabold h-9 px-4.5 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm shadow-accent/10"
                         >
                           <ExternalLink className="size-3.5" />
                           Join Classroom
+                        </Button>
+                        {/* Deep-links to the subscription page with this class
+                            pre-selected in the reschedule picker. */}
+                        <Button
+                          variant="ghost"
+                          onClick={() => router.push(`/student/subscription?reschedule=${item.id}#reschedule`)}
+                          className="border border-hairline bg-surface text-ink-2 hover:bg-surface-2 text-xs font-extrabold h-9 px-4 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <CalendarClock className="size-3.5" />
+                          Reschedule
                         </Button>
                       </div>
                     )}

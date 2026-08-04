@@ -20,9 +20,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   fetchTeacherRoleDashboard,
+  fetchMyEarningsSummary,
   type DashboardRange,
   type ResolvedWidget,
   type TeacherDashboard,
+  type EarningSummary,
 } from "@/lib/api";
 import { WidgetCard, WidgetGrid, useMyWidgets } from "../widget-grid";
 import { DashboardSkeleton, EmptyState, Kpi, KpiGrid, ListRow, RangePicker } from "../primitives";
@@ -286,11 +288,47 @@ export function TeacherPanel() {
   if (!widgets || !data) return <DashboardSkeleton />;
 
   return (
-    <WidgetGrid
-      widgets={widgets}
-      onWidgetsChange={setWidgets}
-      render={render}
-      toolbar={<RangePicker value={range} onChange={setRange} disabled={loading} />}
-    />
+    <div className="space-y-4">
+      <EarningsStrip />
+      <WidgetGrid
+        widgets={widgets}
+        onWidgetsChange={setWidgets}
+        render={render}
+        toolbar={<RangePicker value={range} onChange={setRange} disabled={loading} />}
+      />
+    </div>
+  );
+}
+
+/* Earnings-at-a-glance (spec 6A step 6). Fixed strip above the arrangeable
+ * widgets — today / week / month / pending / paid, linking to the full ledger. */
+function EarningsStrip() {
+  const [s, setS] = useState<EarningSummary | null>(null);
+  useEffect(() => { fetchMyEarningsSummary().then(setS).catch(() => undefined); }, []);
+  if (!s) return null;
+  const c = s.currency ?? "USD";
+  const money = (n: number) => `${c} ${n.toFixed(2)}`;
+  const items = [
+    { label: "Today", value: money(s.today) },
+    { label: "This week", value: money(s.week) },
+    { label: "This month", value: money(s.month) },
+    { label: "Pending salary", value: money(s.pending) },
+    { label: "Paid salary", value: money(s.paid) },
+  ];
+  return (
+    <Link href="/teacher/earnings" className="block rounded-2xl border border-hairline bg-surface p-4 shadow-sm transition-colors hover:bg-surface-2/40">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-extrabold uppercase tracking-wider text-ink-3">My Earnings</h3>
+        <span className="text-[11px] font-bold text-accent">View ledger →</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {items.map((k) => (
+          <div key={k.label}>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-3">{k.label}</p>
+            <p className="mt-0.5 text-base font-black text-ink">{k.value}</p>
+          </div>
+        ))}
+      </div>
+    </Link>
   );
 }

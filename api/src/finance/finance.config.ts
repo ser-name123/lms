@@ -12,6 +12,11 @@ export interface FinanceConfig {
   overdueReminders: boolean;
   autoInvoice: boolean; // auto-generate recurring invoices
   salaryDayOfMonth: number; // 1..28 — day the payroll run is generated
+  // ── Teacher Earnings (Module 6A) — admin-configurable payout amounts ──
+  teacherEarningsEnabled: boolean; // compute per-class earnings on completion
+  earningsCurrency: string; // currency earnings are booked in
+  trialClassPayout: number; // paid to the teacher for a completed trial class
+  trialEnrollBonus: number; // extra paid when that trial's student enrolls (optional)
 }
 
 export const DEFAULT_FINANCE_CONFIG: FinanceConfig = {
@@ -22,6 +27,10 @@ export const DEFAULT_FINANCE_CONFIG: FinanceConfig = {
   overdueReminders: true,
   autoInvoice: true,
   salaryDayOfMonth: 1,
+  teacherEarningsEnabled: true,
+  earningsCurrency: 'USD',
+  trialClassPayout: 1,
+  trialEnrollBonus: 1,
 };
 
 export const FEE_COMPONENT_TYPES: FeeComponentType[] = [

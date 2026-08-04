@@ -55,6 +55,15 @@ enum ClassStatus {
   CANCELLED
 }
 
+// A teacher-initiated class reschedule. Student reschedules apply immediately
+// (auto-approved); a teacher's must be approved by an academic coach first, so
+// they are queued here. PENDING → APPROVED (class moved) or REJECTED.
+enum ClassRescheduleStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum BatchStatus {
   ACTIVE
   PAUSED
@@ -276,6 +285,11 @@ enum SubscriptionRequestType {
   // Monthly Package → Hourly Subscription). Applied at the next cycle like any
   // other change, so historical invoices/attendance stay on the old model.
   MODEL_CHANGE
+  // A student (or a coach on their behalf) pausing the subscription for a fixed
+  // window. Approved like any other request, but it does NOT queue a next-cycle
+  // change — it schedules a break window the cron applies (status ON_BREAK,
+  // classes paused, cycle extended) at the start date and resolves at the end.
+  BREAK_REQUEST
 }
 
 // How a subscription model prices a student. This is the ONLY axis code branches
@@ -292,6 +306,7 @@ enum StudentSubscriptionStatus {
   PENDING_PAYMENT // enrolled, invoice raised, awaiting first payment — no classes/teacher block yet
   ACTIVE
   PAUSED
+  ON_BREAK // an approved break is currently running — classes paused, cycle extended, slot reserved
   ENDED // superseded by a migration, or cancelled
 }
 
@@ -326,6 +341,12 @@ model SubscriptionRequest {
   requestedDays      String[]  @default([])
   requestedTime      String? // "18:00", same shape as Batch.startTime
   requestedStartDate DateTime?
+
+  // BREAK_REQUEST — the window the family asked to pause for. Kept on the request
+  // as the record of what was asked; the approved window is copied onto the
+  // subscription, where the cron reads it.
+  breakStartDate DateTime?
+  breakEndDate   DateTime?
   // Which batch the change is for, and — when others share it — the batch the
   // coach moves this student into instead of rewriting everyone's timetable.
   batchId       String?
@@ -364,6 +385,9 @@ model SubscriptionNextCycle {
   nextTime      String?
   nextStartDate DateTime?
   nextBatchId   String?
+  // A teacher change queued for the next cycle (AC "Modify Schedule → Next cycle
+  // only" with a new teacher). Applied by retiming the batch's teacher at rollover.
+  nextTeacherId String?
 
   updatedAt DateTime @updatedAt
 }
@@ -430,6 +454,15 @@ model TeacherProfile {
   // ── System-generated rating (0..5, cached) ──
   rating      Float?
   ratingCount Int?
+
+  // ── Teacher Salary Payment (Wise): payout recipient details (admin-editable) ──
+  payoutCurrency  String? // currency the teacher is paid in (e.g. USD)
+  recipientName   String? // name on the receiving bank account
+  payoutCountry   String?
+  payoutBankName  String?
+  iban            String? // IBAN or account number
+  swift           String? // SWIFT / BIC
+  wiseRecipientId String? // Wise recipient id, once created
 
   // Archived teachers are hidden from active management but not deleted.
   archived Boolean @default(false)
@@ -605,8 +638,11 @@ model StudentSubscription {
   remainingClasses  Int     @default(0)
   completedClasses  Int     @default(0)
   minutesUsed       Int     @default(0) // taught minutes consumed this cycle; reset at cycle close
-  rescheduleCounter Int     @default(0) // resets each billing cycle
-  rescheduleLimit   Int     @default(0) // snapshot from the plan
+  rescheduleCounter Int     @default(0) // student's own reschedules this cycle
+  rescheduleLimit   Int     @default(0) // snapshot from the plan (Simple 0 / Essential 2 / Premium 4 / Elite 6)
+  // The assigned teacher's reschedules of THIS student this cycle, capped at 2.
+  // Per-student because a student has one teacher; resets each cycle like the above.
+  teacherRescheduleCounter Int @default(0)
   familyDiscountPct Decimal @default(0) @db.Decimal(5, 2)
 
   batchId         String? // the recurring-schedule Batch (plain id) — set only on activation
@@ -618,6 +654,13 @@ model StudentSubscription {
   pendingTime        String?
   pendingTeacherId   String?
   preferredStartDate DateTime? // the family's requested commencement date (preferred, not actual)
+
+  // Approved break window (set on approval; read by the break cron). While a
+  // break runs, status is ON_BREAK. Cleared on resume. The window's duration is
+  // added to renewalDate + the fee assignment's nextRunAt so billing is postponed
+  // rather than lost, and the reserved batch is kept untouched throughout.
+  breakStartDate DateTime?
+  breakEndDate   DateTime?
 
   status    StudentSubscriptionStatus @default(ACTIVE)
   createdAt DateTime                  @default(now())
@@ -723,6 +766,37 @@ model ClassAttendee {
 
   @@unique([classId, studentId])
   @@index([studentId])
+}
+
+// A teacher's request to move one class of one student, awaiting academic-coach
+// approval. Plain-id soft FKs (like the rest of the scheduling code) so no back
+// relations are added to ClassSession/TeacherProfile/StudentProfile. Old/new
+// times are snapshotted so the audited before→after stays readable even if the
+// class is later moved again.
+model ClassRescheduleRequest {
+  id             String                @id @default(uuid())
+  classSessionId String
+  studentId      String
+  teacherId      String // TeacherProfile id
+  requestedById  String // the teacher's User id
+  oldStartsAt    DateTime
+  oldEndsAt      DateTime
+  newStartsAt    DateTime
+  newEndsAt      DateTime
+  reason         String?
+  status         ClassRescheduleStatus @default(PENDING)
+  reviewedById   String?
+  reviewedByName String?
+  reviewedAt     DateTime?
+  reviewNotes    String?
+  appliedAt      DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([status])
+  @@index([studentId, status])
+  @@index([teacherId, studentId])
+  @@index([classSessionId])
 }
 
 // ─── Batches (a scheduled cohort of a course, with one teacher + N students) ───
@@ -1482,6 +1556,200 @@ model Payout {
   studentsCount Int?
 
   @@index([userId])
+  @@index([status])
+}
+
+// ─── Teacher Earnings & Salary (Modules 6A / 6B / 6C / 6D) ───────────────────
+// Self-contained per-class earnings ledger + monthly salary consolidation, kept
+// separate from the legacy Payout/PayrollConfig batch payroll so neither breaks.
+// Soft FKs (plain id columns, no relations) matching the app convention.
+
+enum EarningClassType {
+  REGULAR
+  TRIAL
+  TRIAL_ENROLL_BONUS
+}
+
+// How attendance resolved for the class the earning is derived from (spec 6A).
+enum EarningAttendanceOutcome {
+  COMPLETED        // student + teacher present → paid
+  STUDENT_NO_SHOW  // teacher present, student absent → paid
+  TEACHER_ABSENT   // teacher absent → NOT paid, earnings 0
+  BOTH_NO_SHOW     // both absent → NOT paid, student marked absent
+}
+
+model TeacherEarning {
+  id               String                   @id @default(uuid())
+  teacherId        String                   // TeacherProfile.id
+  classSessionId   String?                  @unique // one earning per regular class (idempotency)
+  leadTrialId      String?                  // trial the earning derives from (payout + optional enrol bonus)
+  studentId        String?                  // StudentProfile.id
+  courseId         String?
+  classType        EarningClassType         @default(REGULAR)
+  scheduledMinutes Int                      @default(0)
+  hourlyRate       Decimal                  @default(0) @db.Decimal(10, 2)
+  amount           Decimal                  @default(0) @db.Decimal(10, 2)
+  currency         String                   @default("USD")
+  outcome          EarningAttendanceOutcome
+  paid             Boolean                  @default(false) // did the teacher earn (false when absent)
+  salaryId         String?                  // consolidated into which TeacherSalary
+  earnedAt         DateTime                 @default(now())
+  createdAt        DateTime                 @default(now())
+
+  // One TRIAL payout and one TRIAL_ENROLL_BONUS may both reference a trial, but
+  // neither may duplicate. NULLs (regular classes) are distinct in Postgres.
+  @@unique([leadTrialId, classType])
+  @@index([teacherId, earnedAt])
+  @@index([salaryId])
+  @@index([teacherId, paid])
+}
+
+enum TeacherAbsenceStatus {
+  PENDING
+  RESCHEDULED
+  DISMISSED
+}
+
+// Teacher-absent classes (spec 6A scenario 3): a task list the Academic Coach
+// works through to reschedule the missed class.
+model TeacherAbsenceTask {
+  id                   String               @id @default(uuid())
+  classSessionId       String               @unique
+  teacherId            String
+  studentId            String?
+  courseId             String?
+  originalStartsAt     DateTime
+  status               TeacherAbsenceStatus @default(PENDING)
+  rescheduledSessionId String?
+  resolvedById         String?
+  resolvedByName       String?
+  resolvedAt           DateTime?
+  createdAt            DateTime             @default(now())
+
+  @@index([status])
+  @@index([teacherId, status])
+}
+
+enum SalaryStatus {
+  CALCULATED
+  UNDER_REVIEW
+  ADJUSTMENT_APPLIED
+  APPROVED
+  PAID
+  FAILED
+}
+
+model TeacherSalary {
+  id               String       @id @default(uuid())
+  teacherId        String       // TeacherProfile.id
+  periodStart      DateTime
+  periodEnd        DateTime
+  monthLabel       String       // "June 2026"
+  totalClasses     Int          @default(0)
+  trialEarnings    Decimal      @default(0) @db.Decimal(10, 2)
+  regularEarnings  Decimal      @default(0) @db.Decimal(10, 2)
+  bonusEarnings    Decimal      @default(0) @db.Decimal(10, 2)
+  grossAmount      Decimal      @default(0) @db.Decimal(10, 2)
+  adjustmentsTotal Decimal      @default(0) @db.Decimal(10, 2)
+  netAmount        Decimal      @default(0) @db.Decimal(10, 2)
+  currency         String       @default("USD")
+  status           SalaryStatus @default(CALCULATED)
+  approvedById     String?
+  approvedByName   String?
+  approvedAt       DateTime?
+  // Payment (Wise) outcome mirrored onto the salary for quick display.
+  paidAt           DateTime?
+  wiseReference    String?
+  failureReason    String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([teacherId, periodStart])
+  @@index([status])
+  @@index([periodStart])
+}
+
+enum SalaryAdjustmentType {
+  EXTRA_PAY
+  DEDUCTION
+}
+
+// Itemised salary adjustment (spec 6B step 4) — each with its own reason, audited.
+model SalaryAdjustment {
+  id           String               @id @default(uuid())
+  salaryId     String
+  type         SalaryAdjustmentType
+  amount       Decimal              @db.Decimal(10, 2)
+  reason       String
+  createdById  String?
+  createdByName String?
+  createdAt    DateTime             @default(now())
+
+  @@index([salaryId])
+}
+
+enum SalaryPaymentStatus {
+  SUCCESS
+  FAILED
+}
+
+// Every Wise payment attempt (spec 6C step 5 payment history) — retries append.
+model SalaryPayment {
+  id              String              @id @default(uuid())
+  salaryId        String
+  teacherId       String
+  amount          Decimal             @db.Decimal(10, 2)
+  currency        String              @default("USD")
+  reference       String?             // Wise transaction reference
+  status          SalaryPaymentStatus
+  failureReason   String?
+  attemptedById   String?
+  attemptedByName String?
+  attemptedAt     DateTime            @default(now())
+
+  @@index([salaryId])
+  @@index([teacherId])
+}
+
+enum MonthlyReportStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+// Teacher's monthly progress report per student (spec 6D): teacher submits →
+// supervisor + admin review → supervisor approves → salary cycle can finalise.
+model TeacherMonthlyReport {
+  id             String              @id @default(uuid())
+  teacherId      String              // TeacherProfile.id
+  studentId      String              // StudentProfile.id
+  periodStart    DateTime
+  periodEnd      DateTime
+  monthLabel     String
+  summary        String?
+  strengths      String?
+  areasToImprove String?
+  recommendation String?
+  attendanceNote String?
+  status         MonthlyReportStatus @default(DRAFT)
+  submittedAt    DateTime?
+  supervisorReviewedById   String?
+  supervisorReviewedByName String?
+  supervisorReviewedAt     DateTime?
+  adminReviewedById        String?
+  adminReviewedByName      String?
+  adminReviewedAt          DateTime?
+  approvedById   String?
+  approvedByName String?
+  approvedAt     DateTime?
+  reviewNotes    String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([teacherId, studentId, periodStart])
+  @@index([teacherId, periodStart])
   @@index([status])
 }
 

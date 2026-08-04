@@ -28,6 +28,9 @@ import { TeacherRegistrationsModule } from './teacher-registrations/teacher-regi
 import { NotificationsModule } from './notifications/notifications.module';
 import { LeadsModule } from './leads/leads.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { EarningsModule } from './earnings/earnings.module';
+import { SalaryModule } from './salary/salary.module';
+import { ReportsModule } from './reports/reports.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { TeacherManagementModule } from './teacher-management/teacher-management.module';
 import { StudentManagementModule } from './student-management/student-management.module';
@@ -66,6 +69,9 @@ import { PaymentsModule } from './payments/payments.module';
     NotificationsModule,
     LeadsModule,
     AttendanceModule,
+    EarningsModule,
+    SalaryModule,
+    ReportsModule,
 
     SubscriptionsModule,
     TeacherManagementModule,

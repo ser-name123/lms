@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -33,18 +33,62 @@ import { useUI } from "@/store/ui";
 import { useSettingsStore } from "@/store/settings";
 import { useAuth } from "@/store/auth";
 import { cn } from "@/lib/utils";
+import { fetchUnreadCount } from "@/lib/api";
+
+/*
+ * Live unread-notification count for the shared sidebar. The Topbar bell already
+ * shows this, but the bell lives per-page; the sidebar is always rendered by the
+ * shell, so surfacing the count here keeps notification visibility consistent on
+ * every admin/coach/supervisor page — including any that omit a Topbar. Called
+ * once in Sidebar() and passed down, so there is a single poller (not one per
+ * nav item).
+ *
+ * Deliberately NOT wired to the SSE stream: the bell already holds one stream
+ * connection per tab, and opening a second just to refresh a count would double
+ * every user's long-lived connection. The bell stays the real-time authority;
+ * this badge refreshes on a 60s poll (paused when hidden), on tab re-focus, and
+ * on every route change — navigation is frequent in the panel, so it stays fresh.
+ */
+function useUnreadCount(pathname: string) {
+  const [count, setCount] = useState(0);
+  const load = useCallback(
+    () => fetchUnreadCount().then((r) => setCount(r.count)).catch(() => undefined),
+    [],
+  );
+  useEffect(() => {
+    load();
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 60_000);
+    const onVisible = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
+  // Refresh on navigation — e.g. after opening /notifications and marking read.
+  useEffect(() => { void load(); }, [pathname, load]);
+  return count;
+}
 
 function SidebarItem({
   item,
   pathname,
   sidebarCollapsed,
   setMobileNav,
+  unreadCount = 0,
 }: {
   item: NavItem;
   pathname: string;
   sidebarCollapsed: boolean;
   setMobileNav: (open: boolean) => void;
+  unreadCount?: number;
 }) {
+  // Live unread badge on the notifications link (any role's list). Static
+  // item.badge (if a nav item ever sets one) is left to its own rendering.
+  const showUnread = item.href === "/notifications" && unreadCount > 0;
+  const unreadLabel = unreadCount > 9 ? "9+" : String(unreadCount);
   const hasActiveChild = item.children?.some(
     (child) => pathname === child.href || pathname.startsWith(`${child.href}/`)
   );
@@ -154,20 +198,30 @@ function SidebarItem({
         {active && (
           <span className="absolute left-1.5 h-5 w-1 rounded-full bg-white" />
         )}
-        <Icon
-          className={cn(
-            "size-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110",
-            active ? "text-white" : "text-sidebar-text/80 group-hover:text-white"
+        <span className="relative shrink-0">
+          <Icon
+            className={cn(
+              "size-4.5 transition-transform duration-200 group-hover:scale-110",
+              active ? "text-white" : "text-sidebar-text/80 group-hover:text-white"
+            )}
+          />
+          {/* Collapsed: the count has nowhere to sit, so a red dot signals unread. */}
+          {showUnread && sidebarCollapsed && (
+            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-critical ring-2 ring-sidebar" />
           )}
-        />
+        </span>
         {!sidebarCollapsed && (
           <>
             <span className="truncate">{item.label}</span>
-            {item.badge && (
+            {showUnread ? (
+              <span className="tnum ml-auto grid min-w-[18px] place-items-center rounded-md bg-critical px-1 py-0.5 text-[10px] font-black text-white">
+                {unreadLabel}
+              </span>
+            ) : item.badge ? (
               <span className="tnum ml-auto rounded-md bg-sidebar-active/50 px-1.5 py-0.5 text-[10px] font-bold text-white border border-sidebar-border">
                 {item.badge}
               </span>
-            )}
+            ) : null}
           </>
         )}
       </Link>
@@ -180,6 +234,8 @@ export function Sidebar() {
   const { settings } = useSettingsStore();
   const { user } = useAuth();
   const pathname = usePathname();
+  // Single poller for the whole sidebar; passed to each item, shown on /notifications.
+  const unreadCount = useUnreadCount(pathname);
 
   const coachNavItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -191,6 +247,9 @@ export function Sidebar() {
     // over it, so anything added for admins has to be added here too or a coach
     // simply never sees it. This is one they decide, so it belongs in both.
     { label: "Subscription Requests", href: "/subscription-requests", icon: ClipboardList },
+    { label: "Reschedule Requests", href: "/reschedule-requests", icon: ClipboardList },
+    { label: "Teacher Absences", href: "/teacher-absences", icon: ClipboardList },
+    { label: "Monthly Reports", href: "/monthly-reports", icon: ClipboardList },
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
@@ -226,6 +285,16 @@ export function Sidebar() {
     { label: "Recruitment", href: "/recruitment", icon: Users },
     { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },
+    // Read-only monitoring — supervisors are notified of subscription/break
+    // requests (§8.4) and can review the queue, but approve/reject stays with
+    // admins and coaches (enforced by @Roles on the API).
+    { label: "Subscription Requests", href: "/subscription-requests", icon: ClipboardList },
+    { label: "Reschedule Requests", href: "/reschedule-requests", icon: ClipboardList },
+    // Read-only monitoring of monthly reports (supervisor reviews/approves) and
+    // salaries (approve/pay stays admin-only, enforced by @Roles on the API).
+    { label: "Monthly Reports", href: "/monthly-reports", icon: ClipboardList },
+    { label: "Salary Management", href: "/salary", icon: Wallet },
+    { label: "Finance", href: "/finance", icon: Wallet },
     { label: "Messages", href: "/chat", icon: MessageCircle },
     { label: "Support", href: "/support", icon: HelpCircle },
   ];
@@ -295,6 +364,7 @@ export function Sidebar() {
                   pathname={pathname}
                   sidebarCollapsed={sidebarCollapsed}
                   setMobileNav={setMobileNav}
+                  unreadCount={unreadCount}
                 />
               ))}
             </ul>
@@ -307,6 +377,7 @@ export function Sidebar() {
                   pathname={pathname}
                   sidebarCollapsed={sidebarCollapsed}
                   setMobileNav={setMobileNav}
+                  unreadCount={unreadCount}
                 />
               ))}
             </ul>
@@ -326,6 +397,7 @@ export function Sidebar() {
                       pathname={pathname}
                       sidebarCollapsed={sidebarCollapsed}
                       setMobileNav={setMobileNav}
+                      unreadCount={unreadCount}
                     />
                   ))}
                 </ul>

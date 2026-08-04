@@ -37,6 +37,15 @@ export class FinanceAutomationService implements OnModuleInit {
     } catch (e) {
       this.logger.warn(`overdue sweep failed: ${(e as Error).message}`);
     }
+    // Start/resume subscription breaks BEFORE renewals: a break that should have
+    // resumed today must be ACTIVE again before the renewal pass considers it,
+    // and one starting today must flip to ON_BREAK so the renewal pass skips it.
+    try {
+      const { started, resumed } = await this.subscriptions.processBreaks(new Date());
+      if (started || resumed) this.logger.log(`Breaks: ${started} started, ${resumed} resumed.`);
+    } catch (e) {
+      this.logger.warn(`break sweep failed: ${(e as Error).message}`);
+    }
     if (cfg.autoInvoice) {
       try {
         await this.generateDueRecurring();

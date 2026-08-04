@@ -26,7 +26,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TrialReportPanel } from "@/components/leads/trial-report";
 import { isTrialClosed } from "@/components/leads/lead-meta";
-import { fetchTeacherClasses, fetchMyTrials, setTrialStatus } from "@/lib/api";
+import {
+  fetchTeacherClasses,
+  fetchMyTrials,
+  setTrialStatus,
+  fetchTeacherReschedulable,
+  fetchTeacherRescheduleSlots,
+  teacherRequestReschedule,
+  type TeacherReschedulableClass,
+  type RescheduleSlots,
+} from "@/lib/api";
 
 const swalBg = () =>
   typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff";
@@ -182,7 +191,9 @@ export default function TeacherClasses() {
       <Topbar title="My Schedule" subtitle="Schedule lists and past webinar history logs" />
 
       <main className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-full mx-auto">
-        
+
+        <TeacherRescheduleCard onDone={loadData} />
+
         {nextClass && (
           <Card className="border border-accent/25 bg-surface rounded-3xl p-6 shadow-sm relative overflow-hidden bg-gradient-to-r from-accent/5 to-transparent">
             {/* Subtle background glow decorator */}
@@ -550,5 +561,133 @@ function CountdownTimer({ targetDate }: { targetDate: string }) {
     <span className="font-mono text-[10px] font-black bg-accent/10 text-accent px-2.5 py-0.5 rounded-full animate-pulse border border-accent/25">
       {timeLeft}
     </span>
+  );
+}
+
+// Teacher-initiated class reschedule (needs academic-coach approval).
+function TeacherRescheduleCard({ onDone }: { onDone: () => void }) {
+  const [rows, setRows] = useState<TeacherReschedulableClass[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [pick, setPick] = useState("");
+  const [slots, setSlots] = useState<RescheduleSlots | null>(null);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [dateIdx, setDateIdx] = useState("");
+  const [chosen, setChosen] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    fetchTeacherReschedulable()
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => load(), []);
+
+  useEffect(() => {
+    setSlots(null); setDateIdx(""); setChosen("");
+    if (!pick) return;
+    setSlotsLoading(true);
+    fetchTeacherRescheduleSlots(pick)
+      .then((s) => { setSlots(s); setDateIdx(s.days[0]?.date ?? ""); })
+      .catch(() => setSlots(null))
+      .finally(() => setSlotsLoading(false));
+  }, [pick]);
+
+  const selected = rows.find((r) => r.id === pick);
+  const fmt = (v: string) => new Date(v).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const fmtDay = (d: string) => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "short", timeZone: "UTC" });
+  const daySlots = slots?.days.find((d) => d.date === dateIdx)?.slots ?? [];
+  const eligible = rows.filter((r) => !r.pending && r.left > 0);
+
+  const submit = async () => {
+    if (!pick || !chosen) return;
+    setBusy(true);
+    try {
+      await teacherRequestReschedule({ sessionId: pick, newStartsAt: chosen, reason: reason.trim() || undefined });
+      await Swal.fire({ title: "Request submitted", text: "Your academic coach will review the reschedule. The class stays put until it is approved.", icon: "success", background: swalBg(), confirmButtonColor: "#10b981" });
+      setPick(""); setChosen(""); setReason(""); setOpen(false);
+      load();
+      onDone();
+    } catch (e) {
+      Swal.fire({ title: "Could not submit", text: e instanceof Error ? e.message : "Please try again.", icon: "error", background: swalBg() });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="border border-hairline bg-surface rounded-3xl p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-ink flex items-center gap-2"><Clock className="size-4 text-accent" /> Request a class reschedule</h3>
+          <p className="mt-0.5 text-[11px] text-ink-3">Up to 2 per student each billing cycle · at least 4 hours' notice · academic-coach approval required.</p>
+        </div>
+        <Button onClick={() => setOpen((o) => !o)} className="h-9 rounded-xl bg-accent px-4 text-xs font-bold text-white hover:opacity-90">
+          {open ? "Close" : "Request Reschedule"}
+        </Button>
+      </div>
+
+      {open && (
+        <div className="mt-4 space-y-3 border-t border-hairline pt-4">
+          {loading ? (
+            <div className="flex items-center gap-2 py-3 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Loading your classes…</div>
+          ) : !eligible.length ? (
+            <p className="rounded-xl border border-hairline bg-surface-2/40 p-3 text-xs text-ink-3">No classes are available to reschedule right now (limit reached, already pending, or none upcoming).</p>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Class to move</label>
+                <select value={pick} onChange={(e) => setPick(e.target.value)} disabled={busy}
+                  className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+                  <option value="">— Choose a class —</option>
+                  {eligible.map((r) => (
+                    <option key={r.id} value={r.id}>{fmt(r.startsAt)} · {r.student?.name ?? "Student"} · {r.left}/{r.limit} left</option>
+                  ))}
+                </select>
+                {selected && <p className="mt-1 text-[11px] text-ink-3">{selected.left} of {selected.limit} reschedules left for {selected.student?.name} this cycle.</p>}
+              </div>
+
+              {pick && (slotsLoading ? (
+                <div className="flex items-center gap-2 py-2 text-xs font-bold text-ink-3"><Loader2 className="size-4 animate-spin text-accent" /> Finding available slots…</div>
+              ) : !slots || !slots.days.length ? (
+                <p className="rounded-lg border border-hairline bg-surface-2/40 p-3 text-xs text-ink-3">No available slots within the student's current cycle.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Available date</label>
+                    <select value={dateIdx} onChange={(e) => { setDateIdx(e.target.value); setChosen(""); }} disabled={busy}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+                      {slots.days.map((d) => <option key={d.date} value={d.date}>{fmtDay(d.date)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Available time</label>
+                    <select value={chosen} onChange={(e) => setChosen(e.target.value)} disabled={busy}
+                      className="h-10 w-full rounded-xl border border-hairline bg-surface px-3 text-sm text-ink focus:outline-none focus:border-accent">
+                      <option value="">— Choose a time —</option>
+                      {daySlots.map((s) => <option key={s.startsAt} value={s.startsAt}>{s.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              ))}
+
+              <div>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">Reason (optional)</label>
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} disabled={busy}
+                  className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent" />
+              </div>
+
+              <Button onClick={submit} disabled={busy || !pick || !chosen}
+                className="h-10 rounded-xl bg-accent px-4 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50">
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Submit for approval
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

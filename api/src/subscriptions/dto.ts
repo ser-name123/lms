@@ -29,6 +29,81 @@ export class RequestPackageChangeDto {
   @IsNotEmpty()
   packageId!: string;
 
+  /*
+   * A package change can carry a new schedule too: on a bigger package the
+   * family picks the days and time that suit the new class count, chosen from
+   * their current teacher's availability. Optional — a change that keeps the
+   * same timetable leaves both blank. Validated against the teacher's hours the
+   * same way a schedule change is.
+   */
+  @ApiPropertyOptional({ enum: WEEKDAYS, isArray: true })
+  @IsOptional()
+  @IsArray()
+  @IsIn(WEEKDAYS, { each: true })
+  days?: string[];
+
+  @ApiPropertyOptional({ example: '18:00' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'time must be HH:mm, e.g. 18:00' })
+  time?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
+}
+
+export class RequestBreakDto {
+  @ApiProperty({ description: 'First day of the break (ISO date)' })
+  @IsString()
+  @IsNotEmpty()
+  startDate!: string;
+
+  @ApiProperty({ description: 'Day the break ends and classes resume (ISO date)' })
+  @IsString()
+  @IsNotEmpty()
+  endDate!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
+}
+
+const MODIFY_SCOPES = ['CURRENT_REMAINING', 'CURRENT_AND_NEXT', 'NEXT_ONLY'] as const;
+
+export class ModifyScheduleDto {
+  /*
+   * How far the change reaches — the flow's explicit scope dialog:
+   *  CURRENT_REMAINING — only the remaining classes of the current cycle; next
+   *                      cycle reverts to the batch's stored pattern.
+   *  CURRENT_AND_NEXT  — current remaining AND permanent (rewrites the batch).
+   *  NEXT_ONLY         — queued for the next cycle; current classes untouched.
+   */
+  @ApiProperty({ enum: MODIFY_SCOPES })
+  @IsIn(MODIFY_SCOPES)
+  scope!: (typeof MODIFY_SCOPES)[number];
+
+  @ApiPropertyOptional({ enum: WEEKDAYS, isArray: true })
+  @IsOptional()
+  @IsArray()
+  @IsIn(WEEKDAYS, { each: true })
+  days?: string[];
+
+  @ApiPropertyOptional({ example: '18:00' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'time must be HH:mm, e.g. 18:00' })
+  time?: string;
+
+  @ApiPropertyOptional({ description: 'Reassign to this teacher (profile id)' })
+  @IsOptional()
+  @IsString()
+  teacherId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -110,9 +185,9 @@ export class ListSubscriptionRequestsDto {
   @IsIn(['PENDING', 'APPROVED', 'REJECTED', 'APPLIED'])
   status?: string;
 
-  @ApiPropertyOptional({ enum: ['PACKAGE_CHANGE', 'SCHEDULE_CHANGE'] })
+  @ApiPropertyOptional({ enum: ['PACKAGE_CHANGE', 'SCHEDULE_CHANGE', 'BREAK_REQUEST'] })
   @IsOptional()
-  @IsIn(['PACKAGE_CHANGE', 'SCHEDULE_CHANGE'])
+  @IsIn(['PACKAGE_CHANGE', 'SCHEDULE_CHANGE', 'BREAK_REQUEST'])
   type?: string;
 
   @ApiPropertyOptional()

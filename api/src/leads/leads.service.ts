@@ -27,6 +27,7 @@ import { LeadAvailabilityService } from './availability.service';
 import { ZoomService } from './zoom.service';
 import { BillingService } from '../finance/billing.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { EarningsService } from '../earnings/earnings.service';
 import {
   AssignTeacherLeadDto,
   CoachDecisionDto,
@@ -65,6 +66,7 @@ export class LeadsService implements OnModuleInit {
     private readonly zoom: ZoomService,
     private readonly billing: BillingService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly earnings: EarningsService,
   ) {}
 
   // ── Reminder sweep ──────────────────────────────────────────────────────────
@@ -1630,6 +1632,10 @@ export class LeadsService implements OnModuleInit {
       },
     });
 
+    // Filing the report confirms the trial happened — book the teacher's trial
+    // earning if it was not already booked at attendance time (idempotent).
+    this.earnings.recordTrial(trialId).catch(() => undefined);
+
     /*
      * The teacher was the one in the room, so where they corrected what the
      * family typed into the booking form, their version wins on the lead. Only
@@ -1788,6 +1794,9 @@ export class LeadsService implements OnModuleInit {
         : `Trial marked a no-show${dto.note ? ` — ${dto.note}` : ''}.`,
       actor,
     );
+
+    // Teacher earning for the completed trial (idempotent, config-gated).
+    if (present) this.earnings.recordTrial(trialId).catch(() => undefined);
 
     return this.attachTrialNames([updated]).then((r) => r[0]);
   }
@@ -2679,6 +2688,13 @@ export class LeadsService implements OnModuleInit {
         : `Converted to ${created.length} students (${created.map((c) => c.code).join(', ')}). Accounts activated.`,
       actor,
     );
+
+    // Trial → enrolment: the optional teacher bonus for a converted trial
+    // (idempotent + config-gated; no-op when the bonus is 0 or there is no
+    // trial/teacher). The trial payout itself was booked at attendance time.
+    if (latestTrial?.id) {
+      this.earnings.recordTrialEnrollBonus(latestTrial.id).catch(() => undefined);
+    }
 
     // Email the family their new login credentials + in-app alert to staff.
     this.notifyConverted(lead, created, passwords, pkg, invoices).catch(() => undefined);

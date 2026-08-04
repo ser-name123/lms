@@ -212,8 +212,13 @@ export default function TeacherStudents() {
                   </p>
                   {s.subscription && (
                     <div className="mt-1.5 rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[10.5px] text-ink-2">
-                      <p className="font-black text-accent">
+                      <p className="flex items-center gap-1.5 font-black text-accent">
                         {s.subscription.model}{s.subscription.tier ? ` · ${s.subscription.tier}` : ""}
+                        {s.subscription.status === "ON_BREAK" && (
+                          <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-600">
+                            On break{s.subscription.breakEndDate ? ` · to ${new Date(s.subscription.breakEndDate).toLocaleDateString()}` : ""}
+                          </span>
+                        )}
                       </p>
                       <p className="mt-0.5 text-ink-3">
                         {s.subscription.durationMinutes}min · {s.subscription.weeklyClasses}×/wk · {s.subscription.monthlyHours}h/mo

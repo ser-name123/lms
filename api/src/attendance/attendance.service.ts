@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { EarningsService } from '../earnings/earnings.service';
 import { Role, ClassStatus, StudentAttendanceStatus } from '../generated/prisma/enums';
 import {
   AssignStudentsDto,
@@ -48,6 +49,7 @@ export class AttendanceService implements OnModuleInit {
     private readonly emails: EmailsService,
     private readonly notifications: NotificationsService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly earnings: EarningsService,
   ) {}
 
   // Sweeps: reminders (24h/1h/15m) + auto-lock. Lightweight in-process interval,
@@ -412,6 +414,10 @@ export class AttendanceService implements OnModuleInit {
 
     // Parent/student notifications for the finalised statuses.
     this.notifyAttendanceOutcome(classId).catch(() => undefined);
+    // Book the teacher's earning immediately on completion (spec 6A step 1);
+    // awaited so it is durable before we return, idempotent so the later
+    // auto-lock sweep will not double-count.
+    await this.earnings.recordForClass(classId).catch(() => undefined);
     return this.getClassAttendance(updated.id);
   }
 
@@ -1009,6 +1015,8 @@ export class AttendanceService implements OnModuleInit {
       // The class is now final — consume it from each attendee's subscription.
       // Locking happens once per class, so this cannot double-count.
       await this.subscriptions.consumeClassForSubscription(cls.id).catch(() => undefined);
+      // …and book the teacher's earning for it (idempotent on classSessionId).
+      await this.earnings.recordForClass(cls.id).catch(() => undefined);
     }
 
     // Also lock classes that were never ended but are long past their end time.
@@ -1036,6 +1044,8 @@ export class AttendanceService implements OnModuleInit {
       });
       // Final and locked — consume it from each attendee's subscription (once).
       await this.subscriptions.consumeClassForSubscription(cls.id).catch(() => undefined);
+      // …and book the teacher's earning for it (idempotent on classSessionId).
+      await this.earnings.recordForClass(cls.id).catch(() => undefined);
     }
   }
 

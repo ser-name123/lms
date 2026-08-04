@@ -5,6 +5,7 @@ import Swal from "sweetalert2";
 import {
   AlertTriangle,
   CalendarClock,
+  CalendarOff,
   CheckCircle2,
   ClipboardList,
   Clock,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { money } from "@/lib/currency";
+import { useAuth } from "@/store/auth";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge, type Tone } from "@/components/ui/badge";
@@ -86,7 +88,7 @@ export default function SubscriptionRequestsPage() {
     <>
       <Topbar
         title="Subscription Requests"
-        subtitle="Package and schedule changes students have asked for"
+        subtitle="Package, schedule and break requests students have asked for"
       />
 
       <div className="animate-fade-up space-y-6 p-4 sm:p-6">
@@ -142,14 +144,16 @@ export default function SubscriptionRequestsPage() {
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-ink-2">
                             {r.type === "PACKAGE_CHANGE" ? (
                               <PackageIcon className="size-3.5 text-accent" />
+                            ) : r.type === "BREAK_REQUEST" ? (
+                              <CalendarOff className="size-3.5 text-accent" />
                             ) : (
                               <Clock className="size-3.5 text-accent" />
                             )}
-                            {r.type === "PACKAGE_CHANGE" ? "Package" : "Schedule"}
+                            {r.type === "PACKAGE_CHANGE" ? "Package" : r.type === "BREAK_REQUEST" ? "Break" : "Schedule"}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-xs text-ink-2">
-                          {r.fromLabel} → {r.toLabel}
+                          {r.type === "BREAK_REQUEST" ? r.toLabel : `${r.fromLabel} → ${r.toLabel}`}
                         </td>
                         <td className="px-6 py-4 text-xs text-ink-3">{fmtDate(r.createdAt)}</td>
                         <td className="px-6 py-4">
@@ -198,14 +202,21 @@ function ReviewDrawer({
   onClose: () => void;
   onDecided: () => void;
 }) {
+  const { user } = useAuth();
+  // Approve/reject is admin + coach only (the API enforces it too). A supervisor
+  // reaches this screen from a notification to monitor, read-only.
+  const canReview = user?.role === "ADMIN" || user?.role === "ACADEMIC_COACH";
   const [notes, setNotes] = useState("");
   const [targetBatchId, setTargetBatchId] = useState("");
   const [busy, setBusy] = useState(false);
 
   const sched = request.schedule;
+  const isBreak = request.type === "BREAK_REQUEST";
   // A shared batch cannot simply be retimed — everyone else in it would move
   // with this student, so a destination is required before approving.
   const needsTarget = !!sched && !sched.canRetimeInPlace;
+  const typeLabel =
+    request.type === "PACKAGE_CHANGE" ? "Package change" : isBreak ? "Break request" : "Schedule change";
 
   const decide = async (approve: boolean) => {
     if (approve && needsTarget && !targetBatchId) return;
@@ -219,7 +230,9 @@ function ReviewDrawer({
       await Swal.fire({
         title: approve ? "Approved" : "Rejected",
         text: approve
-          ? "Saved for the next billing cycle. Nothing changes until then."
+          ? isBreak
+            ? "The break is scheduled. Classes pause on the start date and resume automatically."
+            : "Saved for the next billing cycle. Nothing changes until then."
           : "The student has been told.",
         icon: "success",
         background: swalBg(),
@@ -248,7 +261,7 @@ function ReviewDrawer({
           <div>
             <h3 className="text-sm font-black text-ink">{request.student?.name}</h3>
             <p className="text-[11px] text-ink-3">
-              {request.student?.code} · {request.type === "PACKAGE_CHANGE" ? "Package change" : "Schedule change"}
+              {request.student?.code} · {typeLabel}
             </p>
           </div>
           <Badge tone={statusTone[request.status]}>{statusLabel[request.status]}</Badge>
@@ -258,7 +271,7 @@ function ReviewDrawer({
           <div className="rounded-xl border border-hairline bg-surface-2/40 p-4">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink-3">Requested</p>
             <p className="mt-1 text-sm font-bold text-ink">
-              {request.fromLabel} → {request.toLabel}
+              {isBreak ? request.toLabel : `${request.fromLabel} → ${request.toLabel}`}
             </p>
             {request.reason && (
               <p className="mt-2 text-xs text-ink-2">
@@ -267,8 +280,9 @@ function ReviewDrawer({
               </p>
             )}
             <p className="mt-2 text-[11px] text-ink-3">
-              Effective from the next billing cycle
-              {request.current.cycle.end ? ` — ${fmtDate(request.current.cycle.end)}` : ""}.
+              {isBreak
+                ? "Applies on the break start date. Classes pause, the teacher slot stays reserved, and the billing cycle is extended by the break."
+                : `Effective from the next billing cycle${request.current.cycle.end ? ` — ${fmtDate(request.current.cycle.end)}` : ""}.`}
             </p>
           </div>
 
@@ -303,6 +317,21 @@ function ReviewDrawer({
                   delta={`${request.comparison.classesDifference >= 0 ? "+" : ""}${request.comparison.classesDifference}`}
                   up={request.comparison.classesDifference > 0}
                 />
+                <Diff
+                  label="Reschedules / cycle"
+                  from={String(request.comparison.reschedulesFrom)}
+                  to={String(request.comparison.reschedulesTo)}
+                  delta={`${request.comparison.reschedulesTo - request.comparison.reschedulesFrom >= 0 ? "+" : ""}${request.comparison.reschedulesTo - request.comparison.reschedulesFrom}`}
+                  up={request.comparison.reschedulesTo - request.comparison.reschedulesFrom > 0}
+                />
+                {(request.requestedDays.length > 0 || request.requestedTime) && (
+                  <div className="col-span-2 rounded-lg border border-hairline bg-surface-2/40 p-3">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink-3">New schedule with this package</p>
+                    <p className="mt-1 text-sm font-bold text-ink">
+                      {request.requestedDays.join(", ") || "—"}{request.requestedTime ? ` · ${request.requestedTime}` : ""}
+                    </p>
+                  </div>
+                )}
               </div>
               {!request.comparison.billingLinked && (
                 <p className="mt-3 flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
@@ -365,6 +394,13 @@ function ReviewDrawer({
                 </p>
               )}
 
+              {sched.studentClashes.length > 0 && (
+                <p className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+                  The student already attends {sched.studentClashes.map((c) => c.name).join(", ")} at
+                  that time — this would clash.
+                </p>
+              )}
+
               {needsTarget && (
                 <div className="mt-3">
                   <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">
@@ -393,7 +429,7 @@ function ReviewDrawer({
             </div>
           )}
 
-          {request.status === "PENDING" && (
+          {request.status === "PENDING" && canReview && (
             <div>
               <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-ink-3">
                 Notes (shown to the student)
@@ -408,6 +444,13 @@ function ReviewDrawer({
             </div>
           )}
 
+          {request.status === "PENDING" && !canReview && (
+            <p className="rounded-xl border border-hairline bg-surface-2/40 p-3 text-xs text-ink-3">
+              You are viewing this request for monitoring. Approval and rejection are handled by the
+              academic coach or an admin.
+            </p>
+          )}
+
           {request.status !== "PENDING" && request.reviewNotes && (
             <p className="rounded-xl border border-hairline bg-surface-2/40 p-3 text-xs text-ink-2">
               <span className="text-ink-3">Decision notes: </span>
@@ -416,7 +459,7 @@ function ReviewDrawer({
           )}
         </div>
 
-        {request.status === "PENDING" ? (
+        {request.status === "PENDING" && canReview ? (
           <div className="flex gap-2 border-t border-hairline p-4">
             <Button
               onClick={() => decide(false)}
@@ -435,10 +478,10 @@ function ReviewDrawer({
               ) : (
                 <CheckCircle2 className="mr-1 size-4" />
               )}
-              Approve for next cycle
+              {isBreak ? "Approve break" : "Approve for next cycle"}
             </Button>
           </div>
-        ) : (
+        ) : request.status !== "PENDING" ? (
           <div className="border-t border-hairline p-4">
             <p className="flex items-center gap-1.5 text-[11px] text-ink-3">
               <CalendarClock className="size-3.5" />
@@ -447,7 +490,7 @@ function ReviewDrawer({
               {request.appliedAt ? ` · applied ${fmtDate(request.appliedAt)}` : ""}
             </p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
