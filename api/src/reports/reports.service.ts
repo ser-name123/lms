@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { Role } from '../generated/prisma/enums';
+import { Role, EnrollmentStatus } from '../generated/prisma/enums';
 
 export interface Actor {
   id: string;
@@ -29,6 +29,23 @@ export class ReportsService {
     return tp.id;
   }
 
+  /*
+   * A teacher may only write a report for a student assigned to them — the same
+   * roster the portal shows: a student ACTIVE-enrolled in the teacher's course.
+   * The UI already restricts the picker to this set; this is the server-side
+   * enforcement so a crafted request can't file a report for an unrelated
+   * student. NotFoundException (not Forbidden) so an unassigned id is not
+   * confirmed to exist.
+   */
+  private async assertStudentAssigned(teacherId: string, studentId: string) {
+    const teacher = await this.prisma.teacherProfile.findUnique({ where: { id: teacherId }, select: { courseId: true } });
+    if (!teacher?.courseId) throw new ForbiddenException('You have no course assigned.');
+    const enrolled = await this.prisma.enrollment.count({
+      where: { studentId, courseId: teacher.courseId, status: EnrollmentStatus.ACTIVE },
+    });
+    if (!enrolled) throw new NotFoundException('That student is not assigned to you.');
+  }
+
   private monthLabel(d: Date): string {
     return d.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   }
@@ -39,6 +56,8 @@ export class ReportsService {
     dto: { studentId: string; periodStart: string; periodEnd: string; summary?: string; strengths?: string; areasToImprove?: string; recommendation?: string; attendanceNote?: string },
   ) {
     const teacherId = await this.teacherIdFor(userId);
+    if (!dto.studentId) throw new BadRequestException('A student is required.');
+    await this.assertStudentAssigned(teacherId, dto.studentId);
     const periodStart = new Date(dto.periodStart);
     const periodEnd = new Date(dto.periodEnd);
     if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) throw new BadRequestException('Invalid period.');

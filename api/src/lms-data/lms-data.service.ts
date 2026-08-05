@@ -514,13 +514,20 @@ export class LmsDataService implements OnModuleInit {
    * priced stays empty rather than becoming 0 — "free" and "not sold here" are
    * different answers, and only one of them should ever reach a family.
    */
-  private normalisePackage(data: any) {
+  private normalisePackage(data: any, opts: { isCreate?: boolean } = {}) {
     const out = { ...data };
-    // priceUSD is required on both tables. An hourly plan has no fixed monthly
-    // price (it is computed per-subscription), so a missing value becomes 0
-    // rather than blocking the write — the hourly rate below carries its price.
-    out.priceUSD =
-      out.priceUSD == null || out.priceUSD === '' ? 0 : Math.max(0, Number(out.priceUSD) || 0);
+    // priceUSD is required on both tables. On CREATE a missing value becomes 0
+    // (an hourly plan has no fixed monthly price — the hourly rate carries it).
+    // On UPDATE a missing value is left untouched, exactly like priceAED/priceGBP
+    // below: a partial patch (e.g. flipping status or the fee plan) must never
+    // zero a stored price. Forcing 0 here silently wiped priceUSD on every
+    // field-omitting update.
+    if (out.priceUSD === '' || out.priceUSD == null) {
+      if (opts.isCreate || 'priceUSD' in data) out.priceUSD = 0;
+      else delete out.priceUSD; // absent on update → Prisma leaves it unchanged
+    } else {
+      out.priceUSD = Math.max(0, Number(out.priceUSD) || 0);
+    }
     for (const key of ['priceAED', 'priceGBP'] as const) {
       if (out[key] === '' || out[key] === null) out[key] = null;
       else if (out[key] != null) out[key] = Math.max(0, Number(out[key]) || 0);
@@ -694,7 +701,7 @@ export class LmsDataService implements OnModuleInit {
   }
 
   async createPackage(dto: any) {
-    const data = this.normalisePackage(dto);
+    const data = this.normalisePackage(dto, { isCreate: true });
     const pricingMode = await this.pricingModeFor(data.modelId);
     this.deriveMonthlyHours(data, pricingMode);
     await this.assertFeePlan(data.feePlanId, data, pricingMode);

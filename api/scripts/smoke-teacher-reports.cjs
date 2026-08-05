@@ -54,11 +54,16 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 
   try {
     await cleanup();
+    const course = (await db.query(`SELECT id FROM "Course" ORDER BY id LIMIT 1`)).rows[0];
     const tu = (await db.query(`INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt") VALUES (gen_random_uuid(),$1,'x','Rep','Teacher','TEACHER','ACTIVE',now()) RETURNING id`, [`${MARKER}-teacher@example.test`])).rows[0];
-    const teacher = (await db.query(`INSERT INTO "TeacherProfile" (id,"userId","teacherCode","hourlyRate") VALUES (gen_random_uuid(),$1,$2,4.00) RETURNING id`, [tu.id, `${MARKER}-T-${Date.now()}`])).rows[0];
+    // Teacher owns the course so the assigned-student check (a student ACTIVE-
+    // enrolled in the teacher's course) has something to match.
+    const teacher = (await db.query(`INSERT INTO "TeacherProfile" (id,"userId","teacherCode","hourlyRate","courseId") VALUES (gen_random_uuid(),$1,$2,4.00,$3) RETURNING id`, [tu.id, `${MARKER}-T-${Date.now()}`, course.id])).rows[0];
     const su = (await db.query(`INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt") VALUES (gen_random_uuid(),$1,'x','Rep','Student','STUDENT','ACTIVE',now()) RETURNING id`, [`${MARKER}-stu@example.test`])).rows[0];
     const student = (await db.query(`INSERT INTO "StudentProfile" (id,"userId","studentCode","billingCurrency") VALUES (gen_random_uuid(),$1,$2,'USD') RETURNING id`, [su.id, `${MARKER}-S-${Date.now()}`])).rows[0];
-    const course = (await db.query(`SELECT id FROM "Course" ORDER BY id LIMIT 1`)).rows[0];
+    // ACTIVE enrolment links the student to the teacher's course (cascades on
+    // StudentProfile delete, so cleanup needs no extra step).
+    await db.query(`INSERT INTO "Enrollment" (id,"studentId","courseId",status,"updatedAt") VALUES (gen_random_uuid(),$1,$2,'ACTIVE',now())`, [student.id, course.id]);
     const admin = (await db.query(`SELECT id, email FROM "User" WHERE role='ADMIN' LIMIT 1`)).rows[0];
     let supervisor = (await db.query(`SELECT id, email FROM "User" WHERE role='SUPERVISOR' AND status='ACTIVE' LIMIT 1`)).rows[0];
     check('fixtures present', !!teacher && !!course && !!admin);
@@ -82,6 +87,12 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
     const sub = await req('POST', `/monthly-reports/me/${draft0.body.id}/submit`, teacherToken);
     check('submit ok → SUBMITTED', sub.status < 300 && sub.body && sub.body.status === 'SUBMITTED', `status ${sub.status} ${JSON.stringify(sub.body).slice(0,80)}`);
     const reportId = draft0.body.id;
+
+    // Security: a report for a student NOT assigned to the teacher is refused.
+    const ou = (await db.query(`INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt") VALUES (gen_random_uuid(),$1,'x','Rep','Outsider','STUDENT','ACTIVE',now()) RETURNING id`, [`${MARKER}-outsider@example.test`])).rows[0];
+    const outsider = (await db.query(`INSERT INTO "StudentProfile" (id,"userId","studentCode","billingCurrency") VALUES (gen_random_uuid(),$1,$2,'USD') RETURNING id`, [ou.id, `${MARKER}-O-${Date.now()}`])).rows[0];
+    const foreignDraft = await req('POST', '/monthly-reports/me', teacherToken, { studentId: outsider.id, periodStart: ps, periodEnd: pe, summary: 'nope' });
+    check('draft for an unassigned student refused', foreignDraft.status === 404 || foreignDraft.status === 403, `status ${foreignDraft.status}`);
 
     // Staff list shows it.
     const listR = await req('GET', '/monthly-reports?status=SUBMITTED', adminToken);

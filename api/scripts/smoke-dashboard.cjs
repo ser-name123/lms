@@ -112,6 +112,10 @@ async function send(method, path, userId, payload, expect = 200) {
 
 
   const createdAnnouncementIds = [];
+  // A TIMELINE row so the teacher activity feed is non-empty and deterministic
+  // (recentActivity surfaces StudentActivity/TIMELINE with a /teacher/students
+  // link for a teacher); removed in the finally block.
+  const seed = { activityId: null };
 
   try {
     console.log('\n── Role dashboards ──');
@@ -339,6 +343,21 @@ async function send(method, path, userId, payload, expect = 200) {
      * layout answers with a 404. The feed looked healthy and every row in it
      * was a dead end.
      */
+    /*
+     * Seed one recent TIMELINE activity so the teacher feed is guaranteed
+     * non-empty — otherwise the "every link is a teacher route" check below has
+     * nothing to test and fails (by design: an empty feed must not vacuously
+     * pass). This maps to /teacher/students for a teacher.
+     */
+    {
+      const row = (await db.query(
+        `INSERT INTO "StudentActivity" (id,"studentId",kind,type,title,"createdAt")
+         VALUES (gen_random_uuid(),$1,'TIMELINE','STATUS_CHANGED',$2,now()) RETURNING id`,
+        [testStudentId, `${MARKER} activity`],
+      )).rows[0];
+      seed.activityId = row.id;
+    }
+
     const actTeacher = await get('/dashboard/activity', roleUser.TEACHER.id);
     check('TEACHER can read the activity feed', actTeacher.ok && Array.isArray(actTeacher.body), `status ${actTeacher.status}`);
     const teacherLinks = (actTeacher.body || []).map((r) => r.link).filter(Boolean);
@@ -369,6 +388,8 @@ async function send(method, path, userId, payload, expect = 200) {
     check('an invalid range falls back to the default',
       (await get('/dashboard/super-admin?range=bogus', roleUser.ADMIN.id, 400)).status === 400);
   } finally {
+    // Seeded activity row.
+    if (seed.activityId) await db.query(`DELETE FROM "StudentActivity" WHERE id = $1`, [seed.activityId]);
     /*
      * Any role user this run had to invent. Deleted by id, so a real account
      * that happened to share a name can never be caught by it.

@@ -120,7 +120,11 @@ async function main() {
      */
     if (studentProfileId) {
       console.log('MULTI-CURRENCY:');
-      const before = (await get(users.ADMIN, '/finance/dashboard')).cards.totalRevenue;
+      const dashBefore = await get(users.ADMIN, '/finance/dashboard');
+      const before = dashBefore.cards.totalRevenue;
+      // The shared DB may already hold AED revenue from other runs, so assert the
+      // delta this payment adds, not an absolute total.
+      const aedBefore = (dashBefore.byCurrency || []).find((l) => l.currency === 'AED')?.totalRevenue ?? 0;
       let aedInvoiceId = null;
       try {
         const aed = await req(users.ADMIN, 'POST', '/finance/invoices', {
@@ -140,8 +144,8 @@ async function main() {
           `AED payment left the ${dash.currency} total alone (${before} → ${dash.cards.totalRevenue})`);
 
         const line = (dash.byCurrency || []).find((l) => l.currency === 'AED');
-        ok(line && line.totalRevenue === 1000,
-          `AED revenue is reported on its own line (${line ? line.totalRevenue : 'missing'})`);
+        ok(line && line.totalRevenue === aedBefore + 1000,
+          `AED revenue line rose by exactly the 1000 paid (${aedBefore} → ${line ? line.totalRevenue : 'missing'})`);
         ok((dash.byCurrency || []).every((l) => typeof l.currency === 'string'),
           'every currency line names its currency');
       } finally {

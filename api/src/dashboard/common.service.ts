@@ -774,6 +774,17 @@ export class DashboardCommonService {
       })),
     ];
 
-    return feed.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+    /*
+     * Drop rows that have no page for this role. A teacher, in particular, has
+     * no invoices page, so payment rows map to a null link — left in, they were
+     * dead ends that also crowded the teacher's own submissions/assessments out
+     * of the top `limit` and surfaced customer payment/invoice numbers they have
+     * no reason to see. Staff roles have a page for every kind, so nothing is
+     * dropped for them.
+     */
+    return feed
+      .filter((e) => e.link !== null)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, limit);
   }
 }
