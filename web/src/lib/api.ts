@@ -4438,7 +4438,10 @@ export const dismissAbsence = (id: string) =>
   api<unknown>(`/teacher-absences/${id}/dismiss`, { method: "POST" });
 
 // ── Salary Management (6B) + Wise payment (6C) ──
-export type SalaryStatus = "CALCULATED" | "UNDER_REVIEW" | "ADJUSTMENT_APPLIED" | "APPROVED" | "PAID" | "FAILED";
+// PROCESSING is the claim a pay attempt takes before calling Wise, so a
+// double-click cannot put two transfers through. A row sitting in it means the
+// transfer went out and the outcome was never reported — reconcile, don't retry.
+export type SalaryStatus = "CALCULATED" | "UNDER_REVIEW" | "ADJUSTMENT_APPLIED" | "APPROVED" | "PROCESSING" | "PAID" | "FAILED";
 export interface SalaryRow {
   id: string;
   teacher: { id: string; code: string; name: string } | null;
@@ -4669,3 +4672,860 @@ export const reviewSubscriptionRequest = (
     method: "PATCH",
     body: JSON.stringify(dto),
   });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Module 7 — Monthly Assessment + Student Ranking
+ *
+ * Note the route prefixes: `/monthly-assessments` and `/assessment-config`.
+ * The older `/assessments` endpoints above belong to the ONLINE TEST engine
+ * and are unrelated — same word, different feature.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+export type MonthlyAssessmentStatus = "DRAFT" | "SUBMITTED" | "RETURNED" | "APPROVED" | "PUBLISHED";
+export type AssessmentTemplateStatus = "ACTIVE" | "INACTIVE";
+export type AssessmentFrequency = "MONTHLY" | "QUARTERLY" | "HALF_YEARLY" | "YEARLY";
+
+export interface GradeBand {
+  id?: string;
+  grade: string;
+  minPercent: number;
+  maxPercent: number;
+  displayOrder?: number;
+}
+export interface GradingScale {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  bands: GradeBand[];
+}
+export interface AssessmentCriterion {
+  id?: string;
+  name: string;
+  maxMarks: number;
+  displayOrder?: number;
+  isMandatory?: boolean;
+}
+export interface AssessmentTemplate {
+  id: string;
+  name: string;
+  course: { id: string; title: string } | null;
+  level: { id: string; name: string } | null;
+  frequency: AssessmentFrequency;
+  maxMarks: number;
+  passingMarks: number;
+  gradingScale: { id: string; name: string } | null;
+  displayOrder: number;
+  status: AssessmentTemplateStatus;
+  criteria: Required<AssessmentCriterion>[];
+  criteriaTotal: number;
+  usedBy: number;
+  createdByName: string | null;
+  createdAt: string;
+}
+export interface RankingWeightage {
+  assessment: number;
+  attendance: number;
+  assignment: number;
+  homework: number;
+  teacherRating: number;
+}
+export interface AssessmentConfig {
+  minDaysBeforeAssessment: number;
+  dueDaysAfterCycleEnd: number;
+  reminderDaysBefore: number;
+  overdueReminders: boolean;
+  requireSupervisorApproval: boolean;
+  autoRankOnPublish: boolean;
+  studentVisibleTopN: number;
+  ranking: RankingWeightage;
+}
+export interface RankingBadgeConfig {
+  id: string;
+  rule: string;
+  label: string;
+  icon: string;
+  enabled: boolean;
+  threshold: number | null;
+  displayOrder: number;
+}
+export interface AssessmentConfigMeta {
+  courses: { id: string; title: string; levelId: string | null }[];
+  levels: { id: string; name: string }[];
+  gradingScales: { id: string; name: string; isDefault: boolean }[];
+}
+
+// ── Configuration ───────────────────────────────────────────────────────────
+
+export const fetchMonthlyAssessmentMeta = () => api<AssessmentConfigMeta>(`/assessment-config/meta`);
+export const fetchAssessmentConfig = () => api<AssessmentConfig>(`/assessment-config/settings`);
+export const saveAssessmentConfig = (dto: Partial<AssessmentConfig>) =>
+  api<AssessmentConfig>(`/assessment-config/settings`, { method: "PATCH", body: JSON.stringify(dto) });
+
+export const fetchGradingScales = () => api<GradingScale[]>(`/assessment-config/grading-scales`);
+export const createGradingScale = (dto: { name: string; isDefault?: boolean; bands: GradeBand[] }) =>
+  api<GradingScale>(`/assessment-config/grading-scales`, { method: "POST", body: JSON.stringify(dto) });
+export const updateGradingScale = (id: string, dto: { name: string; isDefault?: boolean; bands: GradeBand[] }) =>
+  api<GradingScale>(`/assessment-config/grading-scales/${id}`, { method: "PUT", body: JSON.stringify(dto) });
+export const deleteGradingScale = (id: string) =>
+  api<{ deleted: boolean }>(`/assessment-config/grading-scales/${id}`, { method: "DELETE" });
+
+export const fetchBadgeConfigs = () => api<RankingBadgeConfig[]>(`/assessment-config/badges`);
+export const saveBadgeConfig = (dto: {
+  rule: string; label?: string; icon?: string; enabled?: boolean; threshold?: number; displayOrder?: number;
+}) => api<RankingBadgeConfig[]>(`/assessment-config/badges`, { method: "PATCH", body: JSON.stringify(dto) });
+
+export const fetchAssessmentTemplates = (params: { courseId?: string; status?: string; search?: string } = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, String(v)); });
+  return api<AssessmentTemplate[]>(`/assessment-config/templates${q.toString() ? `?${q}` : ""}`);
+};
+export const fetchAssessmentTemplate = (id: string) =>
+  api<AssessmentTemplate>(`/assessment-config/templates/${id}`);
+export const createAssessmentTemplate = (dto: {
+  name: string; courseId: string; levelId?: string; frequency?: string; maxMarks?: number;
+  passingMarks?: number; gradingScaleId?: string; displayOrder?: number; status?: string;
+  criteria: AssessmentCriterion[];
+}) => api<AssessmentTemplate>(`/assessment-config/templates`, { method: "POST", body: JSON.stringify(dto) });
+export const updateAssessmentTemplate = (id: string, dto: Record<string, unknown>) =>
+  api<AssessmentTemplate>(`/assessment-config/templates/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const activateAssessmentTemplate = (id: string) =>
+  api<AssessmentTemplate>(`/assessment-config/templates/${id}/activate`, { method: "POST" });
+export const deactivateAssessmentTemplate = (id: string) =>
+  api<AssessmentTemplate>(`/assessment-config/templates/${id}/deactivate`, { method: "POST" });
+export const duplicateAssessmentTemplate = (id: string) =>
+  api<AssessmentTemplate>(`/assessment-config/templates/${id}/duplicate`, { method: "POST" });
+export const deleteAssessmentTemplate = (id: string) =>
+  api<{ deleted: boolean }>(`/assessment-config/templates/${id}`, { method: "DELETE" });
+
+/** The rubrics the spec ships with, to start a template from. */
+export interface AssessmentPreset {
+  key: string;
+  name: string;
+  maxMarks: number;
+  passingMarks: number;
+  criteria: { name: string; maxMarks: number }[];
+}
+export const fetchAssessmentPresets = () =>
+  api<AssessmentPreset[]>(`/assessment-config/presets`);
+export const seedAssessmentPresets = () =>
+  api<{ created: string[] }>(`/assessment-config/presets/seed`, { method: "POST" });
+
+// ── The assessment itself ───────────────────────────────────────────────────
+
+export interface MonthlyAssessmentScoreRow {
+  id?: string;
+  criterionId: string | null;
+  criterionName: string;
+  maxMarks: number;
+  marks: number;
+  comment: string | null;
+  displayOrder: number;
+}
+export interface MonthlyAssessmentStats {
+  attendancePct: number;
+  attendedClasses: number;
+  totalClasses: number;
+  assignmentPct: number;
+  assignmentsSubmitted: number;
+  assignmentsTotal: number;
+  homeworkPct: number;
+}
+export interface MonthlyAssessmentFeedbackRow {
+  id: string;
+  rating: number | null;
+  comment: string;
+  by: string | null;
+  at: string;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+}
+export interface MonthlyAssessmentRecord {
+  id: string;
+  studentId: string;
+  courseId: string;
+  teacherId: string | null;
+  templateId: string | null;
+  cycleStart: string;
+  cycleEnd: string;
+  cycleIndex: number;
+  monthLabel: string;
+  dueAt: string | null;
+  assessmentDate: string;
+  levelName: string | null;
+  summary: MonthlyAssessmentStats;
+  totalMarks: number;
+  maxMarks: number;
+  passingMarks: number;
+  percentage: number;
+  grade: string | null;
+  passed: boolean;
+  teacherRemarks: string | null;
+  recommendations: string | null;
+  status: MonthlyAssessmentStatus;
+  submittedAt: string | null;
+  returnedReason: string | null;
+  returnedAt: string | null;
+  reviewedByName: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  publishedAt: string | null;
+  reopenedByName: string | null;
+  reopenedAt: string | null;
+  scores: MonthlyAssessmentScoreRow[];
+  student?: { id: string; code: string | null; name: string };
+  course?: { id: string; title: string } | null;
+  teacher?: { id: string; code: string | null; name: string } | null;
+  teacherName?: string | null;
+  feedback?: MonthlyAssessmentFeedbackRow[];
+  feedbackCount?: number;
+}
+export interface MonthlyAssessmentFormData {
+  student: { id: string; code: string | null; name: string; email: string; level: string | null; parentName: string | null };
+  course: { id: string; title: string } | null;
+  teacherId: string | null;
+  cycle: { start: string; end: string; index: number; label: string; fromSubscription: boolean; dueAt: string };
+  eligibility: { eligible: boolean; enrolledDays: number; minDays: number; reason: string | null };
+  summary: MonthlyAssessmentStats;
+  template: {
+    id: string; name: string; maxMarks: number; passingMarks: number;
+    criteria: { id: string; name: string; maxMarks: number; displayOrder: number; isMandatory: boolean }[];
+  } | null;
+  gradeBands: { grade: string; minPercent: number; maxPercent: number }[];
+  subscriptionId: string | null;
+  assessment: MonthlyAssessmentRecord | null;
+  editable: boolean;
+}
+export interface MonthlyAssessmentListRow {
+  id: string;
+  student: { id: string; code: string | null; name: string };
+  course: { id: string; title: string } | null;
+  teacherName: string | null;
+  monthLabel: string;
+  cycleStart: string;
+  cycleEnd: string;
+  dueAt: string | null;
+  totalMarks: number;
+  maxMarks: number;
+  percentage: number;
+  grade: string | null;
+  passed: boolean;
+  status: MonthlyAssessmentStatus;
+  submittedAt: string | null;
+  publishedAt: string | null;
+  feedbackCount: number;
+}
+export interface MonthlyAssessmentDueRow {
+  studentId: string;
+  studentCode: string | null;
+  studentName: string;
+  courseId: string;
+  courseTitle: string | null;
+  cycleStart: string;
+  cycleEnd: string;
+  monthLabel: string;
+  dueAt: string;
+  overdue: boolean;
+  daysLeft: number;
+  enrolledDays: number;
+  assessmentId: string | null;
+  status: MonthlyAssessmentStatus | "NOT_STARTED";
+}
+export interface MonthlyAssessmentAdminDashboard {
+  total: number;
+  draft: number;
+  submitted: number;
+  returned: number;
+  approved: number;
+  published: number;
+  overdue: number;
+  pendingFeedback: number;
+  averagePercentage: number;
+  passRate: number;
+  gradeDistribution: { grade: string; count: number }[];
+}
+export interface MonthlyAssessmentTeacherDashboard {
+  due: number;
+  overdue: number;
+  draft: number;
+  submitted: number;
+  published: number;
+  pendingFeedback: number;
+}
+export interface PendingFeedbackRow {
+  id: string;
+  assessmentId: string;
+  monthLabel: string;
+  courseTitle: string | null;
+  student: { id: string; code: string | null; name: string };
+  rating: number | null;
+  comment: string;
+  by: string | null;
+  at: string;
+}
+
+export const fetchMonthlyAssessmentAdminDashboard = () =>
+  api<MonthlyAssessmentAdminDashboard>(`/monthly-assessments/dashboard/admin`);
+export const fetchMonthlyAssessmentTeacherDashboard = () =>
+  api<MonthlyAssessmentTeacherDashboard>(`/monthly-assessments/dashboard/teacher`);
+export const fetchMonthlyAssessmentsDue = () => api<MonthlyAssessmentDueRow[]>(`/monthly-assessments/due`);
+export const fetchMonthlyAssessmentForm = (studentId: string, courseId: string, cycleStart?: string) => {
+  const q = new URLSearchParams({ studentId, courseId });
+  if (cycleStart) q.set("cycleStart", cycleStart);
+  return api<MonthlyAssessmentFormData>(`/monthly-assessments/form?${q}`);
+};
+export const fetchMyMonthlyAssessments = () => api<MonthlyAssessmentRecord[]>(`/monthly-assessments/mine`);
+export const fetchStudentMonthlyAssessments = (studentId: string) =>
+  api<MonthlyAssessmentRecord[]>(`/monthly-assessments/student/${studentId}`);
+export const fetchPendingAssessmentFeedback = () =>
+  api<PendingFeedbackRow[]>(`/monthly-assessments/feedback/pending`);
+export const reviewAssessmentFeedback = (feedbackId: string, note?: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/feedback/${feedbackId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+
+export interface SaveMonthlyAssessmentPayload {
+  studentId: string;
+  courseId: string;
+  cycleStart?: string;
+  scores: { criterionId: string; criterionName: string; maxMarks: number; marks: number; comment?: string }[];
+  teacherRemarks?: string;
+  recommendations?: string;
+}
+export const saveMonthlyAssessmentDraft = (dto: SaveMonthlyAssessmentPayload) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/draft`, { method: "POST", body: JSON.stringify(dto) });
+export const submitMonthlyAssessment = (dto: SaveMonthlyAssessmentPayload) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/submit`, { method: "POST", body: JSON.stringify(dto) });
+
+export const fetchMonthlyAssessments = (params: {
+  search?: string; courseId?: string; teacherId?: string; studentId?: string;
+  status?: string; cycleStart?: string; monthLabel?: string;
+} = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, String(v)); });
+  return api<MonthlyAssessmentListRow[]>(`/monthly-assessments${q.toString() ? `?${q}` : ""}`);
+};
+export const fetchMonthlyAssessment = (id: string) => api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}`);
+export const reviewMonthlyAssessment = (id: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}/review`, { method: "POST" });
+export const approveMonthlyAssessment = (id: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}/approve`, { method: "POST" });
+export const returnMonthlyAssessment = (id: string, reason: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}/return`, { method: "POST", body: JSON.stringify({ reason }) });
+export const publishMonthlyAssessment = (id: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}/publish`, { method: "POST" });
+export const publishMonthlyAssessmentBatch = (ids: string[]) =>
+  api<{ published: number; results: { id: string; published: boolean; reason?: string }[] }>(
+    `/monthly-assessments/publish-batch`, { method: "POST", body: JSON.stringify({ ids }) },
+  );
+export const reopenMonthlyAssessment = (id: string, reason?: string) =>
+  api<MonthlyAssessmentRecord>(`/monthly-assessments/${id}/reopen`, { method: "POST", body: JSON.stringify({ reason }) });
+export const submitMonthlyAssessmentFeedback = (id: string, dto: { rating?: number; comment: string }) =>
+  api<{ id: string; submitted: boolean }>(`/monthly-assessments/${id}/feedback`, {
+    method: "POST", body: JSON.stringify(dto),
+  });
+
+// ── Ranking ─────────────────────────────────────────────────────────────────
+
+export interface RankingBreakdown {
+  assessment: number;
+  attendance: number;
+  assignment: number;
+  homework: number;
+  teacherRating: number;
+}
+export interface RankingRow {
+  studentId: string;
+  studentCode: string | null;
+  studentName: string;
+  rank: number;
+  previousRank: number | null;
+  movement: number | null;
+  totalStudents: number;
+  totalScore: number;
+  breakdown: RankingBreakdown;
+  badges: { label: string; icon: string; rule: string }[];
+  monthLabel: string;
+  publishedAt: string | null;
+}
+export interface Leaderboard {
+  cycleStart: string | null;
+  monthLabel: string | null;
+  published?: boolean;
+  courses: { course: { id: string; title: string }; rows: RankingRow[] }[];
+}
+export interface MyRankingCycle {
+  cycleStart: string;
+  monthLabel: string;
+  course: { id: string; title: string };
+  myRank: number;
+  previousRank: number | null;
+  movement: number | null;
+  totalStudents: number;
+  myScore: number;
+  breakdown: RankingBreakdown;
+  leaderboard: { rank: number; studentName: string; score: number; isMe: boolean }[];
+}
+export interface EarnedBadge {
+  id: string;
+  rule: string;
+  label: string;
+  icon: string;
+  courseTitle: string | null;
+  monthLabel: string;
+  awardedAt: string;
+}
+export interface MyRanking {
+  cycles: MyRankingCycle[];
+  badges: EarnedBadge[];
+}
+export interface RankingCycleOption {
+  cycleStart: string;
+  monthLabel: string;
+  published: boolean;
+}
+export interface GeneratableCycle {
+  cycleStart: string;
+  monthLabel: string;
+  courseId: string;
+  courseTitle: string | null;
+  alreadyRanked: boolean;
+}
+export interface RankingAnalytics {
+  cycleStart: string | null;
+  courses: { courseId: string; title: string; students: number; averageScore: number; topScore: number }[];
+  scoreBands: { name: string; count: number }[];
+  movers: { studentName: string; courseTitle: string; movement: number; rank: number }[];
+}
+export interface StudentRankingHistory {
+  rankings: {
+    cycleStart: string;
+    monthLabel: string;
+    course: { id: string; title: string };
+    rank: number;
+    previousRank: number | null;
+    movement: number | null;
+    totalStudents: number;
+    totalScore: number;
+    breakdown: RankingBreakdown;
+    publishedAt: string | null;
+  }[];
+  badges: EarnedBadge[];
+}
+
+const rankingQuery = (params: { courseId?: string; cycleStart?: string; limit?: number }) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== "") q.set(k, String(v)); });
+  return q.toString() ? `?${q}` : "";
+};
+
+export const fetchRankingCycles = () => api<RankingCycleOption[]>(`/rankings/cycles`);
+export const fetchGeneratableCycles = () => api<GeneratableCycle[]>(`/rankings/generatable`);
+export const fetchRankingAnalytics = (courseId?: string) =>
+  api<RankingAnalytics>(`/rankings/analytics${courseId ? `?courseId=${courseId}` : ""}`);
+export const fetchLeaderboard = (params: { courseId?: string; cycleStart?: string; limit?: number } = {}) =>
+  api<Leaderboard>(`/rankings${rankingQuery(params)}`);
+export const fetchTeacherLeaderboard = (params: { courseId?: string; cycleStart?: string; limit?: number } = {}) =>
+  api<Leaderboard>(`/rankings/teacher${rankingQuery(params)}`);
+export const fetchMyRanking = () => api<MyRanking>(`/rankings/mine`);
+export const fetchStudentRankingHistory = (studentId: string) =>
+  api<StudentRankingHistory>(`/rankings/student/${studentId}`);
+export const generateRanking = (dto: { courseId?: string; cycleStart?: string; publish?: boolean }) =>
+  api<{ cycleStart: string; monthLabel: string; published: boolean; courses: number; studentsRanked: number; badgesAwarded: number }>(
+    `/rankings/generate`, { method: "POST", body: JSON.stringify(dto) },
+  );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Module 8 — Staff Meeting & Collaboration Management
+//
+// Exports are `Meeting*`-prefixed. `LmsMeeting` (the legacy lms-data row) and
+// the coach↔parent meeting already exist elsewhere in this file; these are the
+// Module 8 staff meetings and must not be confused with either.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type MeetingType =
+  | "BIWEEKLY_TEACHER" | "MONTHLY_STAFF" | "TRAINING" | "PERFORMANCE_REVIEW"
+  | "SUPERVISOR_TEACHER" | "COACH_TEACHER" | "ADMIN_STAFF" | "TEACHER_TEACHER"
+  | "DEPARTMENT" | "STUDENT_MEETING";
+export type MeetingStatus = "SCHEDULED" | "LIVE" | "COMPLETED" | "CANCELLED";
+export type MeetingPlatform = "JITSI" | "ZOOM" | "TEAMS" | "OTHER";
+export type MeetingAttendanceStatus = "INVITED" | "PRESENT" | "LATE" | "ABSENT" | "EXCUSED";
+export type MeetingMinutesStatus = "NOT_STARTED" | "DRAFT" | "PUBLISHED";
+export type MeetingActionPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+export type MeetingActionStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+
+export interface MeetingListRow {
+  id: string;
+  title: string;
+  type: MeetingType;
+  description: string | null;
+  startsAt: string;
+  endsAt: string;
+  durationMins: number;
+  platform: MeetingPlatform;
+  meetingLink: string | null;
+  status: MeetingStatus;
+  organizerId: string;
+  organizerName: string | null;
+  minutesStatus: MeetingMinutesStatus;
+  seriesId: string | null;
+  cancelReason: string | null;
+  rescheduledFrom: string | null;
+  participantCount: number;
+  attendedCount: number;
+  actionItemCount: number;
+  attachmentCount: number;
+  myStatus: MeetingAttendanceStatus | null;
+  isOrganizer: boolean;
+}
+
+export interface MeetingParticipant {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  role: string;
+  isOrganizer: boolean;
+  isOptional: boolean;
+  status: MeetingAttendanceStatus;
+  joinedAt: string | null;
+  leftAt: string | null;
+  durationMins: number;
+  lateMinutes: number;
+  excuseReason: string | null;
+  markedByName: string | null;
+}
+
+export interface MeetingActionItem {
+  id: string;
+  description: string;
+  assignedToId: string | null;
+  assignedToName: string | null;
+  dueDate: string | null;
+  priority: MeetingActionPriority;
+  status: MeetingActionStatus;
+  completedAt: string | null;
+  completionNote: string | null;
+  overdue: boolean;
+  meeting?: { id: string; title: string; startsAt: string; type: MeetingType };
+}
+
+export interface MeetingAttachment {
+  id: string;
+  kind: string;
+  title: string;
+  url: string;
+  uploadedByName: string | null;
+  createdAt: string;
+}
+
+export interface MeetingRecord {
+  id: string;
+  title: string;
+  type: MeetingType;
+  description: string | null;
+  startsAt: string;
+  endsAt: string;
+  durationMins: number;
+  timeZone: string | null;
+  platform: MeetingPlatform;
+  meetingLink: string | null;
+  status: MeetingStatus;
+  organizerId: string;
+  organizerName: string | null;
+  series: { id: string; name: string; intervalWeeks: number } | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  cancelledAt: string | null;
+  cancelledByName: string | null;
+  cancelReason: string | null;
+  rescheduledFrom: string | null;
+  rescheduleNote: string | null;
+  minutesStatus: MeetingMinutesStatus;
+  minutes: {
+    summary: string | null;
+    discussionPoints: string | null;
+    decisions: string | null;
+    remarks: string | null;
+    publishedAt: string | null;
+    byName: string | null;
+  } | null;
+  participants: MeetingParticipant[];
+  actionItems: MeetingActionItem[];
+  attachments: MeetingAttachment[];
+  canManage: boolean;
+  canJoin: boolean;
+  myStatus: MeetingAttendanceStatus | null;
+  /** The viewer's own user id — used to tell which action items are theirs. */
+  myUserId: string;
+}
+
+export interface MyMeetings {
+  upcoming: MeetingListRow[];
+  past: MeetingListRow[];
+  cancelled: MeetingListRow[];
+}
+
+export interface MeetingConfig {
+  lateAfterMins: number;
+  minAttendancePct: number;
+  reminderHoursBefore: number;
+  finalReminderMins: number;
+  notifyOnStart: boolean;
+  notifyOnAbsence: boolean;
+  requireMinutesToComplete: boolean;
+  absenceGraceMins: number;
+  jitsiBaseUrl: string;
+  defaultGenerateAheadWeeks: number;
+}
+
+export interface MeetingSeries {
+  id: string;
+  name: string;
+  type: MeetingType;
+  active: boolean;
+  intervalWeeks: number;
+  weekday: number;
+  startTime: string;
+  durationMins: number;
+  anchorDate: string;
+  organizerId: string | null;
+  organizerName: string | null;
+  platform: MeetingPlatform;
+  description: string | null;
+  inviteRoles: string[];
+  optionalInviteRoles: string[];
+  generateAheadWeeks: number;
+  lastGeneratedAt: string | null;
+  generatedCount: number;
+  nextOccurrence: { id: string; startsAt: string } | null;
+}
+
+export interface MeetingInvitables {
+  staff: { id: string; name: string; email: string; role: string; avatarUrl: string | null }[];
+  students: { id: string; userId: string; code: string; name: string }[];
+  courses: { id: string; title: string }[];
+  canInviteStudents: boolean;
+}
+
+export interface MeetingParticipantSelection {
+  userIds?: string[];
+  roles?: string[];
+  courseIds?: string[];
+  studentIds?: string[];
+  optionalUserIds?: string[];
+}
+
+export interface MeetingDashboard {
+  upcoming: number;
+  live: number;
+  thisMonth: number;
+  cancelled: number;
+  minutesDue: number;
+  openActions: number;
+  overdueActions: number;
+  avgAttendancePct: number;
+  lowestAttenders: { userId: string; name: string; attendancePct: number; expected: number }[];
+}
+
+export interface MyMeetingStats {
+  upcoming: number;
+  attended: number;
+  missed: number;
+  attendancePct: number;
+  openActions: number;
+  overdueActions: number;
+}
+
+// ── Meetings ────────────────────────────────────────────────────────────────
+
+/**
+ * Paged, because meeting history is kept for ever. The page number and total
+ * come back with the rows so a screen can say how much it is not showing rather
+ * than silently stopping at whatever the server felt like returning.
+ */
+export interface MeetingPage {
+  rows: MeetingListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
+export const fetchMeetings = (params: Record<string, string | number | undefined> = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== "") q.set(k, String(v)); });
+  return api<MeetingPage>(`/meetings${q.toString() ? `?${q}` : ""}`);
+};
+export const fetchMyMeetings = () => api<MyMeetings>(`/meetings/mine`);
+export const fetchMyMeetingStats = () => api<MyMeetingStats>(`/meetings/my-stats`);
+export const fetchMeeting = (id: string) => api<MeetingRecord>(`/meetings/${id}`);
+export const fetchMeetingDashboard = () => api<MeetingDashboard>(`/meetings/dashboard`);
+export const fetchMeetingInvitables = () => api<MeetingInvitables>(`/meetings/invitables`);
+
+export const createMeeting = (dto: {
+  title: string; type: MeetingType; description?: string;
+  startsAt: string; endsAt?: string; durationMins?: number; timeZone?: string;
+  platform?: MeetingPlatform; meetingLink?: string;
+  participants?: MeetingParticipantSelection; organizerId?: string;
+}) => api<MeetingRecord>(`/meetings`, { method: "POST", body: JSON.stringify(dto) });
+
+export const updateMeeting = (id: string, dto: Record<string, unknown>) =>
+  api<MeetingRecord>(`/meetings/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const rescheduleMeeting = (id: string, dto: { startsAt: string; durationMins?: number; note?: string }) =>
+  api<MeetingRecord>(`/meetings/${id}/reschedule`, { method: "POST", body: JSON.stringify(dto) });
+export const cancelMeeting = (id: string, reason?: string) =>
+  api<MeetingRecord>(`/meetings/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+export const startMeeting = (id: string) =>
+  api<MeetingRecord>(`/meetings/${id}/start`, { method: "POST" });
+export const endMeeting = (id: string) =>
+  api<MeetingRecord>(`/meetings/${id}/end`, { method: "POST" });
+
+// ── Attendance ──────────────────────────────────────────────────────────────
+
+export const joinMeeting = (id: string) =>
+  api<{ joinedAt: string; meetingLink: string | null; meetingId: string }>(
+    `/meetings/${id}/join`, { method: "POST" },
+  );
+export const leaveMeeting = (id: string) =>
+  api<{ leftAt: string; durationMins: number; status: MeetingAttendanceStatus }>(
+    `/meetings/${id}/leave`, { method: "POST" },
+  );
+export const markMeetingAttendance = (
+  id: string,
+  dto: { userId: string; status: MeetingAttendanceStatus; reason?: string },
+) => api<MeetingRecord>(`/meetings/${id}/attendance`, { method: "POST", body: JSON.stringify(dto) });
+
+// ── Minutes ─────────────────────────────────────────────────────────────────
+
+export const saveMeetingMinutes = (id: string, dto: {
+  summary?: string; discussionPoints?: string; decisions?: string; remarks?: string;
+}) => api<MeetingRecord>(`/meetings/${id}/minutes`, { method: "PUT", body: JSON.stringify(dto) });
+export const publishMeetingMinutes = (id: string) =>
+  api<MeetingRecord>(`/meetings/${id}/minutes/publish`, { method: "POST" });
+export const reopenMeetingMinutes = (id: string) =>
+  api<MeetingRecord>(`/meetings/${id}/minutes/reopen`, { method: "POST" });
+
+// ── Action items ────────────────────────────────────────────────────────────
+
+export const fetchMyMeetingActions = (status?: string) =>
+  api<MeetingActionItem[]>(`/meetings/my-actions${status ? `?status=${status}` : ""}`);
+export const addMeetingActionItem = (meetingId: string, dto: {
+  description: string; assignedToId?: string; dueDate?: string;
+  priority?: MeetingActionPriority; status?: MeetingActionStatus;
+}) => api<MeetingActionItem>(`/meetings/${meetingId}/action-items`, { method: "POST", body: JSON.stringify(dto) });
+export const updateMeetingActionItem = (itemId: string, dto: Record<string, unknown>) =>
+  api<MeetingActionItem>(`/meetings/action-items/${itemId}`, { method: "PATCH", body: JSON.stringify(dto) });
+export const deleteMeetingActionItem = (itemId: string) =>
+  api<{ deleted: boolean }>(`/meetings/action-items/${itemId}`, { method: "DELETE" });
+
+// ── Attachments ─────────────────────────────────────────────────────────────
+
+export const addMeetingAttachment = (meetingId: string, dto: { title: string; url: string; kind?: string }) =>
+  api<MeetingAttachment>(`/meetings/${meetingId}/attachments`, { method: "POST", body: JSON.stringify(dto) });
+export const deleteMeetingAttachment = (attachmentId: string) =>
+  api<{ deleted: boolean }>(`/meetings/attachments/${attachmentId}`, { method: "DELETE" });
+
+// ── Settings + recurring series ─────────────────────────────────────────────
+
+export const fetchMeetingConfig = () => api<MeetingConfig>(`/meetings/settings`);
+export const saveMeetingConfig = (dto: Partial<MeetingConfig>) =>
+  api<MeetingConfig>(`/meetings/settings`, { method: "PATCH", body: JSON.stringify(dto) });
+export const fetchMeetingSeries = () => api<MeetingSeries[]>(`/meetings/series`);
+export const createMeetingSeries = (dto: Record<string, unknown>) =>
+  api<MeetingSeries>(`/meetings/series`, { method: "POST", body: JSON.stringify(dto) });
+export const updateMeetingSeries = (id: string, dto: Record<string, unknown>) =>
+  api<MeetingSeries>(`/meetings/series/${id}`, { method: "PUT", body: JSON.stringify(dto) });
+export const deleteMeetingSeries = (id: string) =>
+  api<{ deleted: boolean; orphanedFutureMeetings: number }>(`/meetings/series/${id}`, { method: "DELETE" });
+export const generateMeetingSeries = (id: string) =>
+  api<{ created: number }>(`/meetings/series/${id}/generate`, { method: "POST" });
+
+// ── Reports (8.11) ──────────────────────────────────────────────────────────
+
+const meetingReportQuery = (from?: string, to?: string, extra: Record<string, string | undefined> = {}) => {
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  Object.entries(extra).forEach(([k, v]) => { if (v) q.set(k, v); });
+  return q.toString() ? `?${q}` : "";
+};
+
+export interface MeetingAttendanceReportRow {
+  id: string; title: string; type: MeetingType; startsAt: string; durationMins: number;
+  organizerName: string | null; minutesStatus: MeetingMinutesStatus;
+  invited: number; present: number; late: number; absent: number; excused: number;
+  attendancePct: number; avgMinutes: number;
+}
+export interface StaffAttendanceRow {
+  userId: string; name: string; email: string; avatarUrl: string | null; role: string;
+  invited: number; present: number; late: number; absent: number; excused: number;
+  expected: number; attendancePct: number; punctualityPct: number; avgLateMinutes: number;
+}
+export interface MissedMeetingsReport {
+  total: number;
+  byUser: { userId: string; name: string; role: string; missed: number }[];
+  recent: { userId: string; name: string; role: string; meeting: { id: string; title: string; startsAt: string } }[];
+}
+export interface MinutesReport {
+  rows: {
+    id: string; title: string; type: MeetingType; startsAt: string; status: MeetingStatus;
+    organizerName: string | null; minutesStatus: MeetingMinutesStatus; publishedAt: string | null;
+    byName: string | null; hasSummary: boolean; actionItems: number; outstanding: boolean;
+  }[];
+  total: number; published: number; draft: number; outstanding: number; compliancePct: number;
+}
+export interface ActionItemReport {
+  items: MeetingActionItem[];
+  total: number;
+  byStatus: Record<string, number>;
+  overdue: number;
+  completionPct: number;
+  byAssignee: { assignedToId: string | null; name: string; total: number; completed: number; overdue: number; completionPct: number }[];
+}
+export interface TrainingReport {
+  sessions: { id: string; title: string; startsAt: string; durationMins: number; invited: number; attended: number }[];
+  totalSessions: number;
+  staff: { userId: string; name: string; role: string; attended: number; invited: number; attendancePct: number; hours: number }[];
+}
+
+export const fetchMeetingAttendanceReport = (from?: string, to?: string, type?: string) =>
+  api<MeetingAttendanceReportRow[]>(`/meetings/reports/attendance${meetingReportQuery(from, to, { type })}`);
+export const fetchStaffAttendanceReport = (from?: string, to?: string, role?: string) =>
+  api<StaffAttendanceRow[]>(`/meetings/reports/staff${meetingReportQuery(from, to, { role })}`);
+export const fetchMissedMeetingsReport = (from?: string, to?: string) =>
+  api<MissedMeetingsReport>(`/meetings/reports/missed${meetingReportQuery(from, to)}`);
+export const fetchMinutesReport = (from?: string, to?: string) =>
+  api<MinutesReport>(`/meetings/reports/minutes${meetingReportQuery(from, to)}`);
+export const fetchActionItemReport = (from?: string, to?: string, assignedToId?: string) =>
+  api<ActionItemReport>(`/meetings/reports/actions${meetingReportQuery(from, to, { assignedToId })}`);
+export const fetchTrainingReport = (from?: string, to?: string) =>
+  api<TrainingReport>(`/meetings/reports/training${meetingReportQuery(from, to)}`);
+
+export interface MeetingAuditRow {
+  id: string;
+  action: string;
+  description: string | null;
+  actorName: string | null;
+  createdAt: string;
+}
+
+export const fetchMeetingAudit = (id: string) => api<MeetingAuditRow[]>(`/meetings/${id}/audit`);
+
+/**
+ * 8.8 — upload a recording or document, then attach the returned URL.
+ *
+ * Two steps rather than one multipart create: the attachment row also accepts
+ * a link to something already hosted (a Zoom cloud recording, a Drive folder),
+ * and folding the upload into the create would make the link case the odd one.
+ */
+export const uploadMeetingAttachment = async (file: File): Promise<{ url: string; name: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  // No Content-Type header — the browser has to set the multipart boundary.
+  const res = await fetch(`${BASE}/meetings/upload`, { method: "POST", headers: { ...authHeader() }, body: form });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return res.json() as Promise<{ url: string; name: string }>;
+};

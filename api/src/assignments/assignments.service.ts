@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException,
 import { bulkDelete } from '../common/bulk-delete';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeHtml } from '../common/sanitize-html';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailsService } from '../emails/emails.service';
 import { Role, SubmissionStatus } from '../generated/prisma/enums';
@@ -170,7 +171,10 @@ export class AssignmentsService implements OnModuleInit {
       data: {
         title: dto.title, courseId: dto.courseId, batchId: dto.batchId ?? null,
         teacherId: teacherId ?? null, createdById: actor.id,
-        description: dto.description, instructions: dto.instructions,
+        // Rich text, rendered as HTML into a student's browser — sanitised on
+        // WRITE so what is stored is already safe for every reader.
+        description: sanitizeHtml(dto.description),
+        instructions: sanitizeHtml(dto.instructions),
         subject: dto.subject, chapter: dto.chapter, topic: dto.topic,
         skillId: dto.skillId ?? null,
         difficulty: dto.difficulty, type: dto.type,
@@ -206,6 +210,9 @@ export class AssignmentsService implements OnModuleInit {
     await this.assertEditable(id, actor);
     const data: Record<string, unknown> = { ...dto };
     delete data.status; // status changes go through lifecycle endpoints
+    // Same sanitisation as create — an edit is just as good an injection point.
+    if (dto.description !== undefined) data.description = sanitizeHtml(dto.description);
+    if (dto.instructions !== undefined) data.instructions = sanitizeHtml(dto.instructions);
     if (dto.dueAt !== undefined) data.dueAt = dto.dueAt ? new Date(dto.dueAt) : null;
     if (dto.publishAt !== undefined) data.publishAt = dto.publishAt ? new Date(dto.publishAt) : null;
     if (dto.attachments !== undefined) data.attachments = dto.attachments;

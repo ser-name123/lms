@@ -26,6 +26,7 @@ import {
   Wallet,
   Banknote,
   FileText,
+  Trophy,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -40,11 +41,15 @@ const teacherNavItems = [
   { label: "My Availability", href: "/teacher/availability", icon: CalendarClock },
   { label: "Attendance", href: "/teacher/attendance", icon: ClipboardCheck },
   { label: "Live Classes", href: "/teacher/live-class", icon: Radio },
-  { label: "Live Meetings", href: "/teacher/meetings", icon: Video },
+  { label: "Meetings", href: "/teacher/meetings", icon: Video },
   { label: "My Students", href: "/teacher/students", icon: Users },
   { label: "Student Progress", href: "/teacher/progress", icon: TrendingUp },
   { label: "Assignments", href: "/teacher/assignments", icon: ClipboardList },
   { label: "Assessments", href: "/teacher/assessments", icon: FileCheck2 },
+  // Module 7 — the end-of-cycle evaluation the teacher writes per student.
+  // "Assessments" above is the online-test engine; these are not the same thing.
+  { label: "Monthly Assessment", href: "/teacher/monthly-assessments", icon: ClipboardCheck },
+  { label: "Student Rankings", href: "/teacher/rankings", icon: Trophy },
   { label: "Monthly Reports", href: "/teacher/reports", icon: FileText },
   { label: "My Earnings", href: "/teacher/earnings", icon: Wallet },
   { label: "My Salary", href: "/teacher/salary", icon: Banknote },

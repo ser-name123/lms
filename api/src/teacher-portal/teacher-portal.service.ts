@@ -212,6 +212,9 @@ export class TeacherPortalService {
         country: e.student.user.country,
         timezone: e.student.user.timezone,
         joinedAt: e.createdAt,
+        // The enrolment's course, so the roster can link straight into the
+        // monthly assessment form — which is keyed on student + course.
+        courseId: e.courseId,
         subscription: sub
           ? {
               model: sub.model?.name ?? (sub.pricingMode === 'HOURLY' ? 'Hourly Subscription' : 'Monthly Package'),

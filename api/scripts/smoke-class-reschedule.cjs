@@ -33,14 +33,13 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
   if (!SECRET) throw new Error('JWT_ACCESS_SECRET is not set');
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
-  let savedAvailability, savedTeacherId;
   const WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const WIDE = JSON.stringify(Object.fromEntries(WEEK.map((d) => [d, [{ from: '00:00', to: '23:59' }]])));
 
   const cleanup = async () => {
-    if (savedTeacherId !== undefined) {
-      await db.query(`UPDATE "TeacherProfile" SET availability = $2::jsonb WHERE id = $1`, [savedTeacherId, savedAvailability == null ? null : JSON.stringify(savedAvailability)]);
-    }
+    // Sessions and requests first — they reference the teacher this smoke owns.
+    await db.query(`DELETE FROM "ClassSession" WHERE title LIKE $1`, [`${MARKER}%`]);
+    await db.query(`DELETE FROM "LeaveRequest" WHERE reason LIKE $1`, [`${MARKER}%`]);
     const users = await db.query(`SELECT id FROM "User" WHERE email LIKE $1`, [`%${MARKER}%`]);
     for (const u of users.rows) {
       const sp = (await db.query(`SELECT id FROM "StudentProfile" WHERE "userId"=$1`, [u.id])).rows[0];
@@ -48,10 +47,13 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
         await db.query(`DELETE FROM "ClassRescheduleRequest" WHERE "studentId"=$1`, [sp.id]);
         await db.query(`DELETE FROM "StudentSubscription" WHERE "studentId"=$1`, [sp.id]);
       }
+      const tp = (await db.query(`SELECT id FROM "TeacherProfile" WHERE "userId"=$1`, [u.id])).rows[0];
+      if (tp) {
+        await db.query(`DELETE FROM "ClassRescheduleRequest" WHERE "teacherId"=$1`, [tp.id]);
+        await db.query(`DELETE FROM "TeacherProfile" WHERE id=$1`, [tp.id]);
+      }
       await db.query(`DELETE FROM "User" WHERE id=$1`, [u.id]);
     }
-    await db.query(`DELETE FROM "ClassSession" WHERE title LIKE $1`, [`${MARKER}%`]);
-    await db.query(`DELETE FROM "LeaveRequest" WHERE reason LIKE $1`, [`${MARKER}%`]);
   };
 
   const mkStudent = async (tag, limit) => {
@@ -73,12 +75,29 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 
   try {
     await cleanup();
-    const teacher = (await db.query(`SELECT id, "userId", availability FROM "TeacherProfile" WHERE "userId" IS NOT NULL ORDER BY id LIMIT 1`)).rows[0];
+    /*
+     * A teacher of this smoke's own, NOT the first one in the table.
+     *
+     * Borrowing a shared teacher made this test depend on how much data the
+     * rest of the suite had left behind: `/teacher/reschedulable` returns the
+     * nearest 100 upcoming classes, and once that teacher had accumulated more
+     * than 100 sessions ahead of this fixture's, the class under test simply
+     * fell off the end and two assertions failed for reasons that had nothing
+     * to do with rescheduling.
+     */
+    const tUser = (await db.query(
+      `INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt")
+       VALUES (gen_random_uuid(),$1,'x','Resch','Teacher','TEACHER','ACTIVE',now()) RETURNING id`,
+      [`${MARKER}-teacher@example.test`],
+    )).rows[0];
+    const teacher = (await db.query(
+      `INSERT INTO "TeacherProfile" (id,"userId","teacherCode",availability) VALUES (gen_random_uuid(),$1,$2,$3::jsonb)
+       RETURNING id, "userId", availability`,
+      [tUser.id, `${MARKER}-T-${Date.now()}`, WIDE],
+    )).rows[0];
     const course = (await db.query(`SELECT id FROM "Course" ORDER BY id LIMIT 1`)).rows[0];
     check('fixtures present', !!teacher && !!teacher.userId && !!course);
-    if (!teacher || !teacher.userId) throw new Error('no teacher with a user');
-    savedAvailability = teacher.availability; savedTeacherId = teacher.id;
-    await db.query(`UPDATE "TeacherProfile" SET availability = $2::jsonb WHERE id = $1`, [teacher.id, WIDE]);
+    if (!course) throw new Error('no course');
 
     const mkSession = async (studentId, startsAt, suffix) => {
       const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isUniqueClashOn } from '../common/retry-unique';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '../generated/prisma/enums';
 import {
@@ -82,21 +83,35 @@ export class EarningsService {
     const amount = paid ? round2(rate * (scheduledMinutes / 60)) : 0;
     const studentId = cls.attendees[0]?.studentId ?? null;
 
-    await this.prisma.teacherEarning.create({
-      data: {
-        teacherId: cls.teacherId,
-        classSessionId,
-        studentId,
-        courseId: cls.courseId ?? null,
-        classType: 'REGULAR',
-        scheduledMinutes,
-        hourlyRate: rate,
-        amount,
-        currency: cfg.earningsCurrency,
-        outcome,
-        paid,
-      },
-    });
+    /*
+     * The findUnique above is a fast path, not the guarantee. `classSessionId`
+     * is unique, so two attendance locks landing together both read "no earning
+     * yet" and both insert — one of them dies on the index with a P2002 that
+     * used to escape and 500 the whole lock step, which is exactly the call
+     * site this method promises to be safe for. Losing that race means the row
+     * already exists, which is the outcome we wanted: swallow it, rethrow
+     * anything else.
+     */
+    try {
+      await this.prisma.teacherEarning.create({
+        data: {
+          teacherId: cls.teacherId,
+          classSessionId,
+          studentId,
+          courseId: cls.courseId ?? null,
+          classType: 'REGULAR',
+          scheduledMinutes,
+          hourlyRate: rate,
+          amount,
+          currency: cfg.earningsCurrency,
+          outcome,
+          paid,
+        },
+      });
+    } catch (e) {
+      if (isUniqueClashOn(e, 'classSessionId')) return;
+      throw e;
+    }
 
     // Scenario 3 — teacher absent while the student was there: raise a coach
     // reschedule task and notify the coach, the student and the supervisors.
@@ -181,20 +196,27 @@ export class EarningsService {
     const cfg = await this.financeConfig();
     if (!cfg.teacherEarningsEnabled) return;
 
-    await this.prisma.teacherEarning.create({
-      data: {
-        teacherId: trial.teacherId,
-        leadTrialId,
-        courseId: trial.recommendedCourseId ?? null,
-        classType: 'TRIAL',
-        scheduledMinutes: trial.durationMins ?? 0,
-        hourlyRate: 0,
-        amount: round2(cfg.trialClassPayout),
-        currency: cfg.earningsCurrency,
-        outcome: 'COMPLETED',
-        paid: true,
-      },
-    });
+    // Same race as recordForClass: the findFirst above is the fast path, the
+    // compound unique on (leadTrialId, classType) is the guarantee.
+    try {
+      await this.prisma.teacherEarning.create({
+        data: {
+          teacherId: trial.teacherId,
+          leadTrialId,
+          courseId: trial.recommendedCourseId ?? null,
+          classType: 'TRIAL',
+          scheduledMinutes: trial.durationMins ?? 0,
+          hourlyRate: 0,
+          amount: round2(cfg.trialClassPayout),
+          currency: cfg.earningsCurrency,
+          outcome: 'COMPLETED',
+          paid: true,
+        },
+      });
+    } catch (e) {
+      if (isUniqueClashOn(e, 'leadTrialId')) return;
+      throw e;
+    }
   }
 
   // Optional enrolment bonus when a trial's student successfully enrols. Booked
@@ -213,20 +235,27 @@ export class EarningsService {
       where: { leadTrialId, classType: 'TRIAL_ENROLL_BONUS' },
     });
     if (already) return;
-    await this.prisma.teacherEarning.create({
-      data: {
-        teacherId: trial.teacherId,
-        leadTrialId,
-        courseId: trial.recommendedCourseId ?? null,
-        classType: 'TRIAL_ENROLL_BONUS',
-        scheduledMinutes: 0,
-        hourlyRate: 0,
-        amount: round2(cfg.trialEnrollBonus),
-        currency: cfg.earningsCurrency,
-        outcome: 'COMPLETED',
-        paid: true,
-      },
-    });
+    try {
+      await this.prisma.teacherEarning.create({
+        data: {
+          teacherId: trial.teacherId,
+          leadTrialId,
+          courseId: trial.recommendedCourseId ?? null,
+          classType: 'TRIAL_ENROLL_BONUS',
+          scheduledMinutes: 0,
+          hourlyRate: 0,
+          amount: round2(cfg.trialEnrollBonus),
+          currency: cfg.earningsCurrency,
+          outcome: 'COMPLETED',
+          paid: true,
+        },
+      });
+    } catch (e) {
+      // A bonus paid twice is money out of the door — the unique index is the
+      // real guard and a lost race means it is already booked.
+      if (isUniqueClashOn(e, 'leadTrialId')) return;
+      throw e;
+    }
   }
 
   // ── Teacher-facing ledger + dashboard summary ───────────────────────────────

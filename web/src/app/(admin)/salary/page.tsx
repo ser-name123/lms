@@ -19,7 +19,9 @@ import {
 const money = (n: number, c = "USD") => `${c} ${n.toFixed(2)}`;
 const swalBg = () => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "#18181b" : "#ffffff");
 const statusTone: Record<SalaryStatus, Tone> = {
-  CALCULATED: "neutral", UNDER_REVIEW: "warning", ADJUSTMENT_APPLIED: "accent", APPROVED: "good", PAID: "good", FAILED: "critical",
+  CALCULATED: "neutral", UNDER_REVIEW: "warning", ADJUSTMENT_APPLIED: "accent", APPROVED: "good",
+  // Amber, not green: a payment in flight needs watching, not celebrating.
+  PROCESSING: "warning", PAID: "good", FAILED: "critical",
 };
 const monthValue = () => { const d = new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
 

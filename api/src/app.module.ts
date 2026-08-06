@@ -36,6 +36,11 @@ import { TeacherManagementModule } from './teacher-management/teacher-management
 import { StudentManagementModule } from './student-management/student-management.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { AssessmentsModule } from './assessments/assessments.module';
+// Module 7 — the teacher's end-of-cycle evaluation, distinct from the
+// online-test AssessmentsModule above.
+import { MonthlyAssessmentsModule } from './monthly-assessments/monthly-assessments.module';
+import { RankingsModule } from './rankings/rankings.module';
+import { MeetingsModule } from './meetings/meetings.module';
 import { ProgressModule } from './progress/progress.module';
 import { FinanceModule } from './finance/finance.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -78,6 +83,10 @@ import { PaymentsModule } from './payments/payments.module';
     StudentManagementModule,
     AssignmentsModule,
     AssessmentsModule,
+    MonthlyAssessmentsModule,
+    RankingsModule,
+
+    MeetingsModule,
     ProgressModule,
     FinanceModule,
 

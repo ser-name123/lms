@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '../generated/prisma/enums';
 import { round2 } from '../finance/finance.config';
-import { WiseService } from './wise.service';
+import { WiseService, type WiseTransferResult } from './wise.service';
 
 export interface Actor {
   id: string;
@@ -20,6 +20,8 @@ export interface Actor {
  */
 @Injectable()
 export class SalaryService {
+  private readonly logger = new Logger(SalaryService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -57,24 +59,47 @@ export class SalaryService {
     }
 
     const results: string[] = [];
+    const skipped: string[] = [];
     for (const [teacherId, rows] of byTeacher) {
-      // A salary already paid for this exact period is immutable.
+      // A salary already paid or mid-payment for this exact period is immutable.
       const existing = await this.prisma.teacherSalary.findUnique({
         where: { teacherId_periodStart: { teacherId, periodStart } },
         select: { id: true, status: true },
       });
-      if (existing?.status === 'PAID') continue;
+      if (existing?.status === 'PAID' || existing?.status === 'PROCESSING') {
+        skipped.push(teacherId);
+        continue;
+      }
 
+      /*
+       * Every earning in the window lands in exactly one bucket.
+       *
+       * The default arm used to be missing: anything that was not REGULAR,
+       * TRIAL or TRIAL_ENROLL_BONUS was silently dropped from `gross` and yet
+       * still stamped with this salary's id below — the teacher was told it was
+       * settled and never actually paid for it. A future `classType` must
+       * therefore land somewhere, and `bonus` is the honest home for it.
+       *
+       * TRIAL_ENROLL_BONUS moves to `bonus` as well, which is what the column
+       * was always for; it used to be folded into `trial`, leaving
+       * `bonusEarnings` permanently zero and the two figures both wrong.
+       */
       let regular = 0, trial = 0, bonus = 0, classes = 0;
       let currency = 'USD';
       for (const r of rows) {
         const amt = Number(r.amount);
         currency = r.currency || currency;
-        if (r.classType === 'REGULAR') {
-          regular += amt;
-          if (r.paid) classes += 1;
-        } else if (r.classType === 'TRIAL' || r.classType === 'TRIAL_ENROLL_BONUS') {
-          trial += amt;
+        switch (r.classType) {
+          case 'REGULAR':
+            regular += amt;
+            if (r.paid) classes += 1;
+            break;
+          case 'TRIAL':
+            trial += amt;
+            break;
+          default:
+            bonus += amt;
+            break;
         }
       }
       const gross = round2(regular + trial + bonus);
@@ -83,6 +108,20 @@ export class SalaryService {
       const salaryId = existing?.id;
       const adjTotal = salaryId ? await this.adjustmentsTotal(salaryId) : 0;
       const net = round2(gross + adjTotal);
+
+      /*
+       * Recalculating an APPROVED salary sends it back for approval.
+       *
+       * Only PAID used to be protected, so a recalculation could rewrite the
+       * gross and net of an already-approved row while leaving `status`,
+       * `approvedByName` and `approvedAt` untouched — and `pay()` would then
+       * disburse a figure nobody had signed off. Whoever approved it approved a
+       * NUMBER, not a row, so when the number moves the approval has to go.
+       */
+      const approvalReset =
+        existing?.status === 'APPROVED'
+          ? { status: 'CALCULATED' as const, approvedById: null, approvedByName: null, approvedAt: null }
+          : {};
 
       const saved = await this.prisma.teacherSalary.upsert({
         where: { teacherId_periodStart: { teacherId, periodStart } },
@@ -97,6 +136,7 @@ export class SalaryService {
           adjustmentsTotal: round2(adjTotal),
           netAmount: net,
           currency,
+          ...approvalReset,
         },
         create: {
           teacherId,
@@ -113,6 +153,11 @@ export class SalaryService {
           currency,
         },
       });
+      if (existing?.status === 'APPROVED') {
+        this.logger.warn(
+          `Salary ${saved.id} was recalculated while APPROVED — approval cleared, it needs signing off again.`,
+        );
+      }
       // Link every earning in the window to this salary.
       await this.prisma.teacherEarning.updateMany({
         where: { id: { in: rows.map((r) => r.id) } },
@@ -120,7 +165,7 @@ export class SalaryService {
       });
       results.push(saved.id);
     }
-    return { period: label, salariesCalculated: results.length };
+    return { period: label, salariesCalculated: results.length, skippedSettled: skipped.length };
   }
 
   private async adjustmentsTotal(salaryId: string): Promise<number> {
@@ -247,13 +292,43 @@ export class SalaryService {
   }
 
   // ── Payment via Wise (Module 6C) ────────────────────────────────────────────
+  /**
+   * Pay an approved salary.
+   *
+   * The status transition is CLAIMED atomically before the transfer is created.
+   * Reading the status and then paying left a window in which two callers — an
+   * impatient double-click, or a retry racing the first attempt — both saw
+   * APPROVED, both created a transfer and both wrote PAID. The teacher was paid
+   * twice and the second SalaryPayment row was the only trace.
+   *
+   * `updateMany` with the status in the WHERE clause is a compare-and-set:
+   * exactly one caller gets count === 1 and proceeds; everyone else is told the
+   * payment is already running. The invoice side of this codebase solves the
+   * same problem with SELECT … FOR UPDATE; a row lock is not usable here
+   * because the Wise call is network I/O and must not be held inside a
+   * transaction.
+   */
   async pay(salaryId: string, actor: Actor) {
     const s = await this.prisma.teacherSalary.findUnique({ where: { id: salaryId } });
     if (!s) throw new NotFoundException('Salary not found.');
+    if (s.status === 'PAID') throw new BadRequestException('This salary has already been paid.');
+    if (s.status === 'PROCESSING') {
+      throw new BadRequestException(
+        'A payment for this salary is already in progress. Check the payment history before retrying.',
+      );
+    }
     // Only an approved salary can be paid (spec 6C business rule). A FAILED one
     // was approved before it failed, so a retry is allowed.
     if (s.status !== 'APPROVED' && s.status !== 'FAILED') {
       throw new BadRequestException('Only an approved salary can be paid.');
+    }
+
+    const claimed = await this.prisma.teacherSalary.updateMany({
+      where: { id: salaryId, status: { in: ['APPROVED', 'FAILED'] } },
+      data: { status: 'PROCESSING' },
+    });
+    if (claimed.count === 0) {
+      throw new BadRequestException('This salary was just claimed by another payment attempt.');
     }
 
     const teacher = await this.prisma.teacherProfile.findUnique({
@@ -270,7 +345,26 @@ export class SalaryService {
       currency: teacher?.payoutCurrency ?? s.currency,
     };
     const amount = Number(s.netAmount);
-    const result = this.wise.createTransfer({ recipient, amount, currency: s.currency });
+
+    /*
+     * If the transfer call itself throws we do NOT release the claim. A thrown
+     * network error cannot tell us whether the money left — releasing it to
+     * FAILED would invite a retry that pays twice, which is the exact failure
+     * this claim exists to prevent. The row stays PROCESSING so a human
+     * reconciles it against Wise, and the log says so out loud.
+     */
+    let result: WiseTransferResult;
+    try {
+      result = this.wise.createTransfer({ recipient, amount, currency: s.currency });
+    } catch (e) {
+      this.logger.error(
+        `Salary ${salaryId} is stuck PROCESSING — the transfer call threw and the outcome is unknown. ` +
+          `Reconcile against Wise by hand before retrying: ${(e as Error).message}`,
+      );
+      throw new BadRequestException(
+        'The payment provider did not respond. The salary is marked as processing — check Wise before retrying.',
+      );
+    }
 
     // Record the attempt (retries append — spec 6C payment history).
     await this.prisma.salaryPayment.create({

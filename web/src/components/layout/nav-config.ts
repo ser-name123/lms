@@ -28,6 +28,7 @@ import {
   SlidersHorizontal,
   PiggyBank,
   Radio,
+  Trophy,
   type LucideIcon,
 } from "lucide-react";
 
@@ -77,6 +78,17 @@ export const navGroups: NavGroup[] = [
       { label: "Reschedule Requests", href: "/reschedule-requests", icon: ClipboardList },
       { label: "Teacher Absences", href: "/teacher-absences", icon: CalendarOff },
       { label: "Monthly Reports", href: "/monthly-reports", icon: FileText },
+      {
+        // Module 7. Kept out of "Learning management" on purpose: that group is
+        // the catalogue (courses, online tests), this is a per-student workflow.
+        label: "Monthly Assessment",
+        icon: ClipboardCheck,
+        children: [
+          { label: "Assessments", href: "/monthly-assessments", icon: ClipboardCheck },
+          { label: "Student Rankings", href: "/rankings", icon: Trophy },
+          { label: "Assessment Setup", href: "/monthly-assessments/settings", icon: SlidersHorizontal },
+        ],
+      },
       {
         label: "Students",
         icon: Users,

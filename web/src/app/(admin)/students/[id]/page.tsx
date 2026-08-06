@@ -8,6 +8,7 @@ import {
   BookOpen, Snowflake, Play, Send, Plus, Save, ArrowLeftRight, Award, Upload, Check, X, Star, Wallet,
 } from "lucide-react";
 import { SubscriptionTab } from "./subscription-tab";
+import { MonthlyAssessmentTab } from "./monthly-assessment-tab";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -88,6 +89,9 @@ const TABS = [
   { key: "attendance", label: "Attendance", icon: CalendarDays },
   { key: "assignments", label: "Assignments", icon: ClipboardList },
   { key: "assessments", label: "Assessments", icon: ClipboardList },
+  // The end-of-cycle teacher evaluation (Module 7) — distinct from "Assessments"
+  // above, which is the online-test history.
+  { key: "monthlyAssessment", label: "Monthly Assessment", icon: FileText },
   { key: "performance", label: "Performance", icon: TrendingUp },
   { key: "progress", label: "Progress", icon: TrendingUp },
   { key: "documents", label: "Documents", icon: FileText },
@@ -183,6 +187,7 @@ export default function StudentHubPage() {
         {tab === "attendance" && <AttendanceTab studentId={id} />}
         {tab === "assignments" && <AssignmentsTab studentId={id} />}
         {tab === "assessments" && <AssessmentsTab studentId={id} />}
+        {tab === "monthlyAssessment" && <MonthlyAssessmentTab studentId={id} />}
         {tab === "performance" && <PerformanceTab studentId={id} />}
         {tab === "progress" && <ProgressTab studentId={id} />}
         {tab === "documents" && <DocumentsTab studentId={id} />}

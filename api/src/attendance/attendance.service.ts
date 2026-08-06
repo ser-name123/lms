@@ -11,6 +11,8 @@ import { EmailsService } from '../emails/emails.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { EarningsService } from '../earnings/earnings.service';
+import { nextBatchCodeFrom } from '../common/batch-code';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import { Role, ClassStatus, StudentAttendanceStatus } from '../generated/prisma/enums';
 import {
   AssignStudentsDto,
@@ -110,23 +112,26 @@ export class AttendanceService implements OnModuleInit {
       );
     }
 
-    const code = await this.nextCode('Batch', 'BATCH');
-    const batch = await this.prisma.batch.create({
-      data: {
-        code,
-        name: dto.name,
-        courseId: dto.courseId,
-        teacherId: dto.teacherId || null,
-        level: dto.level || null,
-        startDate: dto.startDate ? new Date(dto.startDate) : null,
-        endDate: dto.endDate ? new Date(dto.endDate) : null,
-        daysOfWeek: dto.daysOfWeek || [],
-        startTime: dto.startTime || null,
-        endTime: dto.endTime || null,
-        timeZone: dto.timeZone || null,
-        capacity: dto.capacity ?? null,
-      },
-    });
+    // Recomputed inside the retry — subscriptions.service mints this same
+    // index, so a clash here is as likely to be that service as another admin.
+    const batch = await retryOnUniqueClash('code', async () =>
+      this.prisma.batch.create({
+        data: {
+          code: await nextBatchCodeFrom(this.prisma),
+          name: dto.name,
+          courseId: dto.courseId,
+          teacherId: dto.teacherId || null,
+          level: dto.level || null,
+          startDate: dto.startDate ? new Date(dto.startDate) : null,
+          endDate: dto.endDate ? new Date(dto.endDate) : null,
+          daysOfWeek: dto.daysOfWeek || [],
+          startTime: dto.startTime || null,
+          endTime: dto.endTime || null,
+          timeZone: dto.timeZone || null,
+          capacity: dto.capacity ?? null,
+        },
+      }),
+    );
 
     if (dto.studentIds?.length) await this.assignStudents(batch.id, { studentIds: dto.studentIds });
     return this.getBatch(batch.id);
@@ -1143,16 +1148,6 @@ export class AttendanceService implements OnModuleInit {
       select: { userId: true, guardianName: true, user: { select: { email: true, firstName: true } } },
     });
     return rows.map((r) => ({ userId: r.userId, email: r.user.email, firstName: r.user.firstName, guardian: r.guardianName }));
-  }
-
-  private async nextCode(model: 'Batch', prefix: string) {
-    for (let i = 0; i < 5; i++) {
-      const count = await (this.prisma as any)[model.charAt(0).toLowerCase() + model.slice(1)].count();
-      const candidate = `${prefix}-${String(count + 1 + i).padStart(4, '0')}`;
-      const clash = await this.prisma.batch.findUnique({ where: { code: candidate }, select: { id: true } });
-      if (!clash) return candidate;
-    }
-    return `${prefix}-${Date.now().toString().slice(-5)}`;
   }
 
   private async dailyTrend(days: number) {

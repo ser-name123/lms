@@ -17,6 +17,7 @@ const statusTone: Record<string, Tone> = {
   UNDER_REVIEW: "accent",
   ADJUSTMENT_APPLIED: "warning",
   APPROVED: "good",
+  PROCESSING: "accent",
   PAID: "good",
   FAILED: "critical",
 };
@@ -25,6 +26,8 @@ const statusLabel: Record<string, string> = {
   UNDER_REVIEW: "Under review",
   ADJUSTMENT_APPLIED: "Adjustment applied",
   APPROVED: "Approved",
+  // Worded for the teacher, who only needs to know it is on its way.
+  PROCESSING: "Payment in progress",
   PAID: "Paid",
   FAILED: "Payment failed",
 };

@@ -156,6 +156,7 @@ model User {
   parentLinks    ParentLink[]
   widgetLayouts  UserWidgetLayout[]
   announcementReads AnnouncementRead[]
+  meetingInvites StaffMeetingParticipant[]
 
   @@index([role, status])
 }
@@ -253,6 +254,9 @@ model StudentProfile {
   subscriptionRequests SubscriptionRequest[]
   nextCycle            SubscriptionNextCycle?
   subscriptions        StudentSubscription[]
+  monthlyAssessments   MonthlyAssessment[]
+  rankings             StudentRanking[]
+  rankingBadges        RankingBadge[]
 }
 
 // A requested change (teacher / batch / course) that needs approval before it
@@ -483,6 +487,8 @@ model Level {
   name    String   @unique
   order   Int
   courses Course[]
+
+  assessmentTemplates AssessmentTemplate[]
 }
 
 model Course {
@@ -504,6 +510,11 @@ model Course {
   assessments Assessment[]
   teachers    TeacherProfile[]
   batches     Batch[]
+
+  assessmentTemplates AssessmentTemplate[]
+  monthlyAssessments  MonthlyAssessment[]
+  rankings            StudentRanking[]
+  rankingBadges       RankingBadge[]
 
   @@index([status])
 }
@@ -1635,6 +1646,13 @@ enum SalaryStatus {
   UNDER_REVIEW
   ADJUSTMENT_APPLIED
   APPROVED
+  // Claimed by a pay attempt that has not come back yet. This exists so the
+  // claim can be atomic: `pay()` flips APPROVED/FAILED → PROCESSING with a
+  // conditional update BEFORE calling Wise, so a double-click or a retry cannot
+  // put through two transfers. A row left stranded here means the transfer was
+  // sent and we never learned the outcome — which is a human's job to reconcile
+  // against Wise, not something to retry blindly.
+  PROCESSING
   PAID
   FAILED
 }
@@ -2955,4 +2973,578 @@ model AnnouncementRead {
 
   @@unique([announcementId, userId])
   @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Module 7 — Student Monthly Assessment + Ranking
+//
+// Distinct from the `Assessment` model above, which is the online-test engine
+// (question bank, timed attempts, auto-marking). THIS is the teacher's
+// end-of-billing-cycle evaluation of a student against a per-course rubric.
+//
+// The period is the student's 28-day SUBSCRIPTION cycle, not the calendar
+// month — that is what "one assessment per billing cycle" means, and it keeps
+// working when a break shifts a student's cycle. `monthLabel` is the human
+// label ("July 2026") shown everywhere, exactly like TeacherSalary.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum AssessmentFrequency {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+enum AssessmentTemplateStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/*
+ * DRAFT     — teacher is still working on it (nobody else sees marks)
+ * SUBMITTED — handed to the supervisor
+ * RETURNED  — supervisor sent it back with a reason; teacher edits and resubmits
+ * APPROVED  — supervisor accepted it; not yet visible to the family
+ * PUBLISHED — visible in the student panel; read-only unless a supervisor reopens
+ */
+enum MonthlyAssessmentStatus {
+  DRAFT
+  SUBMITTED
+  RETURNED
+  APPROVED
+  PUBLISHED
+}
+
+// A named grade ladder. Configurable so a course/academy can grade A+..F, or
+// 1..5, or Excellent/Good/Needs Work, without a code change.
+model GradingScale {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bands     GradeBand[]
+  templates AssessmentTemplate[]
+}
+
+model GradeBand {
+  id           String       @id @default(uuid())
+  scaleId      String
+  scale        GradingScale @relation(fields: [scaleId], references: [id], onDelete: Cascade)
+  grade        String // "A+"
+  minPercent   Decimal      @db.Decimal(5, 2)
+  maxPercent   Decimal      @db.Decimal(5, 2)
+  displayOrder Int          @default(0)
+
+  @@index([scaleId])
+}
+
+// The per-course rubric. A new course needs a new row here and nothing else —
+// no code change, which is the whole point of the module.
+model AssessmentTemplate {
+  id             String                   @id @default(uuid())
+  name           String
+  courseId       String
+  course         Course                   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  levelId        String? // optional: a rubric that only applies to one level
+  level          Level?                   @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  frequency      AssessmentFrequency      @default(MONTHLY)
+  maxMarks       Int                      @default(100)
+  passingMarks   Int                      @default(40)
+  gradingScaleId String?
+  gradingScale   GradingScale?            @relation(fields: [gradingScaleId], references: [id], onDelete: SetNull)
+  displayOrder   Int                      @default(0)
+  status         AssessmentTemplateStatus @default(ACTIVE)
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  criteria    AssessmentCriterion[]
+  assessments MonthlyAssessment[]
+
+  // "One ACTIVE template per course+level" is enforced in the service, not here:
+  // levelId is nullable and Postgres treats NULLs as distinct, so a unique index
+  // would silently allow two active course-wide templates.
+  @@index([courseId, status])
+}
+
+model AssessmentCriterion {
+  id           String             @id @default(uuid())
+  templateId   String
+  template     AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  name         String
+  maxMarks     Int
+  displayOrder Int                @default(0)
+  isMandatory  Boolean            @default(true)
+
+  @@index([templateId])
+}
+
+model MonthlyAssessment {
+  id             String              @id @default(uuid())
+  studentId      String
+  student        StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId      String? // TeacherProfile.id (plain, like TeacherEarning)
+  courseId       String
+  course         Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  templateId     String?
+  template       AssessmentTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  subscriptionId String? // the StudentSubscription whose cycle this covers
+
+  // Billing-cycle anchor
+  cycleStart DateTime
+  cycleEnd   DateTime
+  cycleIndex Int       @default(0)
+  monthLabel String // "July 2026"
+  dueAt      DateTime?
+
+  assessmentDate DateTime @default(now())
+
+  /*
+   * Context snapshotted when the teacher opened the form. Kept on the row so a
+   * published report never changes underneath the family — a later attendance
+   * correction must not silently rewrite a report they already read.
+   */
+  levelName            String?
+  attendancePct        Int     @default(0)
+  attendedClasses      Int     @default(0)
+  totalClasses         Int     @default(0)
+  assignmentPct        Int     @default(0)
+  assignmentsSubmitted Int     @default(0)
+  assignmentsTotal     Int     @default(0)
+  homeworkPct          Int     @default(0)
+
+  totalMarks   Decimal @default(0) @db.Decimal(6, 2)
+  maxMarks     Int     @default(100)
+  passingMarks Int     @default(40)
+  percentage   Decimal @default(0) @db.Decimal(5, 2)
+  grade        String?
+  passed       Boolean @default(false)
+
+  teacherRemarks  String?
+  recommendations String?
+
+  status         MonthlyAssessmentStatus @default(DRAFT)
+  submittedAt    DateTime?
+  returnedReason String?
+  returnedAt     DateTime?
+  reviewedById   String?
+  reviewedByName String?
+  approvedById   String?
+  approvedByName String?
+  approvedAt     DateTime?
+  publishedAt    DateTime?
+  reopenedById   String?
+  reopenedByName String?
+  reopenedAt     DateTime?
+
+  // Last due/overdue reminder, so the daily sweep nags once a day and not once
+  // every five minutes.
+  lastReminderAt DateTime?
+
+  scores   MonthlyAssessmentScore[]
+  feedback AssessmentFeedback[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One assessment per student per course per billing cycle.
+  @@unique([studentId, courseId, cycleStart])
+  @@index([status])
+  @@index([teacherId, status])
+  @@index([courseId, cycleStart])
+  @@index([studentId, publishedAt])
+}
+
+model MonthlyAssessmentScore {
+  id           String            @id @default(uuid())
+  assessmentId String
+  assessment   MonthlyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  criterionId  String? // null once the criterion is deleted from the template
+
+  // Name and ceiling are SNAPSHOTS. Editing a template must not retroactively
+  // rewrite last cycle's report.
+  criterionName String
+  maxMarks      Int
+  marks         Decimal @default(0) @db.Decimal(6, 2)
+  comment       String?
+  displayOrder  Int     @default(0)
+
+  @@index([assessmentId])
+}
+
+// Parent/guardian feedback on a published report. Submitted from the STUDENT
+// panel — this deployment has no parent login, so the family's single account
+// is the student account.
+model AssessmentFeedback {
+  id              String            @id @default(uuid())
+  assessmentId    String
+  assessment      MonthlyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  submittedById   String?
+  submittedByName String?
+  rating          Int? // 1..5
+  comment         String
+  reviewedById    String?
+  reviewedByName  String?
+  reviewedAt      DateTime?
+  reviewNote      String?
+  createdAt       DateTime          @default(now())
+
+  @@index([assessmentId])
+  @@index([reviewedAt])
+}
+
+// ─── Ranking ────────────────────────────────────────────────────────────────
+
+model StudentRanking {
+  id         String         @id @default(uuid())
+  studentId  String
+  student    StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  cycleStart DateTime
+  cycleEnd   DateTime
+  monthLabel String
+
+  // Each component is normalised to 0..100 before its weightage is applied, so
+  // the weights in the ranking config read exactly as the spec's percentages.
+  assessmentScore Decimal @default(0) @db.Decimal(6, 2)
+  attendancePct   Decimal @default(0) @db.Decimal(5, 2)
+  assignmentScore Decimal @default(0) @db.Decimal(5, 2)
+  homeworkPct     Decimal @default(0) @db.Decimal(5, 2)
+  teacherRating   Decimal @default(0) @db.Decimal(5, 2)
+  totalScore      Decimal @default(0) @db.Decimal(6, 2)
+
+  rank          Int
+  previousRank  Int?
+  totalStudents Int       @default(0)
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([courseId, cycleStart, studentId])
+  @@index([courseId, cycleStart, rank])
+  @@index([studentId])
+}
+
+enum RankingBadgeRule {
+  RANK_1
+  RANK_2
+  RANK_3
+  TOP_10
+  PERFECT_ATTENDANCE
+  MOST_IMPROVED
+}
+
+model RankingBadgeConfig {
+  id      String    @id @default(uuid())
+  rule    RankingBadgeRule @unique
+  label   String
+  icon    String
+  enabled Boolean   @default(true)
+
+  // TOP_10 → the N; PERFECT_ATTENDANCE → the % that counts as perfect;
+  // MOST_IMPROVED → the minimum rank improvement that earns it.
+  threshold    Int?
+  displayOrder Int  @default(0)
+}
+
+model RankingBadge {
+  id         String         @id @default(uuid())
+  studentId  String
+  student    StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseId   String
+  course     Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  rule       RankingBadgeRule
+  label      String
+  icon       String
+  cycleStart DateTime
+  monthLabel String
+  awardedAt  DateTime       @default(now())
+
+  @@unique([studentId, courseId, rule, cycleStart])
+  @@index([studentId])
+  @@index([courseId, cycleStart])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module 8 — Staff Meeting & Collaboration Management
+//
+// Named `StaffMeeting*` on purpose. `LmsMeeting` is the legacy JSON-attendee
+// row the lms-data module still serves, and `ParentMeeting` is the coach↔parent
+// review; neither is this. The spec's late addition — "Academic Coach and
+// Supervisor can schedule a meeting with Student also" — is why a participant
+// is a plain User rather than a staff record: the same meeting machinery has to
+// carry a student invitee without a parallel table for them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum StaffMeetingType {
+  // Automatic recurring (8.1)
+  BIWEEKLY_TEACHER
+  MONTHLY_STAFF
+  TRAINING
+  PERFORMANCE_REVIEW
+  // Manual (8.1)
+  SUPERVISOR_TEACHER
+  COACH_TEACHER
+  ADMIN_STAFF
+  TEACHER_TEACHER
+  DEPARTMENT
+  // The spec's addendum: coach/supervisor ↔ student
+  STUDENT_MEETING
+}
+
+enum StaffMeetingStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum StaffMeetingPlatform {
+  JITSI
+  ZOOM
+  TEAMS
+  OTHER
+}
+
+/*
+ * INVITED is not in the spec's list, and is the point: until the meeting has
+ * actually run, a participant is neither present nor absent. Defaulting them to
+ * ABSENT would show every upcoming meeting as fully missed.
+ */
+enum MeetingAttendanceStatus {
+  INVITED
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+}
+
+enum MeetingMinutesStatus {
+  NOT_STARTED
+  DRAFT
+  PUBLISHED
+}
+
+enum MeetingActionPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MeetingActionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model StaffMeeting {
+  id          String           @id @default(uuid())
+  title       String
+  type        StaffMeetingType
+  description String? // the agenda
+
+  startsAt     DateTime
+  endsAt       DateTime
+  durationMins Int
+  timeZone     String?
+
+  platform    StaffMeetingPlatform @default(JITSI)
+  meetingLink String?
+  // Provider-side id, so a reschedule or cancellation can be pushed to Zoom
+  // rather than leaving a live room pointing at a meeting that moved.
+  externalId  String?
+
+  status StaffMeetingStatus @default(SCHEDULED)
+
+  organizerId   String
+  organizerName String?
+
+  seriesId        String?
+  series          StaffMeetingSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  occurrenceIndex Int?
+
+  /*
+   * Minutes live on the meeting rather than in a table of their own: there is
+   * exactly one set per meeting, and a 1:1 table buys a join for nothing.
+   * They stay editable until `minutesStatus` reaches PUBLISHED.
+   */
+  minutesStatus      MeetingMinutesStatus @default(NOT_STARTED)
+  summary            String?
+  discussionPoints   String?
+  decisions          String?
+  remarks            String?
+  minutesPublishedAt DateTime?
+  minutesById        String?
+  minutesByName      String?
+
+  startedAt       DateTime?
+  endedAt         DateTime?
+  cancelledAt     DateTime?
+  cancelledByName String?
+  cancelReason    String?
+  rescheduledFrom DateTime?
+  rescheduleNote  String?
+
+  // Reminder bookkeeping, so the hourly sweep sends each notice once and not
+  // once per sweep. Same shape as MonthlyAssessment.lastReminderAt.
+  reminder24SentAt DateTime?
+  reminder1SentAt  DateTime?
+  startedNotifiedAt DateTime?
+  absenceMarkedAt  DateTime?
+
+  participants StaffMeetingParticipant[]
+  actionItems  MeetingActionItem[]
+  attachments  MeetingAttachment[]
+  auditLog     MeetingAuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startsAt, status])
+  @@index([status, startsAt])
+  @@index([organizerId])
+  @@index([type, startsAt])
+  @@index([seriesId])
+}
+
+model StaffMeetingParticipant {
+  id        String       @id @default(uuid())
+  meetingId String
+  meeting   StaffMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Snapshot of the role at invite time: a teacher promoted to supervisor next
+  // year must not rewrite who attended as what last year.
+  role        Role
+  isOrganizer Boolean @default(false)
+  isOptional  Boolean @default(false)
+
+  status       MeetingAttendanceStatus @default(INVITED)
+  joinedAt     DateTime?
+  leftAt       DateTime?
+  durationMins Int                     @default(0)
+  lateMinutes  Int                     @default(0)
+  excuseReason String?
+  markedById   String?
+  markedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([meetingId, userId])
+  @@index([userId, status])
+  @@index([meetingId, status])
+}
+
+model MeetingActionItem {
+  id        String       @id @default(uuid())
+  meetingId String
+  meeting   StaffMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  description    String
+  assignedToId   String?
+  assignedToName String?
+  dueDate        DateTime?
+  priority       MeetingActionPriority @default(MEDIUM)
+  status         MeetingActionStatus   @default(PENDING)
+  completedAt    DateTime?
+  completionNote String?
+
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([assignedToId, status])
+  @@index([meetingId])
+  @@index([status, dueDate])
+}
+
+model MeetingAttachment {
+  id        String       @id @default(uuid())
+  meetingId String
+  meeting   StaffMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  // RECORDING / DOCUMENT / PRESENTATION / TRAINING_MATERIAL
+  kind           String   @default("DOCUMENT")
+  title          String
+  url            String
+  uploadedById   String?
+  uploadedByName String?
+  createdAt      DateTime @default(now())
+
+  @@index([meetingId])
+}
+
+/*
+ * The recurrence rule behind an automatic meeting (8.2). Occurrences are
+ * generated ahead by a sweep and are ordinary StaffMeeting rows once created —
+ * so an admin can move or cancel a single occurrence (8.3) without the series
+ * regenerating it.
+ */
+model StaffMeetingSeries {
+  id     String           @id @default(uuid())
+  name   String
+  type   StaffMeetingType
+  active Boolean          @default(true)
+
+  intervalWeeks Int      @default(2) // 2 = biweekly
+  weekday       Int      @default(6) // 0=Sun … 6=Sat
+  startTime     String   @default("18:00") // HH:mm, academy local
+  durationMins  Int      @default(60)
+  anchorDate    DateTime // the first occurrence this series counts from
+
+  organizerId   String?
+  organizerName String?
+  platform      StaffMeetingPlatform @default(JITSI)
+  description   String?
+
+  // Which roles are invited, as role names. A list rather than booleans so a
+  // new role does not need a migration to become invitable.
+  inviteRoles String[] @default([])
+  // Roles invited as OPTIONAL attendees — §8.2's "(Optional: Academic Coach and
+  // Admin may attend.)" for the biweekly staff meeting. They are invited and
+  // reminded like anyone else; their absence just does not count.
+  optionalInviteRoles String[] @default([])
+
+  generateAheadWeeks Int       @default(8)
+  lastGeneratedAt    DateTime?
+
+  meetings StaffMeeting[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, type])
+}
+
+/*
+ * "All meeting actions shall be recorded in the audit log." There is no
+ * general-purpose audit table in this codebase — StudentActivity is scoped to a
+ * student — so meetings carry their own. Append-only: rows are written and read,
+ * never updated, which is what makes the trail worth having.
+ */
+model MeetingAuditLog {
+  id        String       @id @default(uuid())
+  meetingId String
+  meeting   StaffMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  // CREATED / UPDATED / RESCHEDULED / CANCELLED / STARTED / ENDED / JOINED /
+  // LEFT / ATTENDANCE_MARKED / MINUTES_SAVED / MINUTES_PUBLISHED /
+  // ACTION_ASSIGNED / ACTION_UPDATED / ATTACHMENT_ADDED / REMINDER_SENT
+  action      String
+  description String?
+  meta        Json?
+  actorId     String?
+  actorName   String?
+  createdAt   DateTime @default(now())
+
+  @@index([meetingId, createdAt])
+  @@index([action, createdAt])
 }
