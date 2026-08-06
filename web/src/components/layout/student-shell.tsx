@@ -22,6 +22,8 @@ import {
   FileCheck2,
   TrendingUp,
   Package as PackageIcon,
+  Trophy,
+  FileText,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -35,9 +37,13 @@ const studentNavItems = [
   { label: "My Courses", href: "/student/courses", icon: BookOpen },
   { label: "My Schedule", href: "/student/classes", icon: CalendarDays },
   { label: "My Attendance", href: "/student/attendance", icon: ClipboardCheck },
-  { label: "Live Meetings", href: "/student/meetings", icon: Video },
+  { label: "Meetings", href: "/student/meetings", icon: Video },
   { label: "Homework & Grades", href: "/student/assignments", icon: ClipboardList },
   { label: "Assessments", href: "/student/assessments", icon: FileCheck2 },
+  // Module 7 — the monthly report the teacher writes, and where the family
+  // leaves feedback on it. Distinct from "Assessments" (online tests) above.
+  { label: "Monthly Report", href: "/student/monthly-assessments", icon: FileText },
+  { label: "My Ranking", href: "/student/ranking", icon: Trophy },
   { label: "My Progress", href: "/student/progress", icon: TrendingUp },
   { label: "Knowledge Base", href: "/student/knowledgebase", icon: Library },
   { label: "My Subscription", href: "/student/subscription", icon: PackageIcon },

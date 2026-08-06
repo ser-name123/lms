@@ -25,6 +25,8 @@ import {
   BookOpen,
   Package,
   Wallet,
+  Trophy,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -252,6 +254,10 @@ export function Sidebar() {
     { label: "Monthly Reports", href: "/monthly-reports", icon: ClipboardList },
     { label: "Manage Students", href: "/students", icon: Users },
     { label: "Progress Tracking", href: "/students/progress", icon: TrendingUp },
+    // Module 7: the coach monitors assessments and is one of the roles the spec
+    // publishes rankings to. Approve/publish stays with admin + supervisor.
+    { label: "Monthly Assessment", href: "/monthly-assessments", icon: ClipboardCheck },
+    { label: "Student Rankings", href: "/rankings", icon: Trophy },
     { label: "Manage Teachers", href: "/teachers", icon: GraduationCap },
     // The coach runs the curriculum, and both of these feed the decisions they
     // already make: which course a student is enrolled on, and which package
@@ -293,6 +299,11 @@ export function Sidebar() {
     // Read-only monitoring of monthly reports (supervisor reviews/approves) and
     // salaries (approve/pay stays admin-only, enforced by @Roles on the API).
     { label: "Monthly Reports", href: "/monthly-reports", icon: ClipboardList },
+    // Module 7: the supervisor is the approver here — review, approve, publish
+    // and reopen are all theirs, alongside the admin.
+    { label: "Monthly Assessment", href: "/monthly-assessments", icon: ClipboardCheck },
+    { label: "Assessment Setup", href: "/monthly-assessments/settings", icon: SlidersHorizontal },
+    { label: "Student Rankings", href: "/rankings", icon: Trophy },
     { label: "Salary Management", href: "/salary", icon: Wallet },
     { label: "Finance", href: "/finance", icon: Wallet },
     { label: "Messages", href: "/chat", icon: MessageCircle },

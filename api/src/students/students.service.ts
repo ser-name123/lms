@@ -6,6 +6,7 @@ import {
 import * as bcrypt from 'bcrypt';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import { courseForCode } from '../common/catalogue-course';
 import { currencyForCountry } from '../common/currency';
 import {
@@ -301,9 +302,14 @@ export class StudentsService {
       }
     }
 
-    const studentCode = await this.nextStudentCode();
-
-    const created = await this.prisma.$transaction(async (tx) => {
+    /*
+     * The code is minted INSIDE the retry, not once above it — the whole point
+     * is that a losing attempt re-reads the highest code and takes the next one.
+     * Scoped to `studentCode`, so a duplicate email still surfaces unchanged.
+     */
+    const created = await retryOnUniqueClash('studentCode', async () => {
+      const studentCode = await this.nextStudentCode();
+      return this.prisma.$transaction(async (tx) => {
       const profile = await tx.studentProfile.create({
         data: {
           studentCode,
@@ -359,6 +365,7 @@ export class StudentsService {
       }
 
       return profile;
+      });
     });
 
     return this.findOne(created.id);
@@ -546,8 +553,27 @@ export class StudentsService {
     };
   }
 
+  /*
+   * The next student code, derived from the HIGHEST existing one.
+   *
+   * This used to be `count() + 1`, which is wrong in two ways that compound.
+   * A student deletion is a hard delete (see `remove` above), so the count
+   * drops below the highest code and the next admin-created student is handed a
+   * code that already exists — a P2002 on the unique index that repeats on
+   * every retry, because the count never changes. And lead conversion
+   * (leads.service) has always minted from the maximum, so the two paths agreed
+   * only while no student had ever been removed.
+   *
+   * Zero-padding to five digits keeps the lexical `desc` ordering equal to the
+   * numeric one, which is what makes reading the maximum this cheaply valid.
+   */
   private async nextStudentCode() {
-    const count = await this.prisma.studentProfile.count();
-    return `ST-${String(count + 1).padStart(5, '0')}`;
+    const latest = await this.prisma.studentProfile.findFirst({
+      where: { studentCode: { startsWith: 'ST-' } },
+      orderBy: { studentCode: 'desc' },
+      select: { studentCode: true },
+    });
+    const highest = Number(latest?.studentCode?.slice(3)) || 0;
+    return `ST-${String(highest + 1).padStart(5, '0')}`;
   }
 }

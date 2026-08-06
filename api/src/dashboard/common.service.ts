@@ -319,6 +319,46 @@ export class DashboardCommonService {
 
   // ── Calendar ───────────────────────────────────────────────────────────────
 
+
+  /**
+   * Module 8 staff meetings as calendar events (8.9: "every scheduled meeting
+   * shall automatically appear in" all four portals).
+   *
+   * Scoped to meetings the caller is actually invited to, for every role
+   * including staff — an admin's calendar showing 40 teacher one-to-ones they
+   * are not in would bury their own day. The admin MEETINGS SCREEN still lists
+   * everything; this is the personal diary.
+   */
+  private async staffMeetingEvents(
+    user: AuthUser,
+    window: { gte: Date; lte: Date },
+    link: string,
+  ) {
+    /*
+     * Cancelled meetings are included on purpose. §8.9 asks the calendar to
+     * show upcoming, completed AND cancelled — someone who blocked out Saturday
+     * evening needs to see that the slot was called off, and a cancellation
+     * that simply vanishes from the calendar looks like a meeting they forgot.
+     * The status rides along in `meta` so the calendar can strike it through.
+     */
+    const rows = await this.prisma.staffMeeting.findMany({
+      where: {
+        startsAt: window,
+        participants: { some: { userId: user.id } },
+      },
+      select: { id: true, title: true, startsAt: true, endsAt: true, type: true, status: true },
+    });
+    return rows.map((m) => ({
+      kind: 'MEETING' as const,
+      id: m.id,
+      title: m.status === 'CANCELLED' ? `${m.title} (cancelled)` : m.title,
+      at: m.startsAt.toISOString(),
+      endsAt: m.endsAt.toISOString(),
+      link,
+      meta: { meetingType: m.type, status: m.status, module: 'STAFF_MEETING', cancelled: m.status === 'CANCELLED' },
+    }));
+  }
+
   async calendar(user: AuthUser, from?: string, to?: string) {
     const now = new Date();
     const start = from ? new Date(from) : new Date(now.getFullYear(), now.getMonth(), 1);
@@ -431,6 +471,7 @@ export class DashboardCommonService {
           link: `/students/${m.studentId}`,
         })),
       );
+      events.push(...(await this.staffMeetingEvents(user, window, '/meetings')));
       return events.sort((a, b) => a.at.localeCompare(b.at));
     }
 
@@ -526,6 +567,7 @@ export class DashboardCommonService {
           link: '/teacher/assessments',
         })),
       );
+      events.push(...(await this.staffMeetingEvents(user, window, '/teacher/meetings')));
       return events.sort((a, b) => a.at.localeCompare(b.at));
     }
 
@@ -613,6 +655,7 @@ export class DashboardCommonService {
       })),
     );
 
+    events.push(...(await this.staffMeetingEvents(user, window, `${prefix}/meetings`)));
     return events.sort((a, b) => a.at.localeCompare(b.at));
   }
 

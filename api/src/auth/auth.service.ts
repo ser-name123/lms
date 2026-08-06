@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UserStatus, Role } from '../generated/prisma/enums';
 import type { TokensDto, UpdateProfileDto, CreateAdminDto } from './dto';
 import { EmailsService } from '../emails/emails.service';
+import { isMasterAdmin } from './master-admin';
 
 /* Refresh tokens are high-entropy already, so a fast SHA-256 digest is the
    right store — bcrypt here would only add latency. Passwords still use
@@ -435,7 +436,7 @@ export class AuthService {
     const currentUser = await this.prisma.user.findUnique({
       where: { id: currentUserId },
     });
-    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+    if (!currentUser || !isMasterAdmin(currentUser.email)) {
       throw new ForbiddenException(
         'Only the master administrator can manage admin accounts.',
       );
@@ -461,7 +462,7 @@ export class AuthService {
     const currentUser = await this.prisma.user.findUnique({
       where: { id: currentUserId },
     });
-    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+    if (!currentUser || !isMasterAdmin(currentUser.email)) {
       throw new ForbiddenException(
         'Only the master administrator can manage admin accounts.',
       );
@@ -503,7 +504,7 @@ export class AuthService {
     const currentUser = await this.prisma.user.findUnique({
       where: { id: currentUserId },
     });
-    if (!currentUser || currentUser.email !== 'objectsquarerajan@gmail.com') {
+    if (!currentUser || !isMasterAdmin(currentUser.email)) {
       throw new ForbiddenException(
         'Only the master administrator can manage admin accounts.',
       );
@@ -516,7 +517,7 @@ export class AuthService {
       throw new BadRequestException('User not found.');
     }
 
-    if (targetUser.email === 'objectsquarerajan@gmail.com') {
+    if (isMasterAdmin(targetUser.email)) {
       throw new ForbiddenException(
         'The master administrator account cannot be deleted.',
       );

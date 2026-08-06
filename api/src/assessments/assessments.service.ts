@@ -4,6 +4,7 @@ import {
 import { bulkDelete } from '../common/bulk-delete';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeHtml } from '../common/sanitize-html';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailsService } from '../emails/emails.service';
 import { Role } from '../generated/prisma/enums';
@@ -224,7 +225,8 @@ export class AssessmentsService implements OnModuleInit {
         teacherId: teacherId ?? null, createdById: actor.id,
         subject: dto.subject, chapter: dto.chapter, topic: dto.topic, category: dto.category,
         skillId: dto.skillId ?? null,
-        type: dto.type ?? 'QUIZ', instructions: dto.instructions,
+        // Rendered as HTML to students — sanitised on write, like assignments.
+        type: dto.type ?? 'QUIZ', instructions: sanitizeHtml(dto.instructions),
         durationMin: dto.durationMin ?? 60, totalMarks: dto.totalMarks ?? 100, passingMarks: dto.passingMarks ?? 40,
         attemptsAllowed: dto.attemptsAllowed ?? 1, questionOrder: dto.questionOrder ?? 'FIXED',
         allowBack: dto.allowBack ?? true, showResultImmediately: dto.showResultImmediately ?? false,
@@ -261,6 +263,7 @@ export class AssessmentsService implements OnModuleInit {
     await this.assertEditable(id, actor);
     const data: Record<string, unknown> = { ...dto };
     delete data.status; delete data.questionIds;
+    if (dto.instructions !== undefined) data.instructions = sanitizeHtml(dto.instructions);
     if (dto.startAt !== undefined) data.startAt = dto.startAt ? new Date(dto.startAt) : null;
     if (dto.endAt !== undefined) data.endAt = dto.endAt ? new Date(dto.endAt) : null;
     if (dto.publishAt !== undefined) data.publishAt = dto.publishAt ? new Date(dto.publishAt) : null;

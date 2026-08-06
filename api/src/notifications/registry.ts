@@ -147,6 +147,58 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   LEAD_CONVERTED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Lead converted' },
   TRIAL_REPORT_SUBMITTED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Trial report submitted' },
   TRIAL_INFO_RECEIVED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Trial details completed' },
+
+  /*
+   * ── Module 7: monthly assessment ─────────────────────────────────────────
+   *
+   * Every type here is prefixed MONTHLY_ because ASSESSMENT_SUBMITTED and
+   * ASSESSMENT_PUBLISHED already exist above and belong to the ONLINE TEST
+   * engine. Reusing them would have merged two unrelated events under one label
+   * and one preference toggle — a student muting "assessment published" for
+   * quiz results would silently have stopped receiving their monthly report.
+   *
+   * Channels follow the spec's notification matrix. The staff-facing steps stay
+   * in-app: they are workflow, and a supervisor lives in the queue anyway.
+   * Publication is the one event that reaches a family, so it carries email as
+   * well — they are not sitting in the portal waiting for it. The overdue nag is
+   * in-app + push so it survives an unread inbox.
+   */
+  MONTHLY_ASSESSMENT_DUE: { category: Cat.ASSESSMENT, priority: Pri.HIGH, channels: IN_APP_PUSH, label: 'Monthly assessment due' },
+  MONTHLY_ASSESSMENT_DRAFT: { category: Cat.ASSESSMENT, priority: Pri.LOW, channels: IN_APP, label: 'Monthly assessment saved as draft' },
+  MONTHLY_ASSESSMENT_SUBMITTED: { category: Cat.ASSESSMENT, priority: Pri.MEDIUM, channels: IN_APP, label: 'Monthly assessment submitted' },
+  MONTHLY_ASSESSMENT_RETURNED: { category: Cat.ASSESSMENT, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Monthly assessment returned for revision' },
+  MONTHLY_ASSESSMENT_APPROVED: { category: Cat.ASSESSMENT, priority: Pri.MEDIUM, channels: IN_APP, label: 'Monthly assessment approved' },
+  MONTHLY_ASSESSMENT_PUBLISHED: { category: Cat.ASSESSMENT, priority: Pri.HIGH, channels: ALL_THREE, label: 'Monthly assessment published' },
+  MONTHLY_ASSESSMENT_AVAILABLE: { category: Cat.ASSESSMENT, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Monthly assessment available' },
+  MONTHLY_ASSESSMENT_FEEDBACK: { category: Cat.ASSESSMENT, priority: Pri.MEDIUM, channels: IN_APP, label: 'Assessment feedback received' },
+
+  // ── Module 7: ranking ─────────────────────────────────────────────────────
+  RANKING_PUBLISHED: { category: Cat.PROGRESS, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Monthly ranking published' },
+  RANKING_TOP3: { category: Cat.PROGRESS, priority: Pri.MEDIUM, channels: IN_APP_PUSH, label: 'Top 3 achievement' },
+  BADGE_AWARDED: { category: Cat.PROGRESS, priority: Pri.LOW, channels: IN_APP_PUSH, label: 'Badge awarded' },
+
+  /*
+   * ── Module 8: staff meetings ────────────────────────────────────────────
+   *
+   * SYSTEM rather than ACADEMIC: these are internal staff logistics, and
+   * filing them under ACADEMIC would let "mute academic notifications" — a
+   * setting a teacher sets about classwork — silence the reminder for the
+   * meeting they are expected at.
+   *
+   * The two reminders and the start notice go out by push as well as in-app,
+   * because their whole value is arriving while the person is away from the
+   * portal. Scheduling, rescheduling and cancellation also go by email: they
+   * change something already in the recipient's diary.
+   */
+  MEETING_SCHEDULED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Meeting scheduled' },
+  MEETING_RESCHEDULED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: ALL_THREE, label: 'Meeting rescheduled' },
+  MEETING_CANCELLED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: ALL_THREE, label: 'Meeting cancelled' },
+  MEETING_REMINDER_24H: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_PUSH, label: 'Meeting reminder (24 hours)' },
+  MEETING_REMINDER_1H: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_PUSH, label: 'Meeting reminder (1 hour)' },
+  MEETING_STARTED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_PUSH, label: 'Meeting started' },
+  MEETING_MINUTES_PUBLISHED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Meeting minutes published' },
+  MEETING_ACTION_ASSIGNED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Action item assigned' },
+  MEETING_ABSENCE: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Meeting absence recorded' },
 };
 
 /** Fallback for a type nobody registered — delivers, but only in-app. */

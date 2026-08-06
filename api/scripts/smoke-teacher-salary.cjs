@@ -150,6 +150,71 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
     const pay3 = await req('POST', `/salary/${salId}/pay`, adminToken);
     check('paid salary cannot be re-paid', pay3.status === 400, `status ${pay3.status}`);
 
+    /*
+     * Double-pay race. Two pay calls fired together on one APPROVED salary used
+     * to both pass the status check, both create a transfer and both write PAID
+     * — the teacher was paid twice. The status is now claimed with a
+     * conditional update, so exactly one wins.
+     */
+    const race = (await db.query(
+      `INSERT INTO "TeacherSalary" (id,"teacherId","periodStart","periodEnd","monthLabel","grossAmount","netAmount",currency,status,"updatedAt")
+       VALUES (gen_random_uuid(),$1,now() - interval '400 days',now() - interval '380 days','Race Month',10,10,'USD','APPROVED',now())
+       RETURNING id`,
+      [teacher.id],
+    )).rows[0];
+    const [r1, r2] = await Promise.all([
+      req('POST', `/salary/${race.id}/pay`, adminToken),
+      req('POST', `/salary/${race.id}/pay`, adminToken),
+    ]);
+    const winners = [r1, r2].filter((r) => r.status === 200 || r.status === 201);
+    check('concurrent pay: exactly one attempt is accepted', winners.length === 1, `statuses ${r1.status}/${r2.status}`);
+    const payments = await db.query(`SELECT count(*)::int AS n FROM "SalaryPayment" WHERE "salaryId"=$1`, [race.id]);
+    check('concurrent pay: only one transfer recorded', payments.rows[0].n === 1, `${payments.rows[0].n} payment rows`);
+
+    /*
+     * Recalculating an APPROVED salary must clear the approval — whoever signed
+     * it off approved a NUMBER, and a recalculation moves the number. This runs
+     * on a second throwaway teacher because the first one's salary for this
+     * period is already PAID, and a paid period is deliberately immutable.
+     */
+    const tu2 = (await db.query(
+      `INSERT INTO "User" (id,email,"passwordHash","firstName","lastName",role,status,"updatedAt")
+       VALUES (gen_random_uuid(),$1,'x','Recalc','Teacher','TEACHER','ACTIVE',now()) RETURNING id`,
+      [`${MARKER}-teacher2@example.test`],
+    )).rows[0];
+    const teacher2 = (await db.query(
+      `INSERT INTO "TeacherProfile" (id,"userId","teacherCode","hourlyRate") VALUES (gen_random_uuid(),$1,$2,4.00) RETURNING id`,
+      [tu2.id, `${MARKER}-T2-${Date.now()}`],
+    )).rows[0];
+    const t2Start = minsAgo(320), t2End = minsAgo(290);
+    const t2Class = (await db.query(
+      `INSERT INTO "ClassSession" (id,"courseId","teacherId",title,"startsAt","endsAt",status)
+       VALUES (gen_random_uuid(),$1,$2,$3,$4::timestamp,$5::timestamp,'SCHEDULED') RETURNING id`,
+      [course.id, teacher2.id, `${MARKER} R1`, utcWall(t2Start), utcWall(t2End)],
+    )).rows[0];
+    await db.query(`INSERT INTO "ClassAttendee" (id,"classId","studentId","joinedAt","leftAt") VALUES (gen_random_uuid(),$1,$2,$3,$4)`,
+      [t2Class.id, sp.id, utcWall(t2Start), utcWall(t2End)]);
+    await req('POST', `/attendance/classes/${t2Class.id}/end`, adminToken, { teacherStatus: 'PRESENT' });
+
+    await req('POST', '/salary/calculate', adminToken, { periodStart: ps, periodEnd: pe });
+    const sal2 = (await db.query(`SELECT id,"grossAmount" FROM "TeacherSalary" WHERE "teacherId"=$1`, [teacher2.id])).rows[0];
+    check('second teacher has a calculated salary', !!sal2, JSON.stringify(sal2));
+    await req('POST', `/salary/${sal2.id}/approve`, adminToken);
+    const beforeRecalc = (await db.query(`SELECT status,"approvedByName" FROM "TeacherSalary" WHERE id=$1`, [sal2.id])).rows[0];
+    check('second salary is APPROVED before the recalculation', beforeRecalc.status === 'APPROVED', beforeRecalc.status);
+
+    await req('POST', '/salary/calculate', adminToken, { periodStart: ps, periodEnd: pe });
+    const after = (await db.query(
+      `SELECT status,"approvedByName","approvedAt" FROM "TeacherSalary" WHERE id=$1`, [sal2.id],
+    )).rows[0];
+    check('recalculating an APPROVED salary clears the approval', after && after.status === 'CALCULATED', after && after.status);
+    check('recalculation clears approvedBy/approvedAt', after && !after.approvedByName && !after.approvedAt,
+      after && `${after.approvedByName}/${after.approvedAt}`);
+
+    // The first teacher's PAID salary must be untouched by that same run.
+    const paidStill = (await db.query(`SELECT status FROM "TeacherSalary" WHERE id=$1`, [salId])).rows[0];
+    check('a PAID salary survives a recalculation of its period', paidStill.status === 'PAID', paidStill.status);
+
     // Teacher-facing /salary/me — the teacher sees their own Module-6 salary,
     // with embedded adjustments + payment attempts, and only their own row.
     const teacherToken = token(tu.id, 'TEACHER', `${MARKER}-teacher@example.test`);
@@ -159,7 +224,19 @@ const utcWall = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
     check('teacher sees this salary (PAID) with net + ref', !!myRow && myRow.status === 'PAID' && myRow.netAmount > 0 && !!myRow.wiseReference, myRow && myRow.status);
     check('teacher salary embeds its 2 adjustments', !!myRow && Array.isArray(myRow.adjustments) && myRow.adjustments.length === 2 && myRow.adjustments.every((a) => !!a.reason));
     check('teacher salary embeds its 2 payment attempts', !!myRow && Array.isArray(myRow.payments) && myRow.payments.length === 2);
-    check('every /salary/me row belongs to this teacher', Array.isArray(mine.body) && mine.body.every((r) => r.id === salId), `rows ${Array.isArray(mine.body) ? mine.body.length : '?'}`);
+    /*
+     * Scoping: /salary/me must return this teacher's rows and nothing else.
+     * Checked against the database rather than against a single known id — the
+     * teacher legitimately has more than one salary by now (the double-pay race
+     * above added one), and asserting "exactly one row" was testing the fixture
+     * rather than the isolation.
+     */
+    const ownIds = new Set(
+      (await db.query(`SELECT id FROM "TeacherSalary" WHERE "teacherId"=$1`, [teacher.id])).rows.map((r) => r.id),
+    );
+    check('every /salary/me row belongs to this teacher',
+      Array.isArray(mine.body) && mine.body.length > 0 && mine.body.every((r) => ownIds.has(r.id)),
+      `returned ${Array.isArray(mine.body) ? mine.body.length : '?'} of ${ownIds.size} own rows`);
   } finally {
     await cleanup();
     await db.end();

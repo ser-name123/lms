@@ -86,6 +86,12 @@ async function bootstrap() {
       `${prefix}/assessments`,
       express.static(path.join(uploadsRoot, 'assessments')),
     );
+    // Module 8 recordings and meeting documents — opened from an <a> in the
+    // meeting's Files tab, which cannot carry the auth header.
+    app.use(
+      `${prefix}/meetings`,
+      express.static(path.join(uploadsRoot, 'meetings')),
+    );
   }
 
   // Standard hardening headers (CSP off by default — this is a JSON API).

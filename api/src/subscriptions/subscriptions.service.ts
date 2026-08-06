@@ -7,6 +7,8 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_CURRENCY, priceFor, type Currency } from '../common/currency';
+import { nextBatchCodeFrom } from '../common/batch-code';
+import { retryOnUniqueClash } from '../common/retry-unique';
 import {
   monthlyHours as calcMonthlyHours,
   monthlyClasses as calcMonthlyClasses,
@@ -477,19 +479,17 @@ export class SubscriptionsService {
   }
 
   /*
-   * Next sequential batch code (BATCH-0001…). Read-max-then-insert like the rest
-   * of the codebase, but wrapped in a retry so a concurrent enrolment losing the
-   * unique race retries the next number instead of failing the whole conversion.
+   * Next sequential batch code (BATCH-0001…).
+   *
+   * Derived from the MAXIMUM, not a row count. The comment here used to claim
+   * read-max while the code counted rows, which is only the same number until
+   * the first batch is deleted — after that every attempt collides with an
+   * existing code and the sequence falls through to the timestamp fallback
+   * permanently. See `nextBatchCode` in attendance.service.ts, which mints the
+   * same index and therefore races against this one.
    */
   private async nextBatchCode(): Promise<string> {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const count = await this.prisma.batch.count();
-      const candidate = `BATCH-${String(count + 1 + attempt).padStart(4, '0')}`;
-      const clash = await this.prisma.batch.findUnique({ where: { code: candidate }, select: { id: true } });
-      if (!clash) return candidate;
-    }
-    // Fallback: a suffix that cannot collide, rather than giving up.
-    return `BATCH-${Date.now().toString().slice(-8)}`;
+    return nextBatchCodeFrom(this.prisma);
   }
 
   private addMinutesToTime(time: string, minutes: number): string {
@@ -739,20 +739,24 @@ export class SubscriptionsService {
     let batchId: string | null = null;
     if (sub.pendingTeacherId && sub.courseId && days.length && sub.pendingTime) {
       try {
-        const code = await this.nextBatchCode();
-        const batch = await this.prisma.batch.create({
-          data: {
-            code,
-            name: `${sub.tier ?? 'Subscription'} — ${studentId.slice(0, 6)}`,
-            courseId: sub.courseId,
-            teacherId: sub.pendingTeacherId,
-            daysOfWeek: days,
-            startTime: sub.pendingTime,
-            endTime: this.addMinutesToTime(sub.pendingTime, sub.durationMinutes),
-            startDate: actualStart,
-            status: 'ACTIVE',
-          },
-        });
+        // The code is recomputed inside the retry: reusing a stale one just
+        // collides again. Attendance mints the same index, so the loser here
+        // may well be racing that service rather than another enrolment.
+        const batch = await retryOnUniqueClash('code', async () =>
+          this.prisma.batch.create({
+            data: {
+              code: await this.nextBatchCode(),
+              name: `${sub.tier ?? 'Subscription'} — ${studentId.slice(0, 6)}`,
+              courseId: sub.courseId!,
+              teacherId: sub.pendingTeacherId,
+              daysOfWeek: days,
+              startTime: sub.pendingTime!,
+              endTime: this.addMinutesToTime(sub.pendingTime!, sub.durationMinutes),
+              startDate: actualStart,
+              status: 'ACTIVE',
+            },
+          }),
+        );
         batchId = batch.id;
         await this.prisma.batchStudent.create({ data: { batchId: batch.id, studentId } });
       } catch {

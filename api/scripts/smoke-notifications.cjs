@@ -292,18 +292,24 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
       JSON.stringify({ status: broadcast.body?.status, sent: broadcast.body?.sentCount }));
 
     /*
-     * A deep enough page to hold the broadcast whatever else is in the feed.
+     * Delivery is asserted against the DATABASE, not against a page of the feed.
      *
-     * This asked for the first 10 and assumed a just-sent broadcast would be
-     * among them. The feed sorts by priority before recency, and the broadcast
-     * above is deliberately LOW — so once the coach had ten MEDIUM or HIGH
-     * notifications of their own, a correctly delivered broadcast ranked below
-     * the cut and the check failed. It was testing where the row sorts, not
-     * whether it arrived.
+     * Two earlier versions of this check paged the feed — first 10 rows, then
+     * 200 — and both eventually failed on a correctly delivered broadcast. The
+     * feed sorts by priority before recency and this broadcast is deliberately
+     * LOW, and `list()` clamps the page size to 100 however large a limit is
+     * asked for. So the moment the coach accumulated 100 notifications of their
+     * own, the row was delivered and simply not on the page. That was testing
+     * where a row sorts, not whether it arrived.
      */
-    const coachFeed = await get('/notifications?limit=200', roleUser.ACADEMIC_COACH.id);
-    check('the coach received the broadcast',
-      coachFeed.ok && coachFeed.body.some((n) => n.title === `${MARKER} broadcast`));
+    const coachRow = await db.query(
+      `SELECT id, title FROM "Notification" WHERE "userId"=$1 AND title=$2`,
+      [roleUser.ACADEMIC_COACH.id, `${MARKER} broadcast`],
+    );
+    check('the coach received the broadcast', coachRow.rows.length === 1, `${coachRow.rows.length} row(s)`);
+    // The feed is still exercised, just not relied on for delivery.
+    const coachFeed = await get('/notifications?limit=100', roleUser.ACADEMIC_COACH.id);
+    check('the coach feed is readable', coachFeed.ok && Array.isArray(coachFeed.body), `status ${coachFeed.status}`);
 
     const detail = await get(`/notification-admin/broadcasts/${broadcast.body.id}`, roleUser.ADMIN.id);
     check('broadcast detail reports delivered and read counts',
@@ -480,7 +486,8 @@ const get = (path, userId, expect = 200) => req('GET', path, userId, undefined, 
     check('unread-count reports criticals separately',
       counts.ok && typeof counts.body.count === 'number' && typeof counts.body.critical === 'number');
 
-    const target = coachFeed.body.find((n) => n.title === `${MARKER} broadcast`);
+    // Taken from the row above rather than from a feed page, for the same reason.
+    const target = coachRow.rows[0];
     const readOne = await req('PATCH', `/notifications/${target.id}/read`, roleUser.ACADEMIC_COACH.id);
     check('PATCH mark read', readOne.ok, `status ${readOne.status}`);
     const readRow = await db.query(

@@ -13,7 +13,9 @@ import {
   Award,
   BookOpen,
   Filter,
+  ClipboardCheck,
 } from "lucide-react";
+import Link from "next/link";
 
 import { Topbar } from "@/components/layout/topbar";
 import { Card } from "@/components/ui/card";
@@ -227,6 +229,21 @@ export default function TeacherStudents() {
                     </div>
                   )}
                 </div>
+
+                {/*
+                 * The spec's assessment flow starts here: open the student, click
+                 * Monthly Assessment. The due-list page reaches the same form, but
+                 * only for cycles that are already due — a teacher looking at one
+                 * student should not have to go hunting for them in a list.
+                 */}
+                {s.courseId && (
+                  <Link
+                    href={`/teacher/monthly-assessments/evaluate?studentId=${s.id}&courseId=${s.courseId}`}
+                    className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl border border-hairline bg-surface-2/60 px-3 py-2 text-[11px] font-extrabold text-ink-2 transition hover:border-accent hover:text-accent"
+                  >
+                    <ClipboardCheck className="size-3.5" /> Monthly Assessment
+                  </Link>
+                )}
               </Card>
             ))}
           </div>

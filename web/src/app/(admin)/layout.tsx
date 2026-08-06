@@ -26,6 +26,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
  */
 const ADMIN_ONLY_PREFIXES = ["/finance/payroll", "/payouts"];
 
+/*
+ * Coaches monitor monthly assessments and read the rankings, but they do not
+ * configure the rubric, the grade ladder or the ranking weightage — the API
+ * gives them read-only on /assessment-config and refuses every write.
+ *
+ * A prefix allowlist cannot express that on its own: granting
+ * "/monthly-assessments" grants "/monthly-assessments/settings" with it. So the
+ * setup page is carved back out here, for the same reason /finance/payroll is
+ * carved out of /finance above — a page that loads and then cannot save is
+ * worse than one that is not there.
+ */
+/*
+ * Module 8 adds a second case of the same shape: a coach schedules and runs
+ * meetings and reads every report, but the recurring schedules and the
+ * academy-wide meeting rules belong to the admin and supervisor — the API
+ * refuses PATCH /meetings/settings and POST /meetings/series from a coach.
+ */
+const COACH_BLOCKED_PREFIXES = ["/monthly-assessments/settings", "/meetings/settings"];
+
 function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const pathname = usePathname();
@@ -54,6 +73,10 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       // they can see for their students.
       "/teacher-absences",
       "/monthly-reports",
+      // Module 7: the coach monitors assessments for their students and is one
+      // of the roles rankings are published to. Setup is carved out below.
+      "/monthly-assessments",
+      "/rankings",
       "/evaluation",
       "/students",
       "/teachers",
@@ -73,7 +96,10 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
     const isAllowed = allowedCoachPrefixes.some(
       (path) => pathname === path || pathname.startsWith(`${path}/`),
     );
-    if (!isAllowed) {
+    const isBlocked = COACH_BLOCKED_PREFIXES.some(
+      (path) => pathname === path || pathname.startsWith(`${path}/`),
+    );
+    if (!isAllowed || isBlocked) {
       notFound();
     }
   }
@@ -103,6 +129,10 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       // Supervisors review + approve monthly reports; they monitor salaries
       // (approve/pay stays admin-only, enforced by @Roles on the API).
       "/monthly-reports",
+      // Module 7: the supervisor is the approver — review, approve, publish,
+      // reopen and the whole setup surface are theirs alongside the admin.
+      "/monthly-assessments",
+      "/rankings",
       "/salary",
       "/meetings",
       "/finance",
