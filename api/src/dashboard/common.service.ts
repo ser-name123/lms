@@ -22,22 +22,6 @@ export interface SearchHit {
 
 const STAFF_ROLES: Role[] = [Role.ADMIN, Role.SUPERVISOR, Role.ACADEMIC_COACH];
 
-/** LmsMeeting.attendees is free-form JSON that may hold a string. */
-function safeJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-/** LmsMeeting stores times as strings, so they may not parse at all. */
-function isoOrNull(value: string | null): string | null {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
-
 @Injectable()
 export class DashboardCommonService {
   constructor(private readonly prisma: PrismaService) {}
@@ -478,11 +462,11 @@ export class DashboardCommonService {
     if (user.role === Role.TEACHER) {
       const teacher = await this.prisma.teacherProfile.findUnique({
         where: { userId: user.id },
-        select: { id: true, user: { select: { email: true } } },
+        select: { id: true },
       });
       if (!teacher) return events;
 
-      const [classes, assignments, assessments, allMeetings] = await Promise.all([
+      const [classes, assignments, assessments] = await Promise.all([
         this.prisma.classSession.findMany({
           where: { teacherId: teacher.id, startsAt: window },
           take: 200,
@@ -504,42 +488,16 @@ export class DashboardCommonService {
           take: 200,
           select: { id: true, title: true, startAt: true, endAt: true },
         }),
-        /*
-         * LmsMeeting stores its start as a string and its attendees as JSON,
-         * so neither the window nor the attendee match can be pushed into SQL —
-         * both are applied in memory below, the same way the teacher portal does.
-         */
-        this.prisma.lmsMeeting.findMany({
-          orderBy: { timeStart: 'desc' },
-          take: 500,
-          select: { id: true, topic: true, timeStart: true, timeEnd: true, attendees: true },
-        }),
       ]);
 
-      const email = teacher.user.email.toLowerCase();
-      const meetings = allMeetings.filter((m) => {
-        const at = new Date(m.timeStart);
-        if (Number.isNaN(at.getTime()) || at < start || at > end) return false;
-        const atts = typeof m.attendees === 'string' ? safeJson(m.attendees) : m.attendees;
-        // An empty attendee list means the meeting is for everyone.
-        if (!Array.isArray(atts) || !atts.length) return true;
-        return atts.some(
-          (a) =>
-            typeof (a as { email?: unknown })?.email === 'string' &&
-            (a as { email: string }).email.toLowerCase() === email,
-        );
-      });
-
-      events.push(
-        ...meetings.map((m) => ({
-          kind: 'MEETING' as const,
-          id: m.id,
-          title: m.topic,
-          at: new Date(m.timeStart).toISOString(),
-          endsAt: isoOrNull(m.timeEnd),
-          link: '/teacher/meetings',
-        })),
-      );
+      /*
+       * The pre-Module-8 LmsMeeting table used to be read here as well, and
+       * every one of its events linked to /teacher/meetings — which Module 8
+       * took over. A teacher clicking one landed on a page that did not contain
+       * it, because that page lists StaffMeeting rows. Module 8's own events
+       * are appended below via staffMeetingEvents(), which is the same source
+       * the page reads, so the link now leads where it says it does.
+       */
 
       events.push(
         ...classes.map((c) => ({

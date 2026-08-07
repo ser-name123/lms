@@ -344,31 +344,4 @@ export class TeacherPortalService {
     });
   }
 
-  async getMeetings(userId: string) {
-    const teacher = await this.prisma.teacherProfile.findUnique({
-      where: { userId },
-      include: { user: true },
-    });
-    if (!teacher) throw new NotFoundException('Teacher profile not found');
-    const email = teacher.user.email;
-
-    const meetings = await this.prisma.lmsMeeting.findMany({
-      orderBy: { timeStart: 'desc' },
-    });
-
-    return meetings.filter((m) => {
-      try {
-        const atts =
-          typeof m.attendees === 'string'
-            ? JSON.parse(m.attendees)
-            : m.attendees;
-        if (!Array.isArray(atts) || atts.length === 0) return true;
-        return atts.some(
-          (a: any) => a.email.toLowerCase() === email.toLowerCase(),
-        );
-      } catch (e) {
-        return true;
-      }
-    });
-  }
 }

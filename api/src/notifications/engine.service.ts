@@ -96,7 +96,28 @@ export class NotificationEngineService {
     let suppressed = 0;
     let failed = 0;
 
-    for (const userId of unique) {
+    /*
+     * Recipients are handled concurrently, in bounded batches.
+     *
+     * This loop used to be strictly sequential, and each recipient awaited an
+     * SMTP round trip inside it — so an action that notifies ten people held
+     * the HTTP request open for ten of them, one after another. Approving a
+     * leave notifies the requester plus every admin, supervisor and coach, and
+     * the admin watched their button spin through the lot.
+     *
+     * The work per recipient is already independent: preferences are read up
+     * front, and `attempt` records its own outcome and never throws. So the
+     * only reason it was serial was that it was written as a for-loop.
+     *
+     * Bounded rather than unbounded: an academy-wide broadcast can be hundreds
+     * of people, and firing hundreds of simultaneous SMTP connections is how
+     * you get rate-limited by the relay — which is the failure this is meant to
+     * relieve, not cause. Counts stay exactly as honest as before, because
+     * every send is still awaited before dispatch returns.
+     */
+    const CONCURRENCY = 8;
+
+    const deliverTo = async (userId: string): Promise<'created' | 'suppressed' | 'failed'> => {
       const pref = prefs.get(userId) ?? DEFAULT_PREFS;
 
       /*
@@ -108,14 +129,8 @@ export class NotificationEngineService {
       const critical = priority === Pri.CRITICAL;
 
       if (!critical) {
-        if (pref.mutedCategories.includes(category)) {
-          suppressed++;
-          continue;
-        }
-        if (def.marketing && pref.muteMarketing) {
-          suppressed++;
-          continue;
-        }
+        if (pref.mutedCategories.includes(category)) return 'suppressed';
+        if (def.marketing && pref.muteMarketing) return 'suppressed';
       }
 
       // Which channels survive this user's preferences.
@@ -127,10 +142,7 @@ export class NotificationEngineService {
        * this one — record nothing rather than writing a row they will never
        * see. A critical notification never reaches here.
        */
-      if (!selected.length) {
-        suppressed++;
-        continue;
-      }
+      if (!selected.length) return 'suppressed';
 
       const inApp = selected.includes(Ch.IN_APP);
       const notification = await this.prisma.notification.create({
@@ -177,26 +189,34 @@ export class NotificationEngineService {
         this.stream.publish({ userId, kind: 'notification', payload: notification });
       }
 
-      // Out-of-band channels, one at a time, never throwing.
+      // Out-of-band channels, together rather than in turn, never throwing.
       const message: OutgoingMessage = {
         title: input.title,
         body: input.body ?? '',
         link: input.link ?? null,
         html: input.html ?? null,
       };
-      let anyFailed = false;
-      for (const channel of selected) {
-        if (channel === Ch.IN_APP) continue;
-        const outcome = await this.attempt(notification.id, channel, userId, message);
-        if (outcome === 'failed') anyFailed = true;
-      }
+      const outcomes = await Promise.all(
+        selected
+          .filter((c) => c !== Ch.IN_APP)
+          .map((channel) => this.attempt(notification.id, channel, userId, message)),
+      );
+
       /*
        * Counted per recipient, not per delivery, so it stays in the same unit as
        * `created` — a caller showing "3 sent / 1 failed" is talking about people.
        * A recipient whose email bounced but whose in-app row landed still counts
        * here: something the sender asked for did not happen.
        */
-      if (anyFailed) failed++;
+      return outcomes.includes('failed') ? 'failed' : 'created';
+    };
+
+    for (let i = 0; i < unique.length; i += CONCURRENCY) {
+      const results = await Promise.all(unique.slice(i, i + CONCURRENCY).map(deliverTo));
+      for (const r of results) {
+        if (r === 'suppressed') suppressed++;
+        else if (r === 'failed') failed++;
+      }
     }
 
     return { created: notificationIds.length, suppressed, failed, notificationIds };
