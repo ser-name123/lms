@@ -141,6 +141,30 @@ function isoDay(offset) {
     check('the day has bookable slots', (slots.body?.slots || []).length > 0, JSON.stringify(slots.body).slice(0, 160));
     check('and they come from real availability, not the fallback window', slots.body?.fallback === false);
 
+    /*
+     * Book from the slot list for the gender being asked for, not the merged
+     * one above.
+     *
+     * `POST /leads` re-validates the slot against `slotsFor(date, { gender })`,
+     * so a slot that exists only because some OTHER teacher published it is
+     * correctly refused with "that slot has just been taken". This run's two
+     * teachers are free 09:00-21:00, but the merged list also carries every
+     * other approved teacher in the database — whoever starts earliest owns
+     * slot[0]. Picking from there and then booking with a preference asked the
+     * server for a slot the preferred teacher never offered, and the whole
+     * booking half of this file failed on it.
+     *
+     * That is the endpoint behaving correctly. The test was wrong.
+     */
+    const slotsForGender = async (gender) => {
+      const r = await req('GET', `/leads/availability?date=${bookDate}&gender=${gender}`, null);
+      return r.body?.slots ?? [];
+    };
+    const femaleSlots = await slotsForGender('Female');
+    const maleSlots = await slotsForGender('Male');
+    check('the female teacher offers slots', femaleSlots.length > 0, String(femaleSlots.length));
+    check('the male teacher offers slots', maleSlots.length > 0, String(maleSlots.length));
+
     // ── A website booking picks a teacher ────────────────────────────────────
     console.log('\nWebsite booking assigns a teacher');
 
@@ -156,8 +180,7 @@ function isoDay(offset) {
         preferredSlot: slot,
       }, 201);
 
-    const openSlots = slots.body.slots;
-    const b1 = await book(emails.lead1, openSlots[0], 'Female');
+    const b1 = await book(emails.lead1, femaleSlots[0], 'Female');
     check('booking succeeds', b1.ok, `status ${b1.status}: ${JSON.stringify(b1.body).slice(0, 140)}`);
 
     const { rows: t1 } = await db.query(
@@ -179,8 +202,11 @@ function isoDay(offset) {
 
     // The opposite preference must pick the other one, or the first result was
     // luck rather than the preference being honoured.
-    const b2 = await book(emails.lead2, openSlots[1], 'Male');
-    check('a second booking succeeds', b2.ok, `status ${b2.status}`);
+    // A different slot from the first booking, or the male teacher is simply
+    // busy then and the round-robin has nothing to choose from.
+    const maleSlot = maleSlots.find((s) => s !== femaleSlots[0]) ?? maleSlots[1];
+    const b2 = await book(emails.lead2, maleSlot, 'Male');
+    check('a second booking succeeds', b2.ok, `status ${b2.status}: ${JSON.stringify(b2.body).slice(0, 140)}`);
     const { rows: t2 } = await db.query(
       `SELECT t."teacherId" FROM "LeadTrial" t JOIN "Lead" l ON l.id = t."leadId" WHERE l.email = $1`,
       [emails.lead2],
