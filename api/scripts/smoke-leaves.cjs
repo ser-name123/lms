@@ -24,12 +24,25 @@ const check = (n, c, d) => {
   else { fail++; fails.push(`${n}${d ? ` — ${d}` : ''}`); console.log(`  FAIL ${n}${d ? ` — ${d}` : ''}`); }
 };
 const token = (id, role, email) => jwt.sign({ sub: id, email, role }, SECRET, { expiresIn: '30m' });
-async function req(method, path, auth, payload) {
+/*
+ * The API throttles at 100 requests a minute per IP. This smoke now makes more
+ * than that, so a back-to-back run used to collect 429s — which arrive as a
+ * JSON error object and surfaced as "(...).find is not a function", a message
+ * that reads like a Module 9 defect and is not one. Wait the window out and
+ * retry instead: a rate limit is the server asking to be asked more slowly.
+ */
+async function req(method, path, auth, payload, attempt = 0) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) },
     ...(payload ? { body: JSON.stringify(payload) } : {}),
   });
+  if (res.status === 429 && attempt < 3) {
+    const waitMs = Number(res.headers.get('retry-after')) * 1000 || 61_000;
+    console.log(`  ..   rate limited, waiting ${Math.round(waitMs / 1000)}s`);
+    await new Promise((r) => setTimeout(r, waitMs));
+    return req(method, path, auth, payload, attempt + 1);
+  }
   const text = await res.text();
   let body; try { body = JSON.parse(text); } catch { body = text; }
   return { status: res.status, body };
@@ -505,6 +518,157 @@ const iso = (d) => d.toISOString();
     check('a coach cannot change the rules', cfgWrite.status === 403, `status ${cfgWrite.status}`);
     const cfgAdmin = await req('PATCH', '/leaves/settings', adminToken, { noticeDaysExpected: 7 });
     check('an admin can', cfgAdmin.status === 200, `status ${cfgAdmin.status}`);
+
+    /*
+     * ── §9.5 options 1 and 3 ────────────────────────────────────────────────
+     *
+     * The run above proves option 2 end to end. Options 1 and 3 need their own
+     * leave and their own students: an impact is RESOLVED once decided, and
+     * option 1 needs a live subscription that option 2's student does not have.
+     *
+     * Option 1 is the one that touches MONEY — it pauses the classes and pushes
+     * the billing cycle out by the same span — so it is asserted against the
+     * subscription row, not just the impact record.
+     */
+    console.log('\nThe other two options (9.5)');
+
+    const teacher2 = await mk('teacher2', 'TEACHER');
+    const tp2 = await mkTeacher(teacher2, 'T2');
+    const stuA = await mk('stuA', 'STUDENT');
+    const stuB = await mk('stuB', 'STUDENT');
+    const mkStudent = async (u, tag) => (await db.query(
+      `INSERT INTO "StudentProfile" (id,"userId","studentCode","billingCurrency")
+       VALUES (gen_random_uuid(),$1,$2,'USD') RETURNING id`,
+      [u.id, `${MARKER}-${tag}-${Date.now()}`],
+    )).rows[0];
+    const spA = await mkStudent(stuA, 'SA');
+    const spB = await mkStudent(stuB, 'SB');
+
+    const W_FROM = 12, W_TO = 15;
+    const mkClass = async (sp, off) => {
+      const s = dayUtc(off); s.setUTCHours(14, 0, 0, 0);
+      const c = (await db.query(
+        `INSERT INTO "ClassSession" (id,"courseId","teacherId",title,"startsAt","endsAt",status)
+         VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,'SCHEDULED') RETURNING id`,
+        [course.id, tp2.id, `${MARKER} c2 ${off}`, s, new Date(s.getTime() + 3600_000)],
+      )).rows[0];
+      await db.query(`INSERT INTO "ClassAttendee" (id,"classId","studentId") VALUES (gen_random_uuid(),$1,$2)`,
+        [c.id, sp.id]);
+      return c.id;
+    };
+    const clsA = await mkClass(spA, W_FROM + 1);
+    const clsB = await mkClass(spB, W_FROM + 1);
+
+    // Student A carries a live subscription; option 1 refuses without one, on
+    // purpose — recording a pause that never happened is worse than saying no.
+    const model = (await db.query(`SELECT id, "pricingMode" FROM "SubscriptionModel" LIMIT 1`)).rows[0];
+    const renewalBefore = dayUtc(20);
+    const subA = (await db.query(
+      `INSERT INTO "StudentSubscription"
+         (id,"studentId","modelId","pricingMode",currency,"durationMinutes","weeklyClasses","monthlyHours",
+          status,"startDate","renewalDate","remainingClasses","updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,$3,'USD',60,2,8,'ACTIVE',now(),$4,8,now()) RETURNING id`,
+      [spA.id, model.id, model.pricingMode, renewalBefore],
+    )).rows[0];
+
+    const leave2 = await req('POST', '/leaves', teacher2.token, {
+      leaveType: 'VACATION',
+      startDate: iso(dayUtc(W_FROM)),
+      endDate: iso(dayUtc(W_TO)),
+      reason: 'Family trip',
+    });
+    const leave2Id = leave2.body?.id;
+    const app2 = await req('POST', `/leaves/${leave2Id}/approve`, adminToken, { isPaid: true });
+    check('a second unavailability is approved', app2.body?.status === 'APPROVED', `status ${app2.status}`);
+
+    const impacts2 = await req('GET', `/leaves/impacts?leaveId=${leave2Id}`, coach.token);
+    check('both affected students are queued', (impacts2.body ?? []).length === 2,
+      String((impacts2.body ?? []).length));
+    const impA = (impacts2.body ?? []).find((i) => i.studentId === spA.id)?.id;
+    const impB = (impacts2.body ?? []).find((i) => i.studentId === spB.id)?.id;
+
+    // ── Option 1 — wait for the same teacher ────────────────────────────────
+    const wait = await req('POST', `/leaves/impacts/${impA}/decide`, coach.token, {
+      option: 'WAIT_FOR_TEACHER', notes: 'Family happy to wait',
+    });
+    check('§9.5 option 1 — the family can wait for their own teacher',
+      wait.status === 200 || wait.status === 201,
+      `status ${wait.status} ${JSON.stringify(wait.body).slice(0, 140)}`);
+    check('and the cycle extension is reported back to the coach',
+      Number(wait.body?.cycleExtendedDays) > 0, String(wait.body?.cycleExtendedDays));
+
+    const subAfter = (await db.query(
+      `SELECT status, "renewalDate" FROM "StudentSubscription" WHERE id=$1`, [subA.id])).rows[0];
+    check('their subscription is paused, not cancelled', subAfter.status === 'ON_BREAK', subAfter.status);
+    check('and the billing cycle moved OUT, so the pause costs them nothing',
+      new Date(subAfter.renewalDate) > renewalBefore,
+      `${subAfter.renewalDate} vs ${renewalBefore.toISOString()}`);
+
+    const batchIntact = await db.query(
+      `SELECT "teacherId" FROM "ClassSession" WHERE id=$1`, [clsA]);
+    check('the reserved slot stays with the original teacher (§9.5 opt 1)',
+      batchIntact.rows[0].teacherId === tp2.id, batchIntact.rows[0].teacherId);
+
+    // ── Option 3 — reschedule out of the window ─────────────────────────────
+    const stillInside = dayUtc(W_FROM + 2); stillInside.setUTCHours(14, 0, 0, 0);
+    const refused = await req('POST', `/leaves/impacts/${impB}/decide`, coach.token, {
+      option: 'RESCHEDULE', reschedules: [{ classId: clsB, startsAt: iso(stillInside) }],
+    });
+    check('§9.5 option 3 — a move that is STILL inside the window is refused',
+      refused.status === 400, `status ${refused.status}`);
+
+    const outsideAt = dayUtc(W_TO + 3); outsideAt.setUTCHours(14, 0, 0, 0);
+    const moved3 = await req('POST', `/leaves/impacts/${impB}/decide`, coach.token, {
+      option: 'RESCHEDULE', reschedules: [{ classId: clsB, startsAt: iso(outsideAt) }],
+    });
+    check('and a move outside it is accepted',
+      moved3.status === 200 || moved3.status === 201,
+      `status ${moved3.status} ${JSON.stringify(moved3.body).slice(0, 140)}`);
+
+    const movedRow = (await db.query(
+      `SELECT "startsAt","teacherId",status FROM "ClassSession" WHERE id=$1`, [clsB])).rows[0];
+    check('the class really moved out of the unavailability',
+      new Date(movedRow.startsAt) > dayUtc(W_TO), String(movedRow.startsAt));
+    check('kept its own teacher — rescheduling is not a reassignment',
+      movedRow.teacherId === tp2.id, movedRow.teacherId);
+    check('and was not cancelled', movedRow.status === 'SCHEDULED', movedRow.status);
+
+    const movedNotice = await db.query(
+      `SELECT count(*)::int AS n FROM "Notification"
+        WHERE "userId"=$1 AND type='LEAVE_CLASSES_AFFECTED' AND title LIKE '%moved%'`, [stuB.id]);
+    check('and the student was told their classes moved', movedNotice.rows[0].n > 0,
+      String(movedNotice.rows[0].n));
+
+    const auditOpts = await db.query(
+      `SELECT action FROM "LeaveAuditLog" WHERE "leaveId"=$1`, [leave2Id]);
+    const actions2 = auditOpts.rows.map((r) => r.action);
+    check('§9.11 both decisions are in the audit log',
+      actions2.includes('CLASSES_PAUSED') && actions2.includes('CLASSES_RESCHEDULED'),
+      actions2.join(','));
+
+    /*
+     * §9.7's fourth bullet — "resume the student's regular schedule (if
+     * paused)". The return above proved option 2 stands the stand-in down;
+     * this proves option 1's PAUSE is lifted, which is the half that holds a
+     * family's billing open until it happens.
+     */
+    await db.query(`UPDATE "LeaveRequest" SET "startDate"=$1, "endDate"=$2 WHERE id=$3`,
+      [dayUtc(-9), dayUtc(-2), leave2Id]);
+    const return2 = await req('POST', `/leaves/${leave2Id}/return`, coach.token);
+    check('the second unavailability can be returned', return2.status === 200 || return2.status === 201,
+      `status ${return2.status}`);
+
+    const subResumed = (await db.query(
+      `SELECT status FROM "StudentSubscription" WHERE id=$1`, [subA.id])).rows[0];
+    check('§9.7 — the paused subscription is ACTIVE again', subResumed.status === 'ACTIVE', subResumed.status);
+    const resumeNotice = await db.query(
+      `SELECT count(*)::int AS n FROM "Notification" WHERE "userId"=$1 AND type='LEAVE_TEACHER_RETURNED'`,
+      [stuA.id]);
+    check('and the family was told their teacher is back', resumeNotice.rows[0].n > 0,
+      String(resumeNotice.rows[0].n));
+    const teacher2Back = (await db.query(
+      `SELECT "availabilityBlockedAt" FROM "LeaveRequest" WHERE id=$1`, [leave2Id])).rows[0];
+    check('and the teacher is bookable again', !teacher2Back.availabilityBlockedAt, '');
 
     // ── Cancelling an approved leave puts the world back ────────────────────
     console.log('\nCancelling an approved leave');
