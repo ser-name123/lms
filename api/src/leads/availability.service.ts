@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadStatus } from '../generated/prisma/enums';
+import { LeavesService } from '../leaves/leaves.service';
 
 /*
  * Which 30-minute slots a visitor may book a trial in, for one date.
@@ -50,7 +51,27 @@ interface Window {
 
 @Injectable()
 export class LeadAvailabilityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // §9.6 — "consider the unavailability while displaying available teachers
+    // during scheduling". Every picker below asks the leaves module rather than
+    // re-deriving the window: the end date is stored at 00:00 but covers its own
+    // last day, and getting that wrong offers an absent teacher's evening away.
+    private readonly leaves: LeavesService,
+  ) {}
+
+  /**
+   * Teacher-profile ids that are on approved unavailability across a whole date.
+   *
+   * A leave is whole-day, so the question is only ever "is this date inside the
+   * window" — no slot-level arithmetic. Returns an empty set when nobody is
+   * away, which is the overwhelmingly common case and costs one query.
+   */
+  private async awayOnDate(date: Date): Promise<Set<string>> {
+    const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000 - 1);
+    return this.leaves.unavailableTeacherIds(dayStart, dayEnd);
+  }
 
   /** "HH:mm" → minutes from midnight. Returns null on anything malformed. */
   private toMinutes(value: unknown): number | null {
@@ -254,10 +275,21 @@ export class LeadAvailabilityService {
 
     const teachers = await this.prisma.teacherProfile.findMany({
       where: whereClause,
-      select: { availability: true, timeZone: true },
+      select: { id: true, availability: true, timeZone: true },
     });
 
-    const windows = teachers.flatMap((t) =>
+    /*
+     * §9.6 — an approved absence takes the teacher out of the merged window for
+     * those dates. Without this the academy publishes hours it cannot staff:
+     * the visitor books, and a coach discovers on the day that the only teacher
+     * covering that slot is away. The fallback below still applies, so a date
+     * where everyone is off degrades to standard hours + a flagged lead rather
+     * than an empty calendar.
+     */
+    const away = await this.awayOnDate(date);
+    const present = away.size ? teachers.filter((t) => !away.has(t.id)) : teachers;
+
+    const windows = present.flatMap((t) =>
       this.readUtcWindowsForDate(t.availability, t.timeZone, date),
     );
     const merged = this.merge(windows);
@@ -341,6 +373,18 @@ export class LeadAvailabilityService {
       for (const s of slots) busy.get(teacherId)!.add(s);
     }
 
+    /*
+     * §9.6 — an absent teacher stays on the list but has no free slot.
+     *
+     * Dropping them entirely would read as "this person left the academy"; the
+     * coach needs to see WHY the obvious candidate cannot take the class. So
+     * every published slot moves to busySlots and `onLeave` carries the reason.
+     * This is also what keeps `pickTeacherFor` honest — it picks out of
+     * freeSlots, so an empty list excludes them from the auto-assignment with
+     * no separate check to forget.
+     */
+    const away = await this.awayOnDate(date);
+
     return {
       date: rawDate,
       timeZone: 'UTC',
@@ -349,14 +393,16 @@ export class LeadAvailabilityService {
           const slots = this.toSlots(
             this.merge(this.readUtcWindowsForDate(t.availability, t.timeZone, date)),
           );
+          const onLeave = away.has(t.id);
           const taken = busy.get(t.id) ?? new Set<string>();
           return {
             teacherId: t.id,
             name: `${t.user.firstName} ${t.user.lastName}`.trim(),
             gender: t.gender,
             subjects: t.subjects,
-            freeSlots: slots.filter((s) => !taken.has(s)),
-            busySlots: slots.filter((s) => taken.has(s)),
+            onLeave,
+            freeSlots: onLeave ? [] : slots.filter((s) => !taken.has(s)),
+            busySlots: onLeave ? slots : slots.filter((s) => taken.has(s)),
           };
         })
         .sort((a, b) => b.freeSlots.length - a.freeSlots.length),
@@ -424,8 +470,8 @@ export class LeadAvailabilityService {
     time: string; // HH:mm
     durationMinutes: number;
   }): Promise<{
-    matching: { teacherId: string; name: string; gender: string | null; subjects: string[] }[];
-    others: { teacherId: string; name: string; gender: string | null; subjects: string[] }[];
+    matching: { teacherId: string; name: string; gender: string | null; subjects: string[]; onLeave: boolean }[];
+    others: { teacherId: string; name: string; gender: string | null; subjects: string[]; onLeave: boolean }[];
   }> {
     const days = (opts.days ?? []).filter(Boolean);
     const spans = Math.max(1, Math.ceil((opts.durationMinutes || 60) / SLOT_MINUTES));
@@ -452,16 +498,39 @@ export class LeadAvailabilityService {
       },
     });
 
-    // One representative date + reserved-slot map per requested weekday.
+    // One representative date + reserved-slot map per requested weekday, plus
+    // (§9.6) who is on approved unavailability on that date.
     const dayDates = days.map((d) => this.nextDateForWeekday(d));
     const busyByDate = new Map<number, Map<string, Set<string>>>();
-    for (const date of dayDates) busyByDate.set(date.getTime(), await this.activeBatchBusyForDate(date));
+    const awayByDate = new Map<number, Set<string>>();
+    for (const date of dayDates) {
+      busyByDate.set(date.getTime(), await this.activeBatchBusyForDate(date));
+      awayByDate.set(date.getTime(), await this.awayOnDate(date));
+    }
 
-    const matching: { teacherId: string; name: string; gender: string | null; subjects: string[] }[] = [];
+    const matching: { teacherId: string; name: string; gender: string | null; subjects: string[]; onLeave: boolean }[] = [];
     const others: typeof matching = [];
     for (const t of teachers) {
       let freeOnAll = days.length > 0;
+      let onLeave = false;
       for (const date of dayDates) {
+        /*
+         * §9.6 — approved unavailability beats the published pattern.
+         *
+         * Note this is checked against the NEXT occurrence of each weekday, not
+         * the whole enrolment: a recurring schedule runs for months and a
+         * fortnight off does not disqualify someone forever. So an absent
+         * teacher is not hidden — they drop to `others` carrying `onLeave`, and
+         * a coach who genuinely wants them can still assign them knowing the
+         * first classes need covering. What this stops is the accident: an
+         * absent teacher sitting in the "matching" list looking like the safe
+         * pick.
+         */
+        if (awayByDate.get(date.getTime())?.has(t.id)) {
+          onLeave = true;
+          freeOnAll = false;
+          break;
+        }
         const free = new Set(this.toSlots(this.merge(this.readUtcWindowsForDate(t.availability, t.timeZone, date))));
         const reserved = busyByDate.get(date.getTime())?.get(t.id) ?? new Set<string>();
         if (!needed.every((s) => free.has(s) && !reserved.has(s))) {
@@ -477,6 +546,7 @@ export class LeadAvailabilityService {
         name: `${t.user.firstName} ${t.user.lastName}`.trim(),
         gender: t.gender,
         subjects: t.subjects,
+        onLeave,
       };
       (freeOnAll && courseOk ? matching : others).push(row);
     }

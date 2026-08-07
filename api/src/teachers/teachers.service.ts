@@ -336,11 +336,37 @@ export class TeachersService {
       }),
     );
 
+    /*
+     * §9.6 — teachers away RIGHT NOW.
+     *
+     * This used to read `pending + other`, labelled "mock on-leave status for
+     * display": a count of teachers whose account was awaiting activation, put
+     * on a chart titled "On Leave". Module 9 records real approved windows, so
+     * the figure is now the thing it always claimed to be — distinct users with
+     * an approved leave covering today. Distinct because two overlapping
+     * approved leaves are one absent teacher, not two.
+     */
+    const today = new Date();
+    const dayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 86_400_000 - 1);
+    const awayRows = await this.prisma.leaveRequest.findMany({
+      where: {
+        status: 'APPROVED',
+        startDate: { lte: dayEnd },
+        // Stored at 00:00 but covering its own last day, so compare against the
+        // START of today rather than its end.
+        endDate: { gte: dayStart },
+        user: { role: Role.TEACHER },
+      },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+
     return {
       total,
       active,
       inactive: inactive + pending + other, // map anything non-active to inactive for chart visual match
-      onLeave: pending + other, // mock on-leave status for display
+      onLeave: awayRows.length,
       countries,
       specialisations,
     };

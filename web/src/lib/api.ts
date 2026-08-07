@@ -2454,6 +2454,13 @@ export type TrialDayAvailability = {
     name: string;
     gender: string | null;
     subjects: string[];
+    /**
+     * §9.6 — on approved unavailability for this date. Such a teacher stays on
+     * the list (dropping them would read as "no longer with the academy") but
+     * every published slot moves to busySlots, so a picker that filters on
+     * freeSlots excludes them without needing to know about leave at all.
+     */
+    onLeave: boolean;
     freeSlots: string[];
     busySlots: string[];
   }[];
@@ -2846,6 +2853,13 @@ export interface EnrollmentTeacher {
   name: string;
   gender: string | null;
   subjects: string[];
+  /**
+   * §9.6 — on approved unavailability on the next occurrence of a requested
+   * weekday. Such a teacher is never in `matching`; they drop to `others` so a
+   * coach can still assign them for a long enrolment, knowing the opening
+   * classes need cover.
+   */
+  onLeave: boolean;
 }
 export const fetchEnrollmentTeachers = (params: {
   courseId?: string;
@@ -3462,7 +3476,13 @@ export const removeBatchStudent = (id: string, studentId: string) =>
 export const scheduleClass = (dto: Record<string, unknown>) =>
   api<AttendanceClass>("/attendance/classes", { method: "POST", body: JSON.stringify(dto) });
 export const generateClasses = (dto: Record<string, unknown>) =>
-  api<{ generated: number }>("/attendance/classes/generate", { method: "POST", body: JSON.stringify(dto) });
+  // `skippedForLeave` counts days inside the teacher's approved unavailability
+  // that were deliberately not booked (§9.6). Report it — a smaller number than
+  // the admin expected, with no explanation, reads as a failure.
+  api<{ generated: number; skippedForLeave: number }>("/attendance/classes/generate", {
+    method: "POST",
+    body: JSON.stringify(dto),
+  });
 export const fetchAttendanceClasses = (q: { batchId?: string; teacherId?: string; status?: string; date?: string; from?: string; to?: string } = {}) => {
   const p = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v && v !== "All") p.set(k, String(v)); });

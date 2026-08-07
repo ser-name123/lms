@@ -9,13 +9,17 @@ import { FinanceModule } from '../finance/finance.module';
 // subscription record through the subscriptions module.
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { EarningsModule } from '../earnings/earnings.module';
+// §9.6: every teacher picker here has to skip staff on approved unavailability.
+// Safe to import — LeavesModule reaches Prisma/Notifications/Subscriptions and
+// none of those reach back here, so there is no cycle and no forwardRef.
+import { LeavesModule } from '../leaves/leaves.module';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
 import { LeadAvailabilityService } from './availability.service';
 import { ZoomService } from './zoom.service';
 
 @Module({
-  imports: [PrismaModule, EmailsModule, NotificationsModule, FinanceModule, SubscriptionsModule, EarningsModule],
+  imports: [PrismaModule, EmailsModule, NotificationsModule, FinanceModule, SubscriptionsModule, EarningsModule, LeavesModule],
   controllers: [LeadsController],
   providers: [LeadsService, LeadAvailabilityService, ZoomService],
   // Settings reads Zoom's configured state for its integrations panel.

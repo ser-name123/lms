@@ -1233,9 +1233,10 @@ function useFreeTeachers(whenIso: string, durationMins: number) {
   }, [date]);
 
   return useMemo(() => {
-    if (!avail || !whenIso) return [];
+    const empty = { free: [] as TrialDayAvailability["teachers"], onLeaveIds: new Set<string>() };
+    if (!avail || !whenIso) return empty;
     const start = new Date(whenIso);
-    if (isNaN(start.getTime())) return [];
+    if (isNaN(start.getTime())) return empty;
     const from = start.getUTCHours() * 60 + start.getUTCMinutes();
     const need = Math.max(1, Math.ceil((durationMins || 30) / 30));
     const wanted: string[] = [];
@@ -1243,7 +1244,14 @@ function useFreeTeachers(whenIso: string, durationMins: number) {
       const m = from + i * 30;
       wanted.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
     }
-    return avail.teachers.filter((t) => wanted.every((s) => t.freeSlots.includes(s)));
+    return {
+      // An absent teacher has no free slots at all (§9.6), so they fall out here
+      // without a leave check of their own.
+      free: avail.teachers.filter((t) => wanted.every((s) => t.freeSlots.includes(s))),
+      // …but the fallback list below shows EVERY teacher when nobody is free,
+      // and an absent one has to be labelled there or the coach assigns them.
+      onLeaveIds: new Set(avail.teachers.filter((t) => t.onLeave).map((t) => t.teacherId)),
+    };
   }, [avail, whenIso, durationMins]);
 }
 
@@ -1264,7 +1272,7 @@ function AssignTeacherRow({
   const [busy, setBusy] = useState(false);
 
   const open = !leadAssignedTeacherId && !isTrialClosed(trial) && trial.status !== "CANCELLED";
-  const free = useFreeTeachers(trial.scheduledAt, trial.durationMins);
+  const { free, onLeaveIds } = useFreeTeachers(trial.scheduledAt, trial.durationMins);
 
   useEffect(() => {
     if (recommendedTeacherId) {
@@ -1293,9 +1301,13 @@ function AssignTeacherRow({
       })
     : teachers.map((t) => {
         const isRec = t.id === recommendedTeacherId;
+        // §9.6 — this branch lists everyone, so an absent teacher would appear
+        // here looking like an ordinary busy one. Say so in the label: the
+        // coach may still pick them deliberately, but not by accident.
+        const suffix = onLeaveIds.has(t.id) ? " — on approved leave" : "";
         return {
           id: t.id,
-          label: isRec ? `${t.name} (Recommended)` : t.name,
+          label: `${isRec ? `${t.name} (Recommended)` : t.name}${suffix}`,
           free: false,
         };
       });
@@ -1307,7 +1319,7 @@ function AssignTeacherRow({
     if (recTeacher) {
       options.push({
         id: recTeacher.id,
-        label: `${recTeacher.name} (Recommended)`,
+        label: `${recTeacher.name} (Recommended)${onLeaveIds.has(recTeacher.id) ? " — on approved leave" : ""}`,
         free: false,
       });
     }
@@ -1384,7 +1396,7 @@ function EditTrialForm({ trial, teachers, onCancel, onSaved }: {
   const [busy, setBusy] = useState(false);
 
   const whenIso = when ? new Date(when).toISOString() : trial.scheduledAt;
-  const free = useFreeTeachers(whenIso, duration);
+  const { free, onLeaveIds } = useFreeTeachers(whenIso, duration);
 
   /*
    * Free teachers first, but never an empty list: the currently assigned one
@@ -1396,7 +1408,12 @@ function EditTrialForm({ trial, teachers, onCancel, onSaved }: {
     const seen = new Set<string>();
     const out: { id: string; label: string; free: boolean }[] = [];
     for (const t of free) { seen.add(t.teacherId); out.push({ id: t.teacherId, label: t.name, free: true }); }
-    for (const t of teachers) if (!seen.has(t.id)) out.push({ id: t.id, label: t.name, free: false });
+    // §9.6 — the not-free tail includes teachers who are away; label those so
+    // rescheduling a trial onto an absent teacher is a deliberate act.
+    for (const t of teachers) {
+      if (seen.has(t.id)) continue;
+      out.push({ id: t.id, label: onLeaveIds.has(t.id) ? `${t.name} — on approved leave` : t.name, free: false });
+    }
     return out;
   })();
 
@@ -2091,6 +2108,12 @@ function DecisionTab({ lead, onChange }: { lead: Lead; onChange: () => void }) {
                           <label key={t.teacherId} className="flex items-center gap-2 text-xs text-ink-2">
                             <input type="radio" name="enrollTeacher" checked={teacherId === t.teacherId} onChange={() => setTeacherId(t.teacherId)} />
                             {t.name}{t.gender ? ` · ${t.gender}` : ""}
+                            {/* §9.6 — why this one is not in the list above. */}
+                            {t.onLeave && (
+                              <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">
+                                on approved leave
+                              </span>
+                            )}
                           </label>
                         ))}
                       </div>

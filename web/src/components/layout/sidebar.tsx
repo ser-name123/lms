@@ -276,9 +276,17 @@ export function Sidebar() {
         { label: "Meetings", href: "/meetings", icon: Users },
         // §9.5 puts the coach in charge of the classes an absent teacher leaves.
         { label: "Affected Classes", href: "/leave-impacts", icon: CalendarOff },
+        // §9.8 puts the coach on the submitted and approved rows, so the queue
+        // their notifications link to has to be reachable without typing a URL.
+        // Approving stays admin-only — the API refuses it and the page hides it.
+        { label: "Leave Requests", href: "/leaves", icon: CalendarOff },
         { label: "Attendance", href: "/attendance", icon: ClipboardCheck },
       ],
     },
+    // §9.1 lists the Academic Coach as applicable staff, so they request leave
+    // from their own portal like everyone else. The route was already allowed;
+    // only this link was missing, which left the coach unable to apply at all.
+    { label: "My Leave", href: "/my-leave", icon: CalendarOff },
     { label: "Messages", href: "/chat", icon: MessageCircle },
     { label: "Support", href: "/support", icon: HelpCircle },
   ];
@@ -296,6 +304,10 @@ export function Sidebar() {
     // §9.8 puts the supervisor on the submitted/approved rows, so they need the
     // queue; deciding stays with the admin (enforced by @Roles on the API).
     { label: "Leave Requests", href: "/leaves", icon: CalendarOff },
+    // §9.8 row 4 notifies the supervisor when an absence affects classes, and
+    // that notification links here — without the entry it led to a page with no
+    // way back. Read-only for them; deciding is the coach's (§9.5).
+    { label: "Affected Classes", href: "/leave-impacts", icon: CalendarOff },
     { label: "My Leave", href: "/my-leave", icon: CalendarOff },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },
     // Read-only monitoring — supervisors are notified of subscription/break
