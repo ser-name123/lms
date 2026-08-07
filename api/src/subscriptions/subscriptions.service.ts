@@ -2891,7 +2891,45 @@ export class SubscriptionsService {
    * duration so the next invoice is postponed, flip to ON_BREAK, and notify all
    * four roles. Idempotent — only acts on an ACTIVE subscription with a window.
    */
-  async startBreak(subId: string): Promise<boolean> {
+  /**
+   * Module 9 §9.5 option 1 — "wait for the same teacher".
+   *
+   * The student is not taking a break; their TEACHER is away. The mechanics are
+   * identical (pause the classes, push the cycle out by the same span, keep the
+   * batch and its reserved slot untouched) so this reuses the break path rather
+   * than growing a second copy of the billing arithmetic — the one place a
+   * divergence would quietly cost a family money. What differs is the wording,
+   * which is why it is a separate entry point and not a flag.
+   *
+   * Returns the days the cycle moved, so the coach can be shown the answer.
+   */
+  async pauseForTeacherUnavailability(subId: string, from: Date, to: Date): Promise<number> {
+    const sub = await this.prisma.studentSubscription.findUnique({ where: { id: subId } });
+    if (!sub || sub.status !== 'ACTIVE') return 0;
+
+    // The window runs to the END of the teacher's last day off, so a class that
+    // evening is paused too. `startBreak` reads these fields.
+    const start = new Date(from);
+    const end = new Date(to);
+    end.setUTCHours(23, 59, 59, 999);
+    if (end <= start) return 0;
+
+    await this.prisma.studentSubscription.update({
+      where: { id: subId },
+      data: { breakStartDate: start, breakEndDate: end },
+    });
+    const ok = await this.startBreak(subId, 'TEACHER_UNAVAILABILITY');
+    if (!ok) {
+      // Put the window back rather than leaving a half-applied pause behind.
+      await this.prisma.studentSubscription
+        .update({ where: { id: subId }, data: { breakStartDate: null, breakEndDate: null } })
+        .catch(() => undefined);
+      return 0;
+    }
+    return Math.round((end.getTime() - start.getTime()) / SubscriptionsService.DAY_MS);
+  }
+
+  async startBreak(subId: string, cause: 'STUDENT_BREAK' | 'TEACHER_UNAVAILABILITY' = 'STUDENT_BREAK'): Promise<boolean> {
     const sub = await this.prisma.studentSubscription.findUnique({ where: { id: subId } });
     if (!sub || sub.status !== 'ACTIVE' || !sub.breakStartDate || !sub.breakEndDate) return false;
     const start = new Date(sub.breakStartDate);
@@ -2927,21 +2965,27 @@ export class SubscriptionsService {
           .catch(() => undefined);
       }
     }
-    await this.prisma.subscriptionRequest
-      .updateMany({
-        where: { studentId: sub.studentId, type: SubscriptionRequestType.BREAK_REQUEST, status: SubscriptionRequestStatus.APPROVED },
-        data: { status: SubscriptionRequestStatus.APPLIED, appliedAt: new Date() },
-      })
-      .catch(() => undefined);
+    // Only a student-requested break closes a BREAK_REQUEST. A teacher's
+    // unavailability has no such request, and marking someone else's pending
+    // break APPLIED would silently consume it.
+    if (cause === 'STUDENT_BREAK') {
+      await this.prisma.subscriptionRequest
+        .updateMany({
+          where: { studentId: sub.studentId, type: SubscriptionRequestType.BREAK_REQUEST, status: SubscriptionRequestStatus.APPROVED },
+          data: { status: SubscriptionRequestStatus.APPLIED, appliedAt: new Date() },
+        })
+        .catch(() => undefined);
+    }
 
+    const byTeacher = cause === 'TEACHER_UNAVAILABILITY';
     await this.audit(
       sub.studentId,
       'SUBSCRIPTION_BREAK_STARTED',
-      'Break started',
-      `Paused until ${end.toISOString().slice(0, 10)}; cycle extended ${durationDays} day(s). Teacher slot reserved.`,
+      byTeacher ? 'Classes paused — teacher unavailable' : 'Break started',
+      `${byTeacher ? 'Paused while the teacher is away' : 'Paused'} until ${end.toISOString().slice(0, 10)}; cycle extended ${durationDays} day(s). Teacher slot reserved.`,
       undefined,
     );
-    await this.notifyBreakAll(sub.studentId, sub.batchId, 'BREAK_STARTED', start, end).catch(() => undefined);
+    await this.notifyBreakAll(sub.studentId, sub.batchId, 'BREAK_STARTED', start, end, cause).catch(() => undefined);
     return true;
   }
 
@@ -2950,7 +2994,7 @@ export class SubscriptionsService {
    * classes from the resume date to the (extended) cycle end so the paused
    * classes are made up and none are lost. Idempotent — only acts on ON_BREAK.
    */
-  async resumeBreak(subId: string): Promise<boolean> {
+  async resumeBreak(subId: string, cause: 'STUDENT_BREAK' | 'TEACHER_UNAVAILABILITY' = 'STUDENT_BREAK'): Promise<boolean> {
     const sub = await this.prisma.studentSubscription.findUnique({ where: { id: subId } });
     if (!sub || sub.status !== 'ON_BREAK') return false;
     const end = sub.breakEndDate ? new Date(sub.breakEndDate) : new Date();
@@ -2995,7 +3039,7 @@ export class SubscriptionsService {
       'Break ended; classes resumed with the same teacher.',
       undefined,
     );
-    await this.notifyBreakAll(sub.studentId, sub.batchId, 'BREAK_RESUMED', end, end).catch(() => undefined);
+    await this.notifyBreakAll(sub.studentId, sub.batchId, 'BREAK_RESUMED', end, end, cause).catch(() => undefined);
     return true;
   }
 
@@ -3042,6 +3086,7 @@ export class SubscriptionsService {
     kind: 'BREAK_STARTED' | 'BREAK_RESUMED',
     _start: Date,
     end: Date,
+    cause: 'STUDENT_BREAK' | 'TEACHER_UNAVAILABILITY' = 'STUDENT_BREAK',
   ): Promise<void> {
     const student = await this.prisma.studentProfile.findUnique({
       where: { id: studentId },
@@ -3058,13 +3103,29 @@ export class SubscriptionsService {
     const name = student?.user ? `${student.user.firstName} ${student.user.lastName}`.trim() : 'A student';
     const started = kind === 'BREAK_STARTED';
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    const title = started ? 'Subscription break started' : 'Subscription resumed';
+    /*
+     * A teacher's absence is not the family's break, and telling them "your
+     * break has started" would read as something they asked for. Same pause,
+     * different sentence.
+     */
+    const byTeacher = cause === 'TEACHER_UNAVAILABILITY';
+    const title = started
+      ? byTeacher ? 'Classes paused — your teacher is away' : 'Subscription break started'
+      : byTeacher ? 'Your teacher is back — classes resumed' : 'Subscription resumed';
     const studentBody = started
-      ? `Your classes are paused until ${fmt(end)}. Your billing cycle has been extended and your teacher is reserved.`
-      : 'Your break has ended and your classes have resumed.';
+      ? byTeacher
+        ? `Your teacher is unavailable until ${fmt(end)}. Your classes are paused, your billing cycle has been extended by the same time, and your slot is held.`
+        : `Your classes are paused until ${fmt(end)}. Your billing cycle has been extended and your teacher is reserved.`
+      : byTeacher
+        ? 'Your teacher is available again and your classes have resumed.'
+        : 'Your break has ended and your classes have resumed.';
     const staffBody = started
-      ? `${name}'s subscription is paused until ${fmt(end)} (teacher slot reserved).`
-      : `${name}'s break has ended and classes resumed.`;
+      ? byTeacher
+        ? `${name}'s classes are paused until ${fmt(end)} while their teacher is away (slot reserved, cycle extended).`
+        : `${name}'s subscription is paused until ${fmt(end)} (teacher slot reserved).`
+      : byTeacher
+        ? `${name}'s classes resumed — their teacher is back.`
+        : `${name}'s break has ended and classes resumed.`;
 
     const jobs: Promise<unknown>[] = [];
     if (student?.userId) {

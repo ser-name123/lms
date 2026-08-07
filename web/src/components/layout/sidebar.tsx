@@ -28,6 +28,7 @@ import {
   Trophy,
   SlidersHorizontal,
   type LucideIcon,
+  CalendarOff,
 } from "lucide-react";
 
 import { navGroups, type NavItem } from "./nav-config";
@@ -273,6 +274,8 @@ export function Sidebar() {
       children: [
         { label: "Classes", href: "/classes", icon: CalendarDays },
         { label: "Meetings", href: "/meetings", icon: Users },
+        // §9.5 puts the coach in charge of the classes an absent teacher leaves.
+        { label: "Affected Classes", href: "/leave-impacts", icon: CalendarOff },
         { label: "Attendance", href: "/attendance", icon: ClipboardCheck },
       ],
     },
@@ -290,6 +293,10 @@ export function Sidebar() {
     { label: "Notification Centre", href: "/notification-management", icon: Radio },
     { label: "Recruitment", href: "/recruitment", icon: Users },
     { label: "Meeting & Training", href: "/meetings", icon: ClipboardList },
+    // §9.8 puts the supervisor on the submitted/approved rows, so they need the
+    // queue; deciding stays with the admin (enforced by @Roles on the API).
+    { label: "Leave Requests", href: "/leaves", icon: CalendarOff },
+    { label: "My Leave", href: "/my-leave", icon: CalendarOff },
     { label: "Teachers", href: "/teachers", icon: GraduationCap },
     // Read-only monitoring — supervisors are notified of subscription/break
     // requests (§8.4) and can review the queue, but approve/reject stays with

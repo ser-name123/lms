@@ -473,6 +473,17 @@ export class TeacherManagementService {
   }
 
   // ── Leave automation: called when a teacher's leave is approved ─────────────
+  /**
+   * @deprecated Superseded by Module 9 §9.5.
+   *
+   * Approving a teacher's leave used to call this, which cancelled every class
+   * in the window and locked their attendance — the family lost lessons they
+   * had paid for and nobody was asked. The spec makes that the Academic Coach's
+   * decision, taken per student (wait / stand-in teacher / reschedule), so
+   * approval now builds a review queue instead (LeaveImpactService).
+   *
+   * Kept only for a deliberate admin bulk-cancel; nothing calls it automatically.
+   */
   async cancelClassesForLeave(userId: string, from: Date, to: Date, reason?: string) {
     const tp = await this.prisma.teacherProfile.findUnique({ where: { userId }, select: { id: true, user: { select: { firstName: true, lastName: true } } } });
     if (!tp) return { cancelled: 0 };

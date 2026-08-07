@@ -24,6 +24,7 @@ import {
   Package as PackageIcon,
   Trophy,
   FileText,
+  CalendarOff,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -49,6 +50,7 @@ const studentNavItems = [
   { label: "My Subscription", href: "/student/subscription", icon: PackageIcon },
   { label: "Invoices and Payments", href: "/student/fees", icon: Receipt },
   { label: "Support Chat", href: "/student/chat", icon: MessageCircle },
+  { label: "Teacher Absence", href: "/student/teacher-absence", icon: CalendarOff },
   { label: "My Profile", href: "/student/profile", icon: User },
 ];
 

@@ -43,7 +43,13 @@ const ADMIN_ONLY_PREFIXES = ["/finance/payroll", "/payouts"];
  * academy-wide meeting rules belong to the admin and supervisor — the API
  * refuses PATCH /meetings/settings and POST /meetings/series from a coach.
  */
-const COACH_BLOCKED_PREFIXES = ["/monthly-assessments/settings", "/meetings/settings"];
+const COACH_BLOCKED_PREFIXES = [
+  "/monthly-assessments/settings",
+  "/meetings/settings",
+  // Module 9 §9.11 — which leave types exist and how unpaid days are deducted
+  // is an academy-wide payroll rule, and the API refuses a coach there anyway.
+  "/leaves/settings",
+];
 
 function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -87,6 +93,13 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       "/packages",
       "/classes",
       "/meetings",
+      // Module 9 §9.5: the coach decides what happens to the classes an absent
+      // teacher leaves behind, so they need the queue. /leaves is the admin's
+      // approval console, but the coach sits on the §9.8 notification rows for
+      // it and follows those links — deciding stays @Roles-guarded to the admin.
+      "/leave-impacts",
+      "/leaves",
+      "/my-leave",
       "/attendance",
       "/finance",
       "/chat",
@@ -135,6 +148,13 @@ function AdminLayoutGuard({ children }: { children: React.ReactNode }) {
       "/rankings",
       "/salary",
       "/meetings",
+      // Module 9 §9.8 puts the supervisor on the Request Submitted and Request
+      // Approved rows, so the notification links have to lead somewhere. The
+      // API grants them list/detail only — approve/reject is admin-only, and
+      // the page hides those buttons for them.
+      "/leaves",
+      "/leave-impacts",
+      "/my-leave",
       "/finance",
       "/chat",
       "/support",
