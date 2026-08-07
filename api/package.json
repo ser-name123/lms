@@ -20,7 +20,10 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "db:export": "node scripts/db-export.cjs",
     "db:import": "node scripts/db-import.cjs",
-    "db:reset-admin": "node scripts/db-reset-keep-admin.cjs"
+    "db:reset-admin": "node scripts/db-reset-keep-admin.cjs",
+    "db:deploy": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
+    "db:verify": "node scripts/verify-migrations.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

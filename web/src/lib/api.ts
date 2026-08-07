@@ -1893,11 +1893,9 @@ export const fetchStudentClasses = () => api<any[]>("/student-portal/classes");
 export const attendStudentClass = (classId: string) => api<any>(`/student-portal/classes/${classId}/attend`, {
   method: "POST",
 });
-export const fetchStudentAssignments = () => api<any[]>("/student-portal/assignments");
-export const submitStudentAssignment = (assignmentId: string, content: string, fileUrl?: string) => api<any>(`/student-portal/assignments/${assignmentId}/submit`, {
-  method: "POST",
-  body: JSON.stringify({ content, fileUrl }),
-});
+// fetchStudentAssignments / submitStudentAssignment removed with their routes —
+// they read the empty pre-module LmsAssignment table and nothing called them.
+// /student/assignments uses fetchMyAssignments + submitMyAssignment.
 export const fetchStudentInvoices = () => api<any[]>("/student-portal/invoices");
 // payStudentInvoice is gone with the endpoint behind it: it marked the invoice
 // PAID with a fabricated Stripe reference and no money moved. Settling an
@@ -1907,7 +1905,7 @@ export const updateStudentProfile = (payload: any) => api<any>("/student-portal/
   method: "PATCH",
   body: JSON.stringify(payload),
 });
-export const fetchStudentMeetings = () => api<any[]>("/student-portal/meetings");
+// fetchStudentMeetings removed with its route (empty pre-Module-8 LmsMeeting).
 export const fetchStudentKnowledgebase = () => api<any[]>("/student-portal/knowledgebase");
 
 export const uploadStudentAvatar = async (file: File): Promise<{ url: string; fileName: string }> => {
@@ -1949,7 +1947,8 @@ export const gradeStudentSubmission = (submissionId: string, grade: number, feed
 });
 export const fetchTeacherPayouts = () => api<any[]>("/teacher-portal/payouts");
 export const fetchTeacherProfile = () => api<any>("/teacher-portal/profile");
-export const fetchTeacherMeetings = () => api<any[]>("/teacher-portal/meetings");
+// fetchTeacherMeetings removed with its route — a teacher's meetings are Staff
+// Meeting rows, fetched by fetchMyMeetings and shown at /teacher/meetings.
 export const updateTeacherProfile = (payload: any) => api<any>("/teacher-portal/profile", {
   method: "PATCH",
   body: JSON.stringify(payload),

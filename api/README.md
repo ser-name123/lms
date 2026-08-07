@@ -23,13 +23,56 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+LMS API — NestJS 11 + Prisma 7 on Postgres.
 
 ## Project setup
 
 ```bash
 $ npm install
 ```
+
+## Database & migrations
+
+**Read this before changing `prisma/schema.prisma`.**
+
+The schema lives in `prisma/migrations/`. `20260807120000_baseline` holds the
+whole thing as it stood on 2026-08-07 — 106 tables, 63 enums, 99 foreign keys.
+
+It exists because for a long time this project had no migrations at all: every
+change went in with `prisma db push` or a hand-written `scripts/migrate-*.cjs`,
+so the database could not be rebuilt anywhere else. The baseline was generated
+from the live schema and the live database was marked as already having it.
+
+```bash
+# Stand up a new server (empty database)
+npm run db:deploy        # prisma migrate deploy
+
+# Where does this database stand?
+npm run db:status
+
+# Change the schema
+#   1. edit prisma/schema.prisma
+npx prisma migrate dev --name what-changed
+npx prisma generate
+
+# Prove the migrations really do build the schema from nothing.
+# Runs them into a throwaway schema, diffs the result against the live
+# database, then drops it. Never writes to `public`.
+npm run db:verify
+```
+
+**Do not use `prisma db push`.** It applies changes without recording them, and
+that is exactly how the history was lost the first time. The old
+`scripts/migrate-*.cjs` files are a record of what happened before this, not a
+pattern to copy.
+
+Two connection strings, and they are not interchangeable: the app talks to the
+pooled `DATABASE_URL`, while the Prisma CLI needs the direct `DIRECT_URL`
+(`prisma.config.ts` wires that up). Migrations cannot run through the
+transaction pooler.
+
+Regenerating the client fails with `EPERM` while `nest start --watch` holds it
+open — stop the dev server first.
 
 ## Compile and run the project
 

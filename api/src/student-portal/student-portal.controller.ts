@@ -62,26 +62,12 @@ export class StudentPortalController {
     return this.service.attendClass(user.id, classId);
   }
 
-  @Get('assignments')
-  @ApiOperation({ summary: 'Get assignments and submissions details' })
-  getAssignments(@CurrentUser() user: AuthUser) {
-    return this.service.getAssignments(user.id);
-  }
-
-  @Post('assignments/:assignmentId/submit')
-  @ApiOperation({ summary: 'Submit an assignment solution' })
-  submitAssignment(
-    @CurrentUser() user: AuthUser,
-    @Param('assignmentId') assignmentId: string,
-    @Body() dto: { content: string; fileUrl?: string },
-  ) {
-    return this.service.submitAssignment(
-      user.id,
-      assignmentId,
-      dto.content,
-      dto.fileUrl,
-    );
-  }
+  /*
+   * GET /assignments and POST /assignments/:id/submit were removed — they read
+   * the empty pre-module LmsAssignment table and the submit route could mint an
+   * Assignment row from a client-supplied id. See the note in the service. The
+   * Assignment Management module owns both jobs.
+   */
 
   @Get('invoices')
   @ApiOperation({ summary: 'Get fee invoices' })
@@ -109,11 +95,12 @@ export class StudentPortalController {
     return this.service.updateProfile(user.id, dto);
   }
 
-  @Get('meetings')
-  @ApiOperation({ summary: 'Get active webinars and meetings' })
-  getMeetings(@CurrentUser() user: AuthUser) {
-    return this.service.getMeetings(user.id);
-  }
+  /*
+   * GET /meetings was removed — it read the empty pre-Module-8 LmsMeeting
+   * table. Staff meetings live in the Staff Meeting module, which a student is
+   * not a participant in; what they need about an absent teacher is at
+   * /leaves/my-impacts.
+   */
 
   @Get('knowledgebase')
   @ApiOperation({ summary: 'Get student course learning materials' })

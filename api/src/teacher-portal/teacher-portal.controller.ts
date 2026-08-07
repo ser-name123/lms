@@ -111,9 +111,9 @@ export class TeacherPortalController {
     return { url: relativePath, fileName: file.filename };
   }
 
-  @Get('meetings')
-  @ApiOperation({ summary: 'Get active teacher portal meetings' })
-  getMeetings(@CurrentUser() user: AuthUser) {
-    return this.service.getMeetings(user.id);
-  }
+  /*
+   * GET /meetings was removed — it read the empty pre-Module-8 LmsMeeting
+   * table. A teacher's meetings are Staff Meeting module rows, served by
+   * GET /meetings/mine and shown at /teacher/meetings.
+   */
 }

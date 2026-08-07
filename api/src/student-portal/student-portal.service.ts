@@ -69,16 +69,48 @@ export class StudentPortalService {
         link: c.link,
       }));
 
-    // Fetch assignments
-    const assignments = await this.prisma.lmsAssignment.findMany({
+    /*
+     * Assignment counters, from the Assignment Management module.
+     *
+     * These used to count rows in the pre-module `LmsAssignment` table, which
+     * has no rows and no writer — so the dashboard reported "0 pending" to
+     * every student however much work they actually had, while their own
+     * /student/assignments page listed it correctly.
+     *
+     * The targeting rules are the ones `AssignmentsService.listMine` uses, so
+     * the number on the dashboard and the list on the page agree: an assignment
+     * reaches a student by being aimed at them directly, at a batch they are
+     * in, or at a course they are enrolled on.
+     */
+    const [batchRows, enrollRows] = await Promise.all([
+      this.prisma.batchStudent.findMany({
+        where: { studentId: student.id },
+        select: { batchId: true },
+      }),
+      this.prisma.enrollment.findMany({
+        where: { studentId: student.id },
+        select: { courseId: true },
+      }),
+    ]);
+    const batchIds = batchRows.map((b) => b.batchId);
+    const courseIds = enrollRows.map((e) => e.courseId);
+
+    const assignments = await this.prisma.assignment.findMany({
       where: {
-        courseCode: { in: activeCourseSlugs },
+        status: { in: ['PUBLISHED', 'CLOSED'] },
+        OR: [
+          { targetType: 'SELECTED', targetStudentIds: { has: student.id } },
+          { targetType: 'BATCH', batchId: { in: batchIds.length ? batchIds : ['__none__'] } },
+          { targetType: 'BATCH', batchId: null, courseId: { in: courseIds.length ? courseIds : ['__none__'] } },
+        ],
       },
+      select: { id: true },
     });
 
     const submissions = await this.prisma.submission.findMany({
       where: {
         studentId: student.id,
+        assignmentId: { in: assignments.map((a) => a.id) },
       },
     });
 
@@ -500,143 +532,22 @@ export class StudentPortalService {
     return attendance;
   }
 
-  async getAssignments(userId: string) {
-    const student = await this.getStudentProfileByUserId(userId);
-    const courseSlugs = student.enrollments.map((e) =>
-      e.course.slug.toUpperCase(),
-    );
-
-    const assignments = await this.prisma.lmsAssignment.findMany({
-      where: {
-        courseCode: { in: courseSlugs },
-      },
-      orderBy: { dueDate: 'asc' },
-    });
-
-    const submissions = await this.prisma.submission.findMany({
-      where: { studentId: student.id },
-    });
-
-    const submissionByAssignmentId = new Map(
-      submissions.map((s) => [s.assignmentId, s]),
-    );
-
-    return assignments.map((a) => {
-      const sub = submissionByAssignmentId.get(a.id);
-      return {
-        id: a.id,
-        title: a.title,
-        courseCode: a.courseCode,
-        courseTitle: a.courseTitle,
-        dueDate: a.dueDate,
-        description: a.description,
-        status: sub ? sub.status : 'PENDING',
-        submission: sub
-          ? {
-              id: sub.id,
-              content: sub.content,
-              fileUrl: sub.fileUrl,
-              grade: sub.grade,
-              feedback: sub.feedback,
-              submittedAt: sub.submittedAt,
-              evaluatedAt: sub.evaluatedAt,
-            }
-          : null,
-      };
-    });
-  }
-
-  async submitAssignment(
-    userId: string,
-    assignmentId: string,
-    content: string,
-    fileUrl?: string,
-  ) {
-    const student = await this.getStudentProfileByUserId(userId);
-
-    const lmsAssignment = await this.prisma.lmsAssignment.findUnique({
-      where: { id: assignmentId },
-    });
-    if (!lmsAssignment) throw new NotFoundException('Assignment not found');
-
-    // Same resolution as joining a class: the catalogue's Course if the code
-    // is one, and only otherwise a stand-in so the foreign key holds.
-    const course =
-      (await courseForCode(this.prisma, lmsAssignment.courseCode)) ??
-      (await this.prisma.course.upsert({
-        where: { slug: lmsAssignment.courseCode.toLowerCase() },
-        update: {},
-        create: {
-          title: lmsAssignment.courseTitle,
-          slug: lmsAssignment.courseCode.toLowerCase(),
-          status: CourseStatus.PUBLISHED,
-          price: 0,
-        },
-      }));
-
-    /*
-     * Authorisation (M9): as with attendClass, prove the student is enrolled in
-     * this assignment's course before upserting an Assignment row from a
-     * client-supplied id and recording a submission against it.
-     */
-    const enrolledForSubmit = await this.prisma.enrollment.findFirst({
-      where: {
-        studentId: student.id,
-        courseId: course.id,
-        status: EnrollmentStatus.ACTIVE,
-      },
-      select: { id: true },
-    });
-    if (!enrolledForSubmit) {
-      throw new ForbiddenException('You are not enrolled in this assignment\'s course.');
-    }
-
-    await this.prisma.assignment.upsert({
-      where: { id: assignmentId },
-      update: {},
-      create: {
-        id: assignmentId,
-        courseId: course.id,
-        title: lmsAssignment.title,
-        description: lmsAssignment.description,
-        dueAt: new Date(lmsAssignment.dueDate),
-      },
-    });
-
-    // Create or update submission record
-    const sub = await this.prisma.submission.upsert({
-      where: {
-        assignmentId_studentId: {
-          assignmentId,
-          studentId: student.id,
-        },
-      },
-      update: {
-        status: SubmissionStatus.SUBMITTED,
-        content,
-        fileUrl: fileUrl || null,
-        submittedAt: new Date(),
-      },
-      create: {
-        assignmentId,
-        studentId: student.id,
-        status: SubmissionStatus.SUBMITTED,
-        content,
-        fileUrl: fileUrl || null,
-        submittedAt: new Date(),
-      },
-    });
-
-    // Increment submissions count on mock/LMS dashboard model
-    await this.prisma.lmsAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        submissionsCount: { increment: 1 },
-      },
-    });
-
-    return sub;
-  }
+  /*
+   * `getAssignments` and `submitAssignment` were removed here, not replaced.
+   *
+   * They read the pre-module `LmsAssignment` table, which has no rows and no
+   * writer — the Assignment Management module owns assignments now, and the
+   * student page at /student/assignments has used `/assignments/mine` since it
+   * shipped. Nothing in the web app called either endpoint.
+   *
+   * Worth removing rather than leaving orphaned: `submitAssignment` UPSERTED a
+   * row into the real `Assignment` table using a client-supplied id, so a
+   * crafted request could mint an assignment the teacher never set. It also
+   * incremented `LmsAssignment.submissionsCount`, a counter nothing reads.
+   *
+   * A student submits through `POST /assignments/:id/submit`, which checks the
+   * assignment is published, open, and theirs.
+   */
 
   async getInvoices(userId: string) {
     const student = await this.prisma.studentProfile.findUnique({
@@ -709,35 +620,6 @@ export class StudentPortalService {
         where: { id: student.id },
         include: { user: true },
       });
-    });
-  }
-
-  async getMeetings(userId: string) {
-    const student = await this.prisma.studentProfile.findUnique({
-      where: { userId },
-      include: { user: true },
-    });
-    if (!student) throw new NotFoundException('Student profile not found');
-    const email = student.user.email;
-
-    const meetings = await this.prisma.lmsMeeting.findMany({
-      orderBy: { timeStart: 'desc' },
-    });
-
-    // Return meetings where student is listed or meeting has no explicit restrict list
-    return meetings.filter((m) => {
-      try {
-        const atts =
-          typeof m.attendees === 'string'
-            ? JSON.parse(m.attendees)
-            : m.attendees;
-        if (!Array.isArray(atts) || atts.length === 0) return true;
-        return atts.some(
-          (a: any) => a.email.toLowerCase() === email.toLowerCase(),
-        );
-      } catch (e) {
-        return true;
-      }
     });
   }
 
