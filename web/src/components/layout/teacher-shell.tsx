@@ -27,6 +27,7 @@ import {
   Banknote,
   FileText,
   Trophy,
+  CalendarOff,
 } from "lucide-react";
 
 import { useUI } from "@/store/ui";
@@ -56,6 +57,8 @@ const teacherNavItems = [
   { label: "Payout History", href: "/teacher/payouts", icon: Receipt },
   { label: "My Payroll", href: "/teacher/payroll", icon: Receipt },
   { label: "Support Chat", href: "/teacher/chat", icon: MessageCircle },
+  // §9.1 — every member of staff requests leave from their own portal.
+  { label: "My Unavailability", href: "/teacher/leave", icon: CalendarOff },
   { label: "My Profile", href: "/teacher/profile", icon: User },
 ];
 

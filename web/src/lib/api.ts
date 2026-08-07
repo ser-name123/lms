@@ -662,28 +662,53 @@ export const seedCandidates = () => api<{ count: number }>("/candidates/seed", {
   method: "POST",
 });
 
-// Leave Request APIs
-export type LeaveType = "SICK" | "CASUAL" | "ANNUAL" | "UNPAID" | "OTHER";
-export type LeaveRequestStatus = "PENDING" | "APPROVED" | "DECLINED";
+// ─── Module 9 — Employee Leave & Teacher Unavailability ─────────────────────
+export type LeaveType =
+  // Pre-Module-9 values, still on existing rows.
+  | "SICK" | "CASUAL" | "ANNUAL" | "UNPAID" | "OTHER"
+  // §9.1 staff leave
+  | "EMERGENCY" | "PERSONAL" | "TRAINING"
+  // §9.1 teacher unavailability
+  | "MEDICAL" | "VACATION" | "FAMILY_EMERGENCY" | "SCHEDULE_CONFLICT" | "RELIGIOUS_HOLIDAY";
+
+export type LeaveRequestStatus = "PENDING" | "APPROVED" | "DECLINED" | "CANCELLED" | "INFO_REQUESTED";
+export type LeaveCategory = "STAFF_LEAVE" | "TEACHER_UNAVAILABILITY";
+export type LeaveImpactOption = "PENDING_REVIEW" | "WAIT_FOR_TEACHER" | "TEMPORARY_TEACHER" | "RESCHEDULE";
+export type LeaveImpactStatus = "OPEN" | "RESOLVED" | "REVERTED";
 
 export interface LeaveRequest {
   id: string;
   userId: string;
+  category: LeaveCategory;
   leaveType: LeaveType;
   startDate: string;
   endDate: string;
+  totalDays: number;
   reason: string;
+  remarks: string | null;
+  documentUrl: string | null;
+  documentName: string | null;
   status: LeaveRequestStatus;
   adminNotes: string | null;
+  isPaid: boolean | null;
+  deductionAmount: number | null;
+  deductionAppliedAt: string | null;
+  approvedById: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
+  infoRequest: string | null;
+  infoRequestedAt: string | null;
+  infoResponse: string | null;
+  cancelledAt: string | null;
+  /** Set only when the admin approved a different window from the one asked for. */
+  originalStartDate: string | null;
+  originalEndDate: string | null;
+  availabilityBlockedAt: string | null;
+  returnedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  user: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    email: string;
-    role: string;
-  };
+  user: { id: string; firstName: string; lastName: string; email: string; role: string };
 }
 
 export interface LeaveStats {
@@ -691,6 +716,73 @@ export interface LeaveStats {
   approved: number;
   declined: number;
   pending: number;
+  infoRequested: number;
+  cancelled: number;
+  unavailability: number;
+  unpaid: number;
+}
+
+export interface LeaveConfig {
+  staffTypes: string[];
+  unavailabilityTypes: string[];
+  paidByDefault: string[];
+  deductionMode: "DAILY_RATE" | "FIXED";
+  fixedDeductionPerDay: number;
+  workingDaysPerMonth: number;
+  nonWorkingWeekdays: number[];
+  noticeDaysExpected: number;
+  maxConsecutiveDays: number;
+  allowSelfCancel: boolean;
+  autoRestoreOnReturn: boolean;
+}
+
+export interface MyLeaves {
+  items: LeaveRequest[];
+  pending: number;
+  approvedDays: number;
+  unpaidDays: number;
+  currentlyAway: boolean;
+}
+
+/** §9.5 — one affected student awaiting (or carrying) the coach's decision. */
+export interface LeaveImpactRow {
+  id: string;
+  leaveId: string;
+  studentId: string;
+  studentName: string;
+  studentCode: string | null;
+  courseTitle: string | null;
+  teacherName: string;
+  from: string | null;
+  to: string | null;
+  totalDays: number | null;
+  leaveType: LeaveType | null;
+  option: LeaveImpactOption;
+  status: LeaveImpactStatus;
+  affectedClassCount: number;
+  temporaryTeacherName: string | null;
+  cycleExtendedDays: number | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface LeaveImpactDetail extends LeaveImpactRow {
+  classes: { id: string; title: string; startsAt: string; endsAt: string; status: string }[];
+}
+
+export interface ReplacementTeacher {
+  id: string;
+  name: string;
+  email: string;
+  teacherCode: string | null;
+  subjects: string[];
+  rating: number | null;
+  sameCourse: boolean;
+  availabilityApproved: boolean;
+  clashes: number;
+  free: boolean;
 }
 
 export interface ListLeavesParams {
@@ -698,6 +790,13 @@ export interface ListLeavesParams {
   limit?: number;
   search?: string;
   status?: string;
+  category?: string;
+  leaveType?: string;
+  role?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+  paid?: string;
   sortBy?: string;
 }
 
@@ -709,21 +808,201 @@ export const fetchLeaves = (params: ListLeavesParams) => {
   if (params.status && params.status !== "All") {
     queryObj.status = params.status.toUpperCase();
   }
+  if (params.category) queryObj.category = params.category;
+  if (params.leaveType) queryObj.leaveType = params.leaveType;
+  if (params.role) queryObj.role = params.role;
+  if (params.userId) queryObj.userId = params.userId;
+  if (params.from) queryObj.from = params.from;
+  if (params.to) queryObj.to = params.to;
+  if (params.paid) queryObj.paid = params.paid;
   if (params.sortBy) queryObj.sortBy = params.sortBy;
 
   const q = new URLSearchParams(queryObj);
   return api<{ items: LeaveRequest[]; meta: { page: number; limit: number; total: number; pages: number } }>(`/leaves?${q.toString()}`);
 };
 
-export const createLeave = (dto: any) => api<LeaveRequest>("/leaves", {
+export const createLeave = (dto: Record<string, unknown>) => api<LeaveRequest>("/leaves", {
   method: "POST",
   body: JSON.stringify(dto),
 });
 
-export const updateLeave = (id: string, dto: any) => api<LeaveRequest>(`/leaves/${id}`, {
-  method: "PATCH",
-  body: JSON.stringify(dto),
-});
+/**
+ * Set a status directly — the pre-Module-9 admin screen's route.
+ *
+ * Points at `/status`, NOT at `PATCH /leaves/:id`: that verb now means "correct
+ * your OWN pending request", so leaving this pointed there would have an admin
+ * approving a colleague's leave rejected as not being theirs. The server routes
+ * this through the real workflow, so a leave approved from the old screen still
+ * blocks availability, builds the coach's queue and deducts unpaid days.
+ */
+export const updateLeave = (id: string, dto: Record<string, unknown>) =>
+  api<LeaveRequest>(`/leaves/${id}/status`, { method: "PATCH", body: JSON.stringify(dto) });
+
+/** §9.1 — correct your own request while it is still pending. */
+export const editOwnLeave = (id: string, dto: Record<string, unknown>) =>
+  api<LeaveRequest>(`/leaves/${id}`, { method: "PATCH", body: JSON.stringify(dto) });
+
+// ── §9.2 decisions ──────────────────────────────────────────────────────────
+
+export const approveLeave = (
+  id: string,
+  dto: { isPaid: boolean; startDate?: string; endDate?: string; deductionAmount?: number; adminNotes?: string },
+) => api<LeaveRequest>(`/leaves/${id}/approve`, { method: "POST", body: JSON.stringify(dto) });
+
+export const rejectLeave = (id: string, reason: string) =>
+  api<LeaveRequest>(`/leaves/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+
+export const requestLeaveInfo = (id: string, question: string) =>
+  api<LeaveRequest>(`/leaves/${id}/request-info`, { method: "POST", body: JSON.stringify({ question }) });
+
+export const respondLeaveInfo = (id: string, response: string) =>
+  api<LeaveRequest>(`/leaves/${id}/respond-info`, { method: "POST", body: JSON.stringify({ response }) });
+
+export const cancelLeave = (id: string, reason?: string) =>
+  api<LeaveRequest>(`/leaves/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+
+// ── Reads ───────────────────────────────────────────────────────────────────
+
+export const fetchMyLeaves = () => api<MyLeaves>("/leaves/mine");
+export const fetchLeave = (id: string) => api<LeaveRequest>(`/leaves/${id}`);
+export const fetchLeaveAudit = (id: string) =>
+  api<{ id: string; action: string; description: string | null; actorName: string | null; createdAt: string }[]>(
+    `/leaves/${id}/audit`,
+  );
+
+// ── §9.11 configuration ─────────────────────────────────────────────────────
+
+export const fetchLeaveConfig = () => api<LeaveConfig>("/leaves/settings");
+export const saveLeaveConfig = (dto: Partial<LeaveConfig>) =>
+  api<LeaveConfig>("/leaves/settings", { method: "PATCH", body: JSON.stringify(dto) });
+
+// ── §9.1 supporting document ────────────────────────────────────────────────
+
+/**
+ * Upload a medical certificate and the like.
+ *
+ * The returned `url` is a bare path, not a link: the folder is NOT served
+ * statically because a sick note names an employee and their condition. Read it
+ * back through `leaveDocumentUrl`, which the API auth-checks.
+ */
+export const uploadLeaveDocument = async (file: File): Promise<{ url: string; name: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/leaves/upload`, { method: "POST", headers: { ...authHeader() }, body: form });
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  return res.json() as Promise<{ url: string; name: string }>;
+};
+
+/** The guarded download route for a request's supporting document. */
+export const leaveDocumentUrl = (id: string) => `${BASE}/leaves/${id}/document`;
+
+// ── §9.5 affected classes ───────────────────────────────────────────────────
+
+export const fetchLeaveImpacts = (status?: string, leaveId?: string) => {
+  const q = new URLSearchParams();
+  if (status) q.set("status", status);
+  if (leaveId) q.set("leaveId", leaveId);
+  return api<LeaveImpactRow[]>(`/leaves/impacts${q.toString() ? `?${q}` : ""}`);
+};
+
+export const fetchLeaveImpact = (impactId: string) =>
+  api<LeaveImpactDetail>(`/leaves/impacts/${impactId}`);
+
+export const fetchReplacementTeachers = (impactId: string) =>
+  api<ReplacementTeacher[]>(`/leaves/impacts/${impactId}/replacements`);
+
+export const decideLeaveImpact = (
+  impactId: string,
+  dto: {
+    option: "WAIT_FOR_TEACHER" | "TEMPORARY_TEACHER" | "RESCHEDULE";
+    temporaryTeacherId?: string;
+    restoreOriginal?: boolean;
+    reschedules?: { classId: string; startsAt: string }[];
+    notes?: string;
+  },
+) => api<LeaveImpactRow>(`/leaves/impacts/${impactId}/decide`, { method: "POST", body: JSON.stringify(dto) });
+
+/** What the student sees about their own disrupted classes. */
+export const fetchMyLeaveImpacts = () =>
+  api<
+    {
+      id: string; option: LeaveImpactOption; status: LeaveImpactStatus; affectedClassCount: number;
+      courseTitle: string | null; temporaryTeacherName: string | null; cycleExtendedDays: number | null;
+      teacherName: string; from: string; to: string; decidedAt: string | null;
+    }[]
+  >("/leaves/my-impacts");
+
+// ── §9.10 reports ───────────────────────────────────────────────────────────
+
+const leaveReportQuery = (from?: string, to?: string) => {
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  return q.toString() ? `?${q}` : "";
+};
+
+export const fetchLeaveSummaryReport = (from?: string, to?: string) =>
+  api<{
+    staff: {
+      userId: string; name: string; email: string; role: string; requests: number;
+      totalDays: number; paidDays: number; unpaidDays: number; byType: Record<string, number>;
+    }[];
+    totals: { people: number; requests: number; days: number; paidDays: number; unpaidDays: number };
+    from: string; to: string;
+  }>(`/leaves/reports/summary${leaveReportQuery(from, to)}`);
+
+export const fetchPaidUnpaidReport = (from?: string, to?: string) =>
+  api<{
+    paid: { requests: number; days: number };
+    unpaid: { requests: number; days: number; deductionTotal: number; pendingDeduction: number };
+    unclassified: { requests: number; days: number };
+    rows: {
+      id: string; name: string; role: string; leaveType: string; from: string; to: string;
+      days: number; deduction: number; charged: boolean;
+    }[];
+    from: string; to: string;
+  }>(`/leaves/reports/paid-unpaid${leaveReportQuery(from, to)}`);
+
+export const fetchUnavailabilityReport = (from?: string, to?: string) =>
+  api<{
+    rows: {
+      id: string; teacher: string; type: string; from: string; to: string; days: number;
+      studentsAffected: number; state: string;
+    }[];
+    byTeacher: { userId: string; name: string; spells: number; days: number; studentsAffected: number }[];
+    totals: { spells: number; days: number; awayNow: number };
+    from: string; to: string;
+  }>(`/leaves/reports/unavailability${leaveReportQuery(from, to)}`);
+
+export const fetchUnavailabilityImpactReport = (from?: string, to?: string) =>
+  api<{
+    rows: {
+      id: string; student: string; studentCode: string | null; course: string | null; teacher: string;
+      from: string; to: string; classes: number; option: string; status: string;
+      temporaryTeacher: string | null; cycleExtendedDays: number | null;
+      decidedBy: string | null; decidedAt: string | null;
+    }[];
+    byOption: Record<string, number>;
+    totals: {
+      studentsAffected: number; classesDisrupted: number; awaitingDecision: number;
+      cycleDaysGiven: number; resolvedPct: number;
+    };
+    from: string; to: string;
+  }>(`/leaves/reports/impact${leaveReportQuery(from, to)}`);
+
+export const fetchLeaveRegister = (month?: string) =>
+  api<{
+    month: string;
+    monthLabel: string;
+    rows: {
+      id: string; name: string; role: string; category: string; type: string;
+      from: string; to: string; totalDays: number; daysInMonth: number;
+      paid: boolean | null; deduction: number; approvalStatus: string;
+      approvedBy: string | null; approvedAt: string | null; reason: string;
+      remarks: string | null; hasDocument: boolean; datesModified: boolean;
+    }[];
+    totals: { requests: number; days: number; paidDays: number; unpaidDays: number; deduction: number };
+  }>(`/leaves/reports/register${month ? `?month=${month}` : ""}`);
 
 export const deleteLeave = (id: string) => api<{ success: boolean }>(`/leaves/${id}`, {
   method: "DELETE",

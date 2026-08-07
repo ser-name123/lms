@@ -248,6 +248,7 @@ model StudentProfile {
   activities  StudentActivity[]
   transfers   StudentTransfer[]
   assessmentAttempts AssessmentAttempt[]
+  leaveImpacts LeaveImpact[]
   feeAssignments StudentFeeAssignment[]
   scholarships   Scholarship[]
   parentLinks    ParentLink[]
@@ -1287,35 +1288,209 @@ model Candidate {
   @@index([status])
 }
 
+/*
+ * Module 9 — Employee Leave & Teacher Unavailability.
+ *
+ * The spec lists two different vocabularies (§9.1): staff leave types and
+ * teacher unavailability types. They are ONE enum here, tagged by `category`,
+ * because both produce the same fact — this person is away between these two
+ * dates — and every consumer (scheduling guards, payroll, the availability
+ * calendar) has to honour that fact whichever list it came from. Two models
+ * would mean two answers to "is this teacher on leave", and the scheduling
+ * guard would silently miss the newer one.
+ *
+ * The pre-Module-9 values (SICK/CASUAL/ANNUAL/UNPAID/OTHER) are kept: rows in
+ * the live database already use them, and renaming an enum value in place would
+ * orphan them.
+ */
 enum LeaveType {
+  // ── Pre-Module-9, still in use by existing rows ──
   SICK
   CASUAL
   ANNUAL
   UNPAID
   OTHER
+  // ── §9.1 staff leave types ──
+  EMERGENCY
+  PERSONAL
+  TRAINING
+  // ── §9.1 teacher unavailability types ──
+  MEDICAL
+  VACATION
+  FAMILY_EMERGENCY
+  SCHEDULE_CONFLICT
+  RELIGIOUS_HOLIDAY
+}
+
+/** Which of §9.1's two lists this request was raised from. */
+enum LeaveCategory {
+  STAFF_LEAVE
+  TEACHER_UNAVAILABILITY
 }
 
 enum LeaveRequestStatus {
   PENDING
   APPROVED
+  // DECLINED predates the spec's "Rejected" and means the same thing; kept
+  // rather than renamed so existing rows stay readable.
   DECLINED
+  CANCELLED
+  // §9.2 "Request Additional Information" — still the requester's move, not a
+  // decision, so it is a distinct state rather than a flag on PENDING.
+  INFO_REQUESTED
 }
 
 model LeaveRequest {
-  id           String             @id @default(uuid())
-  userId       String
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leaveType    LeaveType          @default(CASUAL)
-  startDate    DateTime
-  endDate      DateTime
-  reason       String
-  status       LeaveRequestStatus @default(PENDING)
-  adminNotes   String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id       String        @id @default(uuid())
+  userId   String
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category LeaveCategory @default(STAFF_LEAVE)
+
+  leaveType LeaveType @default(CASUAL)
+  startDate DateTime
+  endDate   DateTime
+  /*
+   * Stored, not derived on read. §9.9 keeps history for ever, and the
+   * academy's working-day rules can change — recomputing an old request under
+   * today's rules would silently rewrite what was approved.
+   */
+  totalDays Int      @default(1)
+  reason    String
+  remarks   String?
+  /** Optional supporting document (medical certificate, etc.) — /uploads path. */
+  documentUrl  String?
+  documentName String?
+
+  status     LeaveRequestStatus @default(PENDING)
+  adminNotes String?
+
+  // ── §9.3 paid / unpaid, decided at approval ──
+  isPaid Boolean?
+  /** Cash deducted for unpaid days; fixed at approval from LEAVE_CONFIG. */
+  deductionAmount Decimal? @db.Decimal(10, 2)
+  /** The SalaryAdjustment this produced, so payroll never deducts twice. */
+  salaryAdjustmentId String?
+  deductionAppliedAt DateTime?
+
+  // ── §9.2 decision trail ──
+  approvedById    String?
+  approvedByName  String?
+  approvedAt      DateTime?
+  rejectionReason String?
+  infoRequest     String?
+  infoRequestedAt DateTime?
+  infoResponse    String?
+  cancelledAt     DateTime?
+  /*
+   * §9.2 lets the admin MODIFY the dates while approving. The originals are
+   * kept because the person is entitled to know their request was changed, not
+   * just that it was approved.
+   */
+  originalStartDate DateTime?
+  originalEndDate   DateTime?
+
+  // ── §9.6 / §9.7 availability lifecycle ──
+  availabilityBlockedAt DateTime?
+  returnedAt            DateTime?
+  /** The teacher's approved weekly availability, parked for §9.7 restoration. */
+  availabilitySnapshot Json?
+
+  impacts  LeaveImpact[]
+  auditLog LeaveAuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
+  @@index([category, status])
+  @@index([startDate, endDate])
+}
+
+/** §9.5 — what the coach decided for one affected student. */
+enum LeaveImpactOption {
+  PENDING_REVIEW
+  WAIT_FOR_TEACHER
+  TEMPORARY_TEACHER
+  RESCHEDULE
+}
+
+enum LeaveImpactStatus {
+  OPEN
+  RESOLVED
+  REVERTED
+}
+
+/*
+ * One affected student per row, created when a teacher's unavailability is
+ * approved (§9.4 → §9.5).
+ *
+ * A row per student rather than a decision on the leave itself: the spec makes
+ * the coach speak to each family, and two families on the same teacher will
+ * routinely answer differently — one waits, one takes a stand-in.
+ */
+model LeaveImpact {
+  id      String       @id @default(uuid())
+  leaveId String
+  leave   LeaveRequest @relation(fields: [leaveId], references: [id], onDelete: Cascade)
+
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollmentId String?
+  courseId     String?
+  courseTitle  String?
+  /** The teacher who is away — restored verbatim when the leave ends. */
+  originalTeacherId String
+
+  /** Classes inside the window at the moment of approval. */
+  affectedClassCount Int @default(0)
+
+  option LeaveImpactOption @default(PENDING_REVIEW)
+  status LeaveImpactStatus @default(OPEN)
+
+  // Option 2 — the stand-in, and whether the original teacher comes back.
+  temporaryTeacherId   String?
+  temporaryTeacherName String?
+  restoreOriginal      Boolean @default(true)
+
+  // Option 1 — the subscription paused and by how much its cycle moved.
+  pausedSubscriptionId String?
+  cycleExtendedDays    Int?
+
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One row per student per leave — a second review of the same family would
+  // otherwise double-pause their subscription.
+  @@unique([leaveId, studentId])
+  @@index([status])
+  @@index([originalTeacherId])
+}
+
+/** §9.11 — "All leave requests, approvals, schedule modifications, and temporary teacher assignments shall be recorded in the audit log." */
+model LeaveAuditLog {
+  id      String       @id @default(uuid())
+  leaveId String
+  leave   LeaveRequest @relation(fields: [leaveId], references: [id], onDelete: Cascade)
+
+  // SUBMITTED / APPROVED / REJECTED / DATES_MODIFIED / INFO_REQUESTED /
+  // INFO_PROVIDED / CANCELLED / IMPACT_DECIDED / TEMP_TEACHER_ASSIGNED /
+  // CLASSES_PAUSED / CLASSES_RESCHEDULED / AVAILABILITY_BLOCKED /
+  // AVAILABILITY_RESTORED / DEDUCTION_APPLIED
+  action      String
+  description String?
+  meta        Json?
+  actorId     String?
+  actorName   String?
+  createdAt   DateTime @default(now())
+
+  @@index([leaveId, createdAt])
+  @@index([action, createdAt])
 }
 
 // ─── Trial Classes ────────────────────────────────────────────────────────────

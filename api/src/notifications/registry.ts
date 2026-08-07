@@ -140,8 +140,17 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDef> = {
   LOGIN_ALERT: { category: Cat.SYSTEM, priority: Pri.CRITICAL, channels: IN_APP_EMAIL, label: 'Login alert' },
   PROFILE_UPDATED: { category: Cat.SYSTEM, priority: Pri.LOW, channels: IN_APP, label: 'Profile updated' },
   STUDENT_UPDATE: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Student update' },
+  // ── Module 9 — Employee Leave & Teacher Unavailability (§9.8) ──
+  // Filed under SYSTEM, not ACADEMIC: a teacher who mutes academic notices must
+  // still hear that their leave was approved and that they are covering a class.
   LEAVE_REQUESTED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Leave requested' },
   LEAVE_DECISION: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Leave decision' },
+  LEAVE_INFO_REQUESTED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Leave — information requested' },
+  // Reaches students, so email as well as in-app: a family that only opens the
+  // portal weekly would otherwise find out by turning up to no class.
+  LEAVE_CLASSES_AFFECTED: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: ALL_THREE, label: 'Teacher unavailability affects classes' },
+  LEAVE_TEMP_TEACHER: { category: Cat.SYSTEM, priority: Pri.HIGH, channels: IN_APP_EMAIL, label: 'Temporary teacher assigned' },
+  LEAVE_TEACHER_RETURNED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Teacher available again' },
   LEAD_NEW: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'New lead' },
   LEAD_ASSIGNED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP_EMAIL, label: 'Lead assigned' },
   LEAD_CONVERTED: { category: Cat.SYSTEM, priority: Pri.MEDIUM, channels: IN_APP, label: 'Lead converted' },

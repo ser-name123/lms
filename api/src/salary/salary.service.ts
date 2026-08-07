@@ -4,6 +4,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '../generated/prisma/enums';
 import { round2 } from '../finance/finance.config';
 import { WiseService, type WiseTransferResult } from './wise.service';
+import { LeavesService } from '../leaves/leaves.service';
 
 export interface Actor {
   id: string;
@@ -26,6 +27,8 @@ export class SalaryService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly wise: WiseService,
+    // Module 9 §9.3: unpaid leave becomes a deduction line during calculation.
+    private readonly leaves: LeavesService,
   ) {}
 
   private monthLabel(d: Date): string {
@@ -163,6 +166,33 @@ export class SalaryService {
         where: { id: { in: rows.map((r) => r.id) } },
         data: { salaryId: saved.id },
       });
+
+      /*
+       * Module 9 §9.3 — unpaid leave is deducted here.
+       *
+       * It has to run AFTER the upsert, because the deduction attaches to a
+       * salary row that may not have existed a moment ago: a leave approved
+       * before payroll ran for its month has nothing to attach to at approval
+       * time and waits for exactly this call. The totals are then recomputed,
+       * since `adjTotal` above was read before the new line existed.
+       */
+      const teacherUser = await this.prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { userId: true },
+      });
+      if (teacherUser?.userId) {
+        const { applied } = await this.leaves
+          .applyPendingDeductions(teacherUser.userId, periodStart, windowEnd)
+          .catch(() => ({ applied: 0 }));
+        if (applied > 0) {
+          const withLeave = await this.adjustmentsTotal(saved.id);
+          await this.prisma.teacherSalary.update({
+            where: { id: saved.id },
+            data: { adjustmentsTotal: round2(withLeave), netAmount: round2(gross + withLeave) },
+          });
+          this.logger.log(`Salary ${saved.id}: applied ${applied} unpaid-leave deduction(s).`);
+        }
+      }
       results.push(saved.id);
     }
     return { period: label, salariesCalculated: results.length, skippedSettled: skipped.length };

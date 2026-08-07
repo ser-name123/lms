@@ -129,6 +129,10 @@ export const navGroups: NavGroup[] = [
           { label: "Meetings", href: "/meetings", icon: Users },
           { label: "Attendance", href: "/attendance", icon: ClipboardCheck },
           { label: "Leave Requests", href: "/leaves", icon: CalendarOff },
+          // §9.5 — the affected-students queue. Its own entry because it is a
+          // different job from approving leave, and a different person's.
+          { label: "Affected Classes", href: "/leave-impacts", icon: Users },
+          { label: "My Leave", href: "/my-leave", icon: CalendarOff },
         ],
       },
     ],
