@@ -122,6 +122,20 @@ const iso = (d) => d.toISOString();
     const tp = await mkTeacher(teacher, 'T');
     const coverTp = await mkTeacher(cover, 'C');
 
+    /*
+     * Published, approved availability on every weekday, so both teachers show
+     * up in the §9.6 pickers below. Without this they are invisible to those
+     * endpoints and the guard would "pass" by finding nobody at all.
+     */
+    const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const allWeek = Object.fromEntries(WEEK.map((d) => [d, [{ from: '09:00', to: '18:00' }]]));
+    for (const t of [tp, coverTp]) {
+      await db.query(
+        `UPDATE "TeacherProfile" SET availability=$1, "availabilityApproved"=true, "timeZone"='UTC' WHERE id=$2`,
+        [JSON.stringify(allWeek), t.id],
+      );
+    }
+
     const student = (await db.query(
       `INSERT INTO "StudentProfile" (id,"userId","studentCode","billingCurrency")
        VALUES (gen_random_uuid(),$1,$2,'USD') RETURNING id`,
@@ -248,6 +262,104 @@ const iso = (d) => d.toISOString();
       `SELECT count(*)::int AS n FROM "ClassSession" WHERE id = ANY($1) AND status='SCHEDULED'`, [classIds]);
     check('approval does NOT cancel the classes — that is the coach\'s call (§9.5)',
       stillScheduled.rows[0].n === 3, String(stillScheduled.rows[0].n));
+
+    /*
+     * §9.6's other half: "consider the unavailability while displaying available
+     * teachers during SCHEDULING", not only rescheduling. Every picker that
+     * offers a teacher for NEW work has to know. The approved window was
+     * trimmed by the admin to AWAY_FROM…AWAY_TO-1, so AWAY_FROM is inside it
+     * and AWAY_TO is the day just outside — which makes the second half of each
+     * pair a control: if a picker simply hid the teacher outright, the "still
+     * offered the day after" checks would fail.
+     */
+    const insideDate = dayUtc(AWAY_FROM).toISOString().slice(0, 10);
+    const outsideDate = dayUtc(AWAY_TO).toISOString().slice(0, 10);
+
+    const availInside = await req('GET', `/leads/teacher-availability?date=${insideDate}`, coach.token);
+    const rowInside = (availInside.body?.teachers ?? []).find((t) => t.teacherId === tp.id);
+    check('the coach assignment screen flags the absent teacher',
+      rowInside?.onLeave === true, JSON.stringify(rowInside ?? availInside.body).slice(0, 160));
+    check('and offers none of their slots',
+      (rowInside?.freeSlots ?? ['x']).length === 0, String(rowInside?.freeSlots?.length));
+    check('but still lists them, so the coach can see WHY they cannot be picked',
+      !!rowInside && (rowInside.busySlots ?? []).length > 0, String(rowInside?.busySlots?.length));
+
+    const availOutside = await req('GET', `/leads/teacher-availability?date=${outsideDate}`, coach.token);
+    const rowOutside = (availOutside.body?.teachers ?? []).find((t) => t.teacherId === tp.id);
+    check('the day after the approved window they are free again',
+      rowOutside?.onLeave === false && (rowOutside?.freeSlots ?? []).length > 0,
+      JSON.stringify({ onLeave: rowOutside?.onLeave, free: rowOutside?.freeSlots?.length }));
+
+    check('the stand-in is unaffected and still bookable',
+      (availInside.body?.teachers ?? []).find((t) => t.teacherId === coverTp.id)?.onLeave === false, '');
+
+    // The public trial slot list is merged across teachers, so it cannot be
+    // asserted teacher-by-teacher — what it must never do is fail outright.
+    const publicSlots = await req('GET', `/leads/availability?date=${insideDate}`, null);
+    check('the public trial slot list still answers with the teacher away',
+      publicSlots.status === 200 && Array.isArray(publicSlots.body?.slots), `status ${publicSlots.status}`);
+
+    // The recurring enrolment search: the absent teacher must not sit in the
+    // "available for this schedule" list a coach picks from.
+    const weekdayInside = WEEK[dayUtc(AWAY_FROM).getUTCDay()];
+    const enrol = await req(
+      'GET',
+      `/leads/enrollment-teachers?days=${weekdayInside}&time=10:00&durationMinutes=60`,
+      coach.token,
+    );
+    const inMatching = (enrol.body?.matching ?? []).some((t) => t.teacherId === tp.id);
+    const inOthers = (enrol.body?.others ?? []).find((t) => t.teacherId === tp.id);
+    check('the enrolment search keeps the absent teacher out of "matching"',
+      !inMatching, `status ${enrol.status}`);
+    check('and moves them to "others" carrying the reason',
+      inOthers?.onLeave === true, JSON.stringify(inOthers ?? {}).slice(0, 140));
+    check('while the stand-in is still offered as matching',
+      (enrol.body?.matching ?? []).some((t) => t.teacherId === coverTp.id),
+      JSON.stringify((enrol.body?.matching ?? []).map((t) => t.name)).slice(0, 140));
+
+    /*
+     * "New classes shall not be scheduled during approved unavailability" —
+     * the rule, not just the picker that displays it. The bulk generator is the
+     * cheapest way to book a whole span onto one teacher, so it is the one
+     * asserted here: a range that straddles the window must produce classes on
+     * either side of the leave and none inside it.
+     *
+     * Every weekday, so the generated set is one class per day and the counts
+     * below are exact rather than "whatever the weekday pattern happened to
+     * land on".
+     */
+    const genBatch = (await db.query(
+      `INSERT INTO "Batch" (id,code,name,"courseId","teacherId","daysOfWeek","startTime","endTime","startDate",status,"updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,'11:00','12:00',$6,'ACTIVE',now()) RETURNING id`,
+      [`${MARKER}-B-${Date.now()}`, `${MARKER} batch`, course.id, tp.id, WEEK, dayUtc(1)],
+    )).rows[0];
+
+    const genFrom = dayUtc(AWAY_FROM - 2);
+    const genTo = dayUtc(AWAY_TO + 1);
+    const gen = await req('POST', '/attendance/classes/generate', adminToken, {
+      batchId: genBatch.id,
+      from: genFrom.toISOString().slice(0, 10),
+      to: genTo.toISOString().slice(0, 10),
+    });
+    check('bulk class generation runs', gen.status === 201 || gen.status === 200, `status ${gen.status}`);
+    check('and reports the days it refused to book',
+      Number(gen.body?.skippedForLeave) > 0, JSON.stringify(gen.body));
+
+    const inWindow = await db.query(
+      `SELECT count(*)::int AS n FROM "ClassSession"
+        WHERE "batchId"=$1 AND "startsAt" >= $2 AND "startsAt" < $3`,
+      [genBatch.id, dayUtc(AWAY_FROM), dayUtc(AWAY_TO)],
+    );
+    check('§9.6 — NOT ONE class was created inside the approved window',
+      inWindow.rows[0].n === 0, String(inWindow.rows[0].n));
+
+    const outsideWindow = await db.query(
+      `SELECT count(*)::int AS n FROM "ClassSession"
+        WHERE "batchId"=$1 AND ("startsAt" < $2 OR "startsAt" >= $3)`,
+      [genBatch.id, dayUtc(AWAY_FROM), dayUtc(AWAY_TO)],
+    );
+    check('while the days either side of it were booked normally',
+      outsideWindow.rows[0].n > 0, String(outsideWindow.rows[0].n));
 
     // ── §9.4 the coach's queue ──────────────────────────────────────────────
     console.log('\nAffected students (9.4/9.5)');

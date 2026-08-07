@@ -262,15 +262,67 @@ export class AttendanceService implements OnModuleInit {
 
     const [sh, sm] = batch.startTime.split(':').map(Number);
     const [eh, em] = batch.endTime.split(':').map(Number);
+
+    /*
+     * §9.6 — "new classes shall not be scheduled during approved unavailability".
+     *
+     * This is the bulk admin action, so it is the easiest way to book a whole
+     * month onto someone who is signed off; a range spanning their leave used to
+     * create every one of those classes silently. Days inside an approved window
+     * are skipped and counted back, so the admin is told rather than left to
+     * compare the number against a calendar.
+     */
+    const leaveWindows = await this.approvedLeaveWindows(batch.teacherId, from, to);
+
     const created: string[] = [];
+    let skippedForLeave = 0;
     for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
       if (!batch.daysOfWeek.includes(DAYS[d.getDay()])) continue;
       const startsAt = new Date(d); startsAt.setHours(sh, sm, 0, 0);
       const endsAt = new Date(d); endsAt.setHours(eh, em, 0, 0);
+      if (leaveWindows.some((w) => w.from < endsAt && w.to > startsAt)) {
+        skippedForLeave += 1;
+        continue;
+      }
       const session = await this.createSessionWithAttendees(batch, startsAt, endsAt, undefined, dto.meetingUrl);
       created.push(session.id);
     }
-    return { generated: created.length };
+    return { generated: created.length, skippedForLeave };
+  }
+
+  /**
+   * A teacher's approved leave as instant ranges (§9.6).
+   *
+   * The end date is stored at 00:00 but the leave covers its own last day, so
+   * it is expanded to end-of-day — without that a class books on the teacher's
+   * final day off. Mirrors the helper of the same name in SubscriptionsService;
+   * both read the one source of truth, the approved LeaveRequest row.
+   */
+  private async approvedLeaveWindows(
+    teacherProfileId: string | null | undefined,
+    from: Date,
+    to: Date,
+  ): Promise<{ from: Date; to: Date }[]> {
+    if (!teacherProfileId) return [];
+    const teacher = await this.prisma.teacherProfile.findUnique({
+      where: { id: teacherProfileId },
+      select: { userId: true },
+    });
+    if (!teacher) return [];
+    const leaves = await this.prisma.leaveRequest.findMany({
+      where: {
+        userId: teacher.userId,
+        status: 'APPROVED',
+        endDate: { gte: new Date(from.getTime() - 86_400_000) },
+        startDate: { lte: to },
+      },
+      select: { startDate: true, endDate: true },
+    });
+    return leaves.map((l) => {
+      const end = new Date(l.endDate);
+      end.setHours(23, 59, 59, 999);
+      return { from: new Date(l.startDate), to: end };
+    });
   }
 
   private async createSessionWithAttendees(batch: any, startsAt: Date, endsAt: Date, title?: string, meetingUrl?: string) {

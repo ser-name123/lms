@@ -513,6 +513,20 @@ export class SubscriptionsService {
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const [sh, sm] = batch.startTime.split(':').map(Number);
     const [eh, em] = batch.endTime.split(':').map(Number);
+    /*
+     * §9.6 — "new classes shall not be scheduled during approved unavailability".
+     *
+     * The impact queue (§9.5) is built when leave is APPROVED, from the classes
+     * that existed at that moment. A student enrolling afterwards would add
+     * fresh classes into a window the coach has already worked through, and
+     * nothing would ever flag them — the family would simply find nobody there.
+     * So those days are not created at all. The leave window is fetched once for
+     * the whole batch window rather than per day.
+     */
+    const leaveWindows = await this.approvedLeaveWindows(batch.teacherId, from, to);
+    const duringLeave = (start: Date, end: Date) =>
+      leaveWindows.some((w) => w.from < end && w.to > start);
+
     // No backdated classes, ever — a session earlier than the window start or
     // already in the past is skipped (the spec's late-payment rule).
     const now = new Date();
@@ -524,6 +538,7 @@ export class SubscriptionsService {
       if (startsAt < from || startsAt < now) continue;
       const endsAt = new Date(d);
       endsAt.setUTCHours(eh, em, 0, 0);
+      if (duringLeave(startsAt, endsAt)) continue;
       const session = await this.prisma.classSession.create({
         data: {
           courseId: batch.courseId,
@@ -1162,24 +1177,43 @@ export class SubscriptionsService {
    * cancelClassesForLeave uses when it clears the teacher's classes.
    */
   private async teacherOnLeave(teacherProfileId: string | null, start: Date, end: Date): Promise<boolean> {
-    if (!teacherProfileId) return false;
+    const windows = await this.approvedLeaveWindows(teacherProfileId, start, end);
+    return windows.some((w) => w.from < end && w.to > start);
+  }
+
+  /**
+   * A teacher's approved leave as instant ranges, for any window.
+   *
+   * The end date is stored at 00:00 but a leave covers its own last day, so it
+   * is expanded to end-of-day here. Every leave check in this service goes
+   * through this one function — the expansion used to be written out at each
+   * call site, and a copy that forgets it books a class on the teacher's last
+   * day off. Cheap: a teacher has very few approved leaves.
+   */
+  private async approvedLeaveWindows(
+    teacherProfileId: string | null | undefined,
+    start: Date,
+    end: Date,
+  ): Promise<{ from: Date; to: Date }[]> {
+    if (!teacherProfileId) return [];
     const teacher = await this.prisma.teacherProfile.findUnique({
       where: { id: teacherProfileId },
       select: { userId: true },
     });
-    if (!teacher) return false;
-    // Fetch the teacher's approved leaves whose day-window could overlap, then
-    // test with the end-of-day expansion (endDate at 00:00 would otherwise miss
-    // its own last day). Cheap: a teacher has very few approved leaves.
+    if (!teacher) return [];
     const leaves = await this.prisma.leaveRequest.findMany({
-      where: { userId: teacher.userId, status: 'APPROVED', endDate: { gte: new Date(start.getTime() - 86400000) } },
+      where: {
+        userId: teacher.userId,
+        status: 'APPROVED',
+        endDate: { gte: new Date(start.getTime() - 86400000) },
+        startDate: { lte: end },
+      },
       select: { startDate: true, endDate: true },
     });
-    return leaves.some((l) => {
-      const from = new Date(l.startDate);
+    return leaves.map((l) => {
       const to = new Date(l.endDate);
       to.setHours(23, 59, 59, 999);
-      return from < end && to > start;
+      return { from: new Date(l.startDate), to };
     });
   }
 
@@ -3470,6 +3504,10 @@ export class SubscriptionsService {
         d.getUTCMinutes(),
       ).padStart(2, '0')}`;
 
+    // §9.6 — the same rule as generateSessionsForBatch: a renewal cycle must not
+    // mint classes onto a teacher who is already signed off for those dates.
+    const leaveWindows = await this.approvedLeaveWindows(input.teacherId, input.from, input.to);
+
     const now = new Date();
     let made = 0;
     for (const d = new Date(input.from); d < input.to; d.setUTCDate(d.getUTCDate() + 1)) {
@@ -3481,6 +3519,7 @@ export class SubscriptionsService {
       if (taken.has(slotOf(startsAt))) continue;
       const endsAt = new Date(d);
       endsAt.setUTCHours(eh, em, 0, 0);
+      if (leaveWindows.some((w) => w.from < endsAt && w.to > startsAt)) continue;
       const session = await this.prisma.classSession.create({
         data: {
           courseId: input.courseId,
@@ -3784,6 +3823,9 @@ export class SubscriptionsService {
     const [sh, sm] = batch.startTime.split(':').map(Number);
     const [eh, em] = batch.endTime.split(':').map(Number);
 
+    // §9.6 — no class is minted onto a teacher already signed off for that date.
+    const leaveWindows = await this.approvedLeaveWindows(batch.teacherId, from, to);
+
     const nowTs = new Date();
     let made = 0;
     for (const d = new Date(from); d < to; d.setUTCDate(d.getUTCDate() + 1)) {
@@ -3796,6 +3838,7 @@ export class SubscriptionsService {
       if (taken.has(slotOf(startsAt))) continue;
       const endsAt = new Date(d);
       endsAt.setUTCHours(eh, em, 0, 0);
+      if (leaveWindows.some((w) => w.from < endsAt && w.to > startsAt)) continue;
 
       const session = await this.prisma.classSession.create({
         data: {

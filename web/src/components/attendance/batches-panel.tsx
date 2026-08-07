@@ -194,7 +194,16 @@ function BatchDetail({ batchId, teachers, onClose }: { batchId: string; teachers
     try {
       const v = value as { a: string; b: string; m: string };
       const res = await generateClasses({ batchId, from: v.a, to: v.b, meetingUrl: v.m || undefined });
-      Swal.fire({ icon: "success", title: `${res.generated} classes generated`, background: swalBg() });
+      Swal.fire({
+        icon: "success",
+        title: `${res.generated} classes generated`,
+        // §9.6 — say why the count is short, rather than leaving the admin to
+        // work out which days are missing and assume something went wrong.
+        text: res.skippedForLeave
+          ? `${res.skippedForLeave} day(s) were skipped — the teacher is on approved leave then.`
+          : undefined,
+        background: swalBg(),
+      });
       load();
     } catch (e) { Swal.fire({ title: "Failed", text: e instanceof Error ? e.message : "Failed", icon: "error", background: swalBg() }); }
   };
